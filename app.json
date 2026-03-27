@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Sift",
+    "slug": "sift-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "sift",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#FAF9F7"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.sift.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FAF9F7"
+      },
+      "package": "com.sift.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

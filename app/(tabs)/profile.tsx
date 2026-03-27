@@ -1,0 +1,245 @@
+import { View, Text, Pressable, ScrollView, StyleSheet, Platform } from "react-native";
+import { useRouter } from "expo-router";
+import { User } from "lucide-react-native";
+import { useUser } from "@/context/UserContext";
+import CalendarSection from "@/components/profile/CalendarSection";
+import SavedListsSection from "@/components/profile/SavedListsSection";
+import { colors, radius, spacing, typography } from "@/lib/theme";
+
+const VIBE_LABELS: Record<string, string> = {
+  hidden_gems: "Show me the hidden gems",
+  popular_spots: "I like popular spots",
+  surprise_me: "Surprise me",
+};
+const BUDGET_LABELS: Record<string, string> = {
+  free: "Free only",
+  under_20: "Under $20",
+  under_50: "Under $50",
+  no_limit: "No limit",
+};
+const INTEREST_LABELS: Record<string, string> = {
+  live_music: "Live music & concerts",
+  art_exhibitions: "Art exhibitions & galleries",
+  popups: "Pop-ups & sample sales",
+  outdoor: "Outdoor activities",
+  fitness: "Fitness & run clubs",
+  comedy: "Comedy & shows",
+  food: "Food events & tastings",
+  nightlife: "Nightlife & bars",
+  theater: "Theater & performances",
+  workshops: "Workshops & classes",
+};
+
+export default function ProfileTab() {
+  const router = useRouter();
+  const {
+    isLoggedIn,
+    userEmail,
+    userDisplayName,
+    userProfile,
+    savedEvents,
+    goingEvents,
+    createdAt,
+  } = useUser();
+
+  const displayLabel = userDisplayName || userEmail || "Guest";
+  const avatarLetter =
+    isLoggedIn && (userDisplayName || userEmail)
+      ? (userDisplayName || userEmail)[0].toUpperCase()
+      : null;
+
+  return (
+    <ScrollView
+      contentContainerStyle={st.scroll}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header */}
+      <View style={st.header}>
+        <View style={st.headerRow}>
+          <View
+            style={[
+              st.avatar,
+              isLoggedIn ? st.avatarLoggedIn : st.avatarGuest,
+            ]}
+          >
+            {avatarLetter ? (
+              <Text style={st.avatarText}>{avatarLetter}</Text>
+            ) : (
+              <User size={24} strokeWidth={1.5} color={colors.textSecondary} />
+            )}
+          </View>
+          <View>
+            <Text style={st.displayName}>{displayLabel}</Text>
+            <Pressable onPress={() => router.push("/(onboarding)/flow")}>
+              <Text style={st.editLink}>Edit preferences</Text>
+            </Pressable>
+          </View>
+        </View>
+        {!isLoggedIn && (
+          <Pressable
+            onPress={() => router.push("/(auth)/signin")}
+            style={st.signInButton}
+          >
+            <Text style={st.signInText}>Sign in to save your taste</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Calendar */}
+      <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
+
+      {/* Saved Lists */}
+      <SavedListsSection />
+
+      {/* Preferences */}
+      {userProfile && (
+        <View style={st.section}>
+          <Text style={st.h3}>My Preferences</Text>
+          <View style={st.card}>
+            {userProfile.interests.length > 0 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={st.prefLabel}>Interests:</Text>
+                <View style={st.pillRow}>
+                  {userProfile.interests.map((i) => (
+                    <View key={i} style={st.pill}>
+                      <Text style={st.pillText}>
+                        {INTEREST_LABELS[i] ?? i}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+            {userProfile.neighborhood ? (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Neighborhood: </Text>
+                {userProfile.neighborhood}, {userProfile.borough}
+              </Text>
+            ) : null}
+            {userProfile.travelRange ? (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Travel range: </Text>
+                {userProfile.travelRange}
+              </Text>
+            ) : null}
+            {userProfile.vibe ? (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Vibe: </Text>
+                {VIBE_LABELS[userProfile.vibe] ?? userProfile.vibe}
+              </Text>
+            ) : null}
+            {userProfile.budget ? (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Budget: </Text>
+                {BUDGET_LABELS[userProfile.budget] ?? userProfile.budget}
+              </Text>
+            ) : null}
+            {(userProfile.freeDays?.length > 0 ||
+              userProfile.freeTime?.length > 0) && (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Availability: </Text>
+                {userProfile.freeDays?.join(", ")} ·{" "}
+                {userProfile.freeTime?.join(", ")}
+              </Text>
+            )}
+            <Pressable
+              onPress={() => router.push("/(onboarding)/flow")}
+              style={{ marginTop: 8 }}
+            >
+              <Text style={st.editLink}>Edit</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* Quick Stats */}
+      <View style={st.section}>
+        <Text style={st.h3}>Quick Stats</Text>
+        <View style={st.statsRow}>
+          <View style={st.statCard}>
+            <Text style={st.statNumber}>{savedEvents.length}</Text>
+            <Text style={st.statLabel}>Events Saved</Text>
+          </View>
+          <View style={st.statCard}>
+            <Text style={st.statNumber}>{goingEvents.length}</Text>
+            <Text style={st.statLabel}>Events Going</Text>
+          </View>
+        </View>
+        {createdAt && (
+          <Text style={st.memberSince}>
+            Member since {new Date(createdAt).toLocaleDateString("en-US")}
+          </Text>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+const st = StyleSheet.create({
+  scroll: {
+    paddingTop: Platform.OS === "ios" ? 60 : 20,
+    paddingHorizontal: spacing.page,
+    paddingBottom: 40,
+  },
+  header: { marginBottom: 24 },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 9999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarLoggedIn: { backgroundColor: colors.primary },
+  avatarGuest: { borderWidth: 2, borderColor: colors.border },
+  avatarText: { fontSize: 20, fontWeight: "600", color: colors.white },
+  displayName: { ...typography.body, fontWeight: "600", color: colors.foreground, marginBottom: 4 },
+  editLink: { ...typography.sm, color: colors.textSecondary },
+  signInButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: "center",
+  },
+  signInText: { ...typography.body, fontWeight: "600", color: colors.white },
+  section: { marginBottom: 32 },
+  h3: { ...typography.h3, marginBottom: 16 },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  prefLabel: { ...typography.xs, color: colors.textSecondary },
+  prefLine: { ...typography.sm, color: colors.foreground, marginBottom: 8 },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  pill: {
+    backgroundColor: colors.muted,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
+  },
+  pillText: { ...typography.xs, color: colors.textSecondary },
+  statsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    alignItems: "center",
+  },
+  statNumber: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  statLabel: { ...typography.sm, color: colors.textSecondary },
+  memberSince: { ...typography.xs, color: colors.textSecondary, marginTop: 12 },
+});
