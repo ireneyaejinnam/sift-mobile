@@ -122,7 +122,7 @@ export default function DiscoverScreen() {
       } else {
         // Guest: try Supabase first, fall back to local
         const dbEvents = await fetchEvents(f);
-        resultEvents = dbEvents.length > 0 ? dbEvents : getAllCandidates(f);
+        resultEvents = dbEvents.length > 0 ? dbEvents : getAllCandidates(f, [], userProfile);
       }
     } catch {
       // Fallback to local hardcoded data
@@ -135,11 +135,11 @@ export default function DiscoverScreen() {
             : "Picked for you",
         }));
       } else {
-        resultEvents = getAllCandidates(f);
+        resultEvents = getAllCandidates(f, [], userProfile);
       }
     }
 
-    const initial: Slot[] = resultEvents.slice(0, 5).map((e) => ({
+    const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
     }));
@@ -335,9 +335,9 @@ export default function DiscoverScreen() {
                       setTimeout(() => goToResults(f), 200);
                     }}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View style={{ flexDirection: "row", alignItems: "baseline" }}>
                       <Text style={s.catLabel}>{d.label}</Text>
-                      <Text style={s.sub}> — {d.desc}</Text>
+                      <Text style={s.distDesc}> — {d.desc}</Text>
                     </View>
                   </OptionCard>
                 ))}
@@ -579,6 +579,7 @@ const s = StyleSheet.create({
   catGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   catCell: { width: "47%" },
   catLabel: { ...typography.body, fontWeight: "500", color: colors.foreground },
+  distDesc: { ...typography.sm, color: colors.textSecondary, lineHeight: 22 },
   resultsScroll: {
     paddingTop: Platform.OS === "ios" ? 60 : 20,
     paddingHorizontal: spacing.page,

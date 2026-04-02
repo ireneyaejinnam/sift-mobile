@@ -23,7 +23,7 @@ const LOW_CONFIDENCE_CATEGORIES = ['popups'];
 
 // Additionally, re-check ALL events from sources known to have poor categorization.
 // Ticketmaster "Miscellaneous" maps to popups, but other sources may also miscategorize.
-const RECHECK_ALL_SOURCES = ['ticketmaster', 'dice', 'meetup', 'yelp', 'nycgov', 'theskint'];
+const RECHECK_ALL_SOURCES = ['ticketmaster', 'dice', 'meetup', 'yelp', 'nycgov', 'theskint', 'eventbrite', 'nyctourism'];
 
 // ── Reclassification rules ──────────────────────────────────
 // Priority order: first matching rule wins.
@@ -48,6 +48,14 @@ const RULES: Rule[] = [
       'musical', 'opera', 'ballet', 'dance performance',
       'one-man show', 'one-woman show', 'monologue', 'curtain call',
       'production', 'tony winning', 'tony award', 'tony-winning', 'new play',
+      // Well-known Broadway/theater show titles
+      'little mermaid', 'lion king', 'wicked', 'hamilton',
+      'phantom of the opera', 'les miserables', 'les mis',
+      'book of mormon', 'dear evan hansen', 'moulin rouge',
+      'aladdin', 'chicago the musical', 'hadestown', 'six the musical',
+      'beetlejuice', 'back to the future', 'sweeney todd',
+      'merrily we roll along', 'the outsiders', 'suffs',
+      'the notebook', 'water for elephants', 'the great gatsby',
       'staged reading', 'preview performance', 'matinee',
       'revival', 'repertory', 'playwright', 'dramaturgy',
       'encores', 'three shows', 'two shows', 'stage show',
@@ -63,6 +71,11 @@ const RULES: Rule[] = [
       'atlantic theater', 'vineyard theatre', 'irish rep',
       'new world stages', 'minetta lane', 'lucille lortel',
       'cherry lane', 'the joyce', 'the shed',
+      'lunt-fontanne', 'gershwin', 'majestic', 'shubert',
+      'winter garden', 'ambassador', 'al hirschfeld', 'neil simon',
+      'palace theatre', 'broadhurst', 'booth', 'belasco',
+      'lyceum', 'ethel barrymore', 'minskoff', 'marquis',
+      'richard rodgers', 'imperial', 'eugene o\'neill',
     ],
   },
   // ── Art (broad set of keywords for exhibitions, collections, museums) ──
@@ -391,11 +404,7 @@ export function reclassifyLocal(
   tags: string[],
   currentCategory: string
 ): string {
-  if (!LOW_CONFIDENCE_CATEGORIES.includes(currentCategory)) {
-    return currentCategory;
-  }
-
-  const result = tryReclassify(title, description, venueName, tags);
+  const result = tryReclassify(title, description, venueName, tags, currentCategory);
   if (result && (result.confidence === 'high' || result.confidence === 'medium')) {
     return result.newCategory;
   }

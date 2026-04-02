@@ -3,6 +3,13 @@ import type { SiftEvent } from "@/types/event";
 import type { Filters } from "@/types/quiz";
 import type { UserProfile } from "@/types/user";
 
+function isUpcoming(event: SiftEvent): boolean {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const end = new Date(event.endDate ?? event.startDate);
+  return end >= now;
+}
+
 const INTEREST_TO_CATEGORY: Record<string, string> = {
   live_music: "music",
   art_exhibitions: "arts",
@@ -24,6 +31,9 @@ function rangesOverlap(
 ) {
   const userStart = new Date(filterStart);
   const userEnd = new Date(filterEnd);
+  // ±1 day padding for flexibility
+  userStart.setDate(userStart.getDate() - 1);
+  userEnd.setDate(userEnd.getDate() + 1);
   const itemStart = new Date(eventStart);
   const itemEnd = new Date(eventEnd ?? eventStart);
   return itemStart <= userEnd && itemEnd >= userStart;
@@ -45,7 +55,7 @@ export function getEventCandidates(
   filters: Filters,
   excludedIds: string[] = []
 ): SiftEvent[] {
-  let filtered = [...events];
+  let filtered = events.filter(isUpcoming);
 
   if (excludedIds.length > 0) {
     filtered = filtered.filter((e) => !excludedIds.includes(e.id));
@@ -99,12 +109,36 @@ export function getEventCandidates(
   return filtered.map((e) => applyMatchReason(e, filters));
 }
 
-/** Returns all candidates matching filters, shuffled. */
+/** Returns candidates in priority order: quiz filters → user interests → any remaining. */
 export function getAllCandidates(
   filters: Filters,
-  excludedIds: string[] = []
+  excludedIds: string[] = [],
+  userProfile?: UserProfile | null
 ): SiftEvent[] {
-  return [...getEventCandidates(filters, excludedIds)].sort(() => Math.random() - 0.5);
+  const shuffle = (arr: SiftEvent[]) => [...arr].sort(() => Math.random() - 0.5);
+
+  // Tier 1: matches all quiz filters including selected categories
+  const tier1 = getEventCandidates(filters, excludedIds);
+
+  // Tier 2: matches user's saved interests (ignoring quiz categories)
+  let tier2: SiftEvent[] = [];
+  if (userProfile?.interests?.length) {
+    const interestCategories = userProfile.interests
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter(Boolean);
+    const broader = getEventCandidates({ ...filters, categories: undefined }, excludedIds);
+    const tier1Ids = new Set(tier1.map((e) => e.id));
+    tier2 = broader.filter(
+      (e) => interestCategories.includes(e.category) && !tier1Ids.has(e.id)
+    );
+  }
+
+  // Tier 3: any remaining upcoming events
+  const usedIds = new Set([...tier1.map((e) => e.id), ...tier2.map((e) => e.id)]);
+  const tier3 = getEventCandidates({ ...filters, categories: undefined }, excludedIds)
+    .filter((e) => !usedIds.has(e.id));
+
+  return [...shuffle(tier1), ...shuffle(tier2), ...shuffle(tier3)];
 }
 
 /**
@@ -123,18 +157,20 @@ export function getNextCandidate(
     return byFilters[Math.floor(Math.random() * byFilters.length)];
   }
 
+  // Tier 2: user's saved interests (respecting date/distance/price but not quiz categories)
   if (userProfile?.interests?.length) {
-    const byInterest = events.filter(
-      (e) =>
-        !excludedIds.includes(e.id) &&
-        userProfile.interests.some((i) => INTEREST_TO_CATEGORY[i] === e.category)
-    );
+    const interestCategories = userProfile.interests
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter(Boolean);
+    const broader = getEventCandidates({ ...filters, categories: undefined }, excludedIds);
+    const byInterest = broader.filter((e) => interestCategories.includes(e.category));
     if (byInterest.length > 0) {
       return byInterest[Math.floor(Math.random() * byInterest.length)];
     }
   }
 
-  const remaining = events.filter((e) => !excludedIds.includes(e.id));
+  // Tier 3: any remaining upcoming event (still respecting date/distance/price)
+  const remaining = getEventCandidates({ ...filters, categories: undefined }, excludedIds);
   if (remaining.length > 0) {
     return remaining[Math.floor(Math.random() * remaining.length)];
   }
