@@ -32,7 +32,7 @@ async function main() {
   await cleanupExpired();
 }
 
-import { fileURLToPath } from 'url';
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+
+if (require.main === module) {
   main().catch(console.error);
 }

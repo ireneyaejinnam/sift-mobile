@@ -165,7 +165,7 @@ export async function ingestNYCTourism(): Promise<void> {
   console.log(`[NYCTourism] Upserted: ${result.inserted}, Errors: ${result.errors}`);
 }
 
-import { fileURLToPath } from 'url';
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+
+if (require.main === module) {
   ingestNYCTourism().catch(console.error);
 }

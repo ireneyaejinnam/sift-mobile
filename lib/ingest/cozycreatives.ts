@@ -382,7 +382,7 @@ export async function ingestCozyCretaives(): Promise<void> {
   console.log(`[CozyCratives] Upserted: ${result.inserted}, Errors: ${result.errors}`);
 }
 
-import { fileURLToPath } from 'url';
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+
+if (require.main === module) {
   ingestCozyCretaives().catch(console.error);
 }

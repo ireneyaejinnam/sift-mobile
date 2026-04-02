@@ -196,7 +196,7 @@ export async function ingestNYCForFree(): Promise<void> {
   console.log(`[NYCForFree] Upserted: ${result.inserted}, Errors: ${result.errors}`);
 }
 
-import { fileURLToPath } from 'url';
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+
+if (require.main === module) {
   ingestNYCForFree().catch(console.error);
 }
