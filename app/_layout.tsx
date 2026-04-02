@@ -24,6 +24,10 @@ export default function RootLayout() {
             options={{ animation: "slide_from_right" }}
           />
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="event/[id]"
+            options={{ animation: "slide_from_right" }}
+          />
         </Stack>
       </ClientProviders>
     </GestureHandlerRootView>

@@ -11,6 +11,7 @@ import { useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { setOnboardingDoneFlag } from "@/lib/storage";
+import { track } from "@/lib/track";
 import {
   BOROUGHS,
   BOROUGHS_NEIGHBORHOODS,
@@ -181,6 +182,11 @@ export default function OnboardingFlow() {
     };
     setUserProfile(full);
     setOnboardingDoneFlag();
+    track("onboarding_complete", {
+      interests: full.interests,
+      borough: full.borough,
+      budget: full.budget,
+    });
     setShowConfirmation(true);
   }, [profile, setUserProfile]);
 

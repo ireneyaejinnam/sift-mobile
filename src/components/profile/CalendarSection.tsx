@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
-import { events } from "@/data/events";
 import type { GoingEvent, SavedEvent } from "@/types/user";
 import { useUser } from "@/context/UserContext";
 import { colors, radius, typography, spacing } from "@/lib/theme";
@@ -40,19 +39,17 @@ export default function CalendarSection({
 
   const { dateToGoing, dateToSaved } = useMemo(() => {
     const dg = new Map<string, GoingEvent[]>();
-    const ds = new Map<string, string[]>();
+    const ds = new Map<string, SavedEvent[]>();
     goingEvents.forEach((e) => {
       const list = dg.get(e.eventDate) ?? [];
       list.push(e);
       dg.set(e.eventDate, list);
     });
     savedEvents.forEach((s) => {
-      const ev = events.find((e) => e.id === s.eventId);
-      if (ev) {
-        const list = ds.get(ev.startDate) ?? [];
-        list.push(s.eventId);
-        ds.set(ev.startDate, list);
-      }
+      if (!s.eventStartDate) return;
+      const list = ds.get(s.eventStartDate) ?? [];
+      list.push(s);
+      ds.set(s.eventStartDate, list);
     });
     return { dateToGoing: dg, dateToSaved: ds };
   }, [goingEvents, savedEvents]);
@@ -84,10 +81,7 @@ export default function CalendarSection({
   };
 
   const selGoing = selectedDate ? dateToGoing.get(selectedDate) ?? [] : [];
-  const selSavedIds = selectedDate ? dateToSaved.get(selectedDate) ?? [] : [];
-  const selSavedEvents = selSavedIds
-    .map((id) => events.find((e) => e.id === id))
-    .filter(Boolean);
+  const selSaved = selectedDate ? dateToSaved.get(selectedDate) ?? [] : [];
 
   return (
     <View style={st.section}>
@@ -146,7 +140,12 @@ export default function CalendarSection({
               <Text style={st.detailLabel}>Going:</Text>
               {selGoing.map((e) => (
                 <View key={e.eventId} style={st.eventRow}>
-                  <Text style={[st.detailItem, { flex: 1 }]}>{e.eventTitle}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.detailItem}>{e.eventTitle}</Text>
+                    {e.eventEndDate && e.eventEndDate !== e.eventDate && (
+                      <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
+                    )}
+                  </View>
                   <Pressable
                     onPress={() => toggleGoing({ eventId: e.eventId, eventTitle: e.eventTitle, eventDate: e.eventDate })}
                     hitSlop={8}
@@ -158,14 +157,19 @@ export default function CalendarSection({
               ))}
             </View>
           )}
-          {selSavedEvents.length > 0 && (
+          {selSaved.length > 0 && (
             <View>
               <Text style={st.detailLabel}>Saved:</Text>
-              {selSavedEvents.map((e) => (
-                <View key={e!.id} style={st.eventRow}>
-                  <Text style={[st.detailItem, { flex: 1 }]}>{e!.title}</Text>
+              {selSaved.map((s) => (
+                <View key={s.eventId} style={st.eventRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.detailItem}>{s.eventTitle}</Text>
+                    {s.eventEndDate && s.eventEndDate !== s.eventStartDate && (
+                      <Text style={st.detailSub}>runs through {s.eventEndDate}</Text>
+                    )}
+                  </View>
                   <Pressable
-                    onPress={() => removeSavedEvent(e!.id)}
+                    onPress={() => removeSavedEvent(s.eventId)}
                     hitSlop={8}
                     style={st.removeBtn}
                   >
@@ -175,7 +179,7 @@ export default function CalendarSection({
               ))}
             </View>
           )}
-          {selGoing.length === 0 && selSavedEvents.length === 0 && (
+          {selGoing.length === 0 && selSaved.length === 0 && (
             <Text style={st.detailEmpty}>No events this day</Text>
           )}
         </View>
@@ -229,6 +233,7 @@ const st = StyleSheet.create({
     marginTop: 4,
   },
   detailItem: { ...typography.sm },
+  detailSub: { ...typography.xs, color: colors.textSecondary, marginTop: 1 },
   removeBtn: {
     padding: 2,
     marginLeft: 8,

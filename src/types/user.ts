@@ -22,6 +22,11 @@ export interface GoingEvent {
   markedAt: string;
 }
 
+export interface SharedWithYouEvent {
+  eventId: string;
+  sharedAt: string;
+}
+
 export const DEFAULT_LISTS = [
   "Want to go",
   "Date ideas",
@@ -36,6 +41,7 @@ export interface SiftStorage {
   userProfile?: UserProfile;
   savedEvents: SavedEvent[];
   goingEvents: GoingEvent[];
+  sharedWithYou: SharedWithYouEvent[];
   customLists: string[];
   createdAt?: string;
 }
@@ -47,5 +53,6 @@ export const initialStorage: SiftStorage = {
   userEmail: "",
   savedEvents: [],
   goingEvents: [],
+  sharedWithYou: [],
   customLists: [],
 };

@@ -5,6 +5,7 @@ import { colors, radius, spacing, typography } from "@/lib/theme";
 
 interface SaveToListSheetProps {
   eventId: string;
+  eventMeta: { title: string; startDate: string; endDate?: string; location?: string };
   currentListName: string | null;
   onClose: () => void;
   onSaved: (listName: string) => void;
@@ -12,6 +13,7 @@ interface SaveToListSheetProps {
 
 export default function SaveToListSheet({
   eventId,
+  eventMeta,
   currentListName,
   onClose,
   onSaved,
@@ -23,7 +25,7 @@ export default function SaveToListSheet({
   const listNames = getAllListNames();
 
   const handleSelectList = (listName: string) => {
-    addSavedEvent(eventId, listName);
+    addSavedEvent(eventId, listName, eventMeta);
     onSaved(listName);
     onClose();
   };
@@ -32,7 +34,7 @@ export default function SaveToListSheet({
     const trimmed = newListName.trim();
     if (!trimmed) return;
     addCustomList(trimmed);
-    addSavedEvent(eventId, trimmed);
+    addSavedEvent(eventId, trimmed, eventMeta);
     onSaved(trimmed);
     onClose();
   };

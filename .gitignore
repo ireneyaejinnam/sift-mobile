@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Native
+ios/Pods/
+android/.gradle/
+android/app/debug.keystore
+
+# OS
+.DS_Store
+*.log
+
+# TypeScript
+*.tsbuildinfo
+.claude/

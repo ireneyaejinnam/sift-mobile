@@ -12,23 +12,60 @@ import {
 import { useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
+import { supabase } from "@/lib/supabase";
 import { setGuestFlag, hasOnboardingDoneFlag } from "@/lib/storage";
+import { useToast } from "@/components/ui/Toast";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 
 export default function SignInScreen() {
   const router = useRouter();
   const { setAuth, isLoggedIn } = useUser();
+  const { showToast } = useToast();
   const [isCreateAccount, setIsCreateAccount] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const canSubmit = email.trim().length > 0 && password.trim().length > 0;
+  const canSubmit = email.trim().length > 0 && password.trim().length >= 6;
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const handleSubmit = async () => {
+    if (!canSubmit || loading) return;
+    setLoading(true);
+
+    try {
+      if (isCreateAccount) {
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password.trim(),
+          options: { data: { display_name: displayName.trim() || undefined } },
+        });
+        if (error) {
+          showToast(error.message);
+          setLoading(false);
+          return;
+        }
+        showToast("Account created");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password.trim(),
+        });
+        if (error) {
+          showToast(error.message);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      showToast("Something went wrong. Try again.");
+      setLoading(false);
+      return;
+    }
+
     setAuth(true, email.trim(), displayName.trim() || undefined);
-    // Navigate to onboarding if not done, otherwise to tabs
+    setLoading(false);
+
     if (hasOnboardingDoneFlag()) {
       router.replace("/(tabs)/discover");
     } else {
@@ -71,8 +108,8 @@ export default function SignInScreen() {
             {isCreateAccount ? "Create account" : "Sign in"}
           </Text>
           <Text style={styles.subtitle}>
-            We'll use this to personalize your experience. No real auth for this
-            demo.
+            We'll use this to save your preferences and personalize your
+            experience.
           </Text>
 
           {/* Username */}
@@ -114,15 +151,19 @@ export default function SignInScreen() {
           {/* Submit */}
           <Pressable
             onPress={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit || loading}
             style={({ pressed }) => [
               styles.primaryButton,
-              !canSubmit && styles.primaryButtonDisabled,
+              (!canSubmit || loading) && styles.primaryButtonDisabled,
               pressed && canSubmit && styles.primaryButtonPressed,
             ]}
           >
             <Text style={styles.primaryButtonText}>
-              {isCreateAccount ? "Create Account" : "Sign In"}
+              {loading
+                ? "Please wait..."
+                : isCreateAccount
+                ? "Create Account"
+                : "Sign In"}
             </Text>
           </Pressable>
 

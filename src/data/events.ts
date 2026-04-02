@@ -643,7 +643,7 @@ export const events: SiftEvent[] = [
   {
     id: "pop-003",
     title: "Players Only Club at Complex NY",
-    category: "popups",
+    category: "outdoors",
     description: "NBC and Peacock recreate a famous golf hole for Players Championship week. Step in, take a swing, and rep your favorite player at this interactive sports pop-up.",
     location: "Complex New York",
     address: "620 Broadway, New York, NY 10012",
@@ -653,7 +653,7 @@ export const events: SiftEvent[] = [
     price: 0,
     priceLabel: "Free",
     link: "https://events.complex.com/complextheplayerschampionship",
-    tags: ["popup", "sports", "golf", "interactive", "free"],
+    tags: ["sports", "golf", "interactive", "free"],
     imageUrl: "https://sift-app-mvp.vercel.app/events/pop-003.jpg"
   },
 

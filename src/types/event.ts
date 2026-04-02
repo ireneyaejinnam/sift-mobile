@@ -33,4 +33,8 @@ export interface SiftEvent {
   endingSoon?: boolean;
   daysLeft?: number;
   tags: string[];
+  ticketUrl?: string;
+  eventUrl?: string;
+  onSaleDate?: string;
+  dates?: { startDate: string; time: string; link: string }[];
 }

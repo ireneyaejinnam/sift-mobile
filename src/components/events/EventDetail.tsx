@@ -18,6 +18,7 @@ import {
   ImageIcon,
   MapPin,
   Share2,
+  Ticket,
 } from "lucide-react-native";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveToListSheet from "@/components/events/SaveToListSheet";
@@ -209,13 +210,32 @@ export default function EventDetail({
               ))}
             </View>
 
+            {/* Ticket / On-sale badge */}
+            {event.ticketUrl ? (
+              <Pressable
+                onPress={() => Linking.openURL(event.ticketUrl!)}
+                style={styles.ticketButton}
+              >
+                <Ticket size={16} strokeWidth={1.5} color={colors.white} />
+                <Text style={styles.ticketButtonText}>Get tickets</Text>
+              </Pressable>
+            ) : event.onSaleDate && new Date(event.onSaleDate) > new Date() ? (
+              <View style={styles.onSaleBadge}>
+                <Text style={styles.onSaleText}>
+                  Tickets drop {new Date(event.onSaleDate).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+                </Text>
+              </View>
+            ) : null}
+
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => Linking.openURL(event.link)}
+                onPress={() => Linking.openURL(event.eventUrl || event.link)}
                 style={styles.primaryButton}
               >
-                <Text style={styles.primaryButtonText}>Check it out</Text>
+                <Text style={styles.primaryButtonText}>
+                  {event.ticketUrl ? "View event" : "Check it out"}
+                </Text>
                 <ExternalLink
                   size={16}
                   strokeWidth={1.5}
@@ -416,6 +436,34 @@ const styles = StyleSheet.create({
   tagText: {
     ...typography.xs,
     color: colors.textSecondary,
+  },
+  ticketButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: radius.md,
+    marginBottom: 12,
+  },
+  ticketButtonText: {
+    ...typography.body,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  onSaleBadge: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(232, 170, 106, 0.15)",
+    marginBottom: 12,
+  },
+  onSaleText: {
+    ...typography.sm,
+    fontWeight: "500",
+    color: "#C8844A",
   },
   actions: {
     flexDirection: "row",

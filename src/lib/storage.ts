@@ -24,6 +24,7 @@ export async function loadStorage(): Promise<SiftStorage> {
       ...parsed,
       savedEvents: parsed.savedEvents ?? initialStorage.savedEvents,
       goingEvents: parsed.goingEvents ?? initialStorage.goingEvents,
+      sharedWithYou: parsed.sharedWithYou ?? initialStorage.sharedWithYou,
       customLists: parsed.customLists ?? initialStorage.customLists,
     };
   } catch {

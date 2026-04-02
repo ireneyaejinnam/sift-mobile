@@ -1,0 +1,363 @@
+import { events } from "@/data/events";
+import { fetchAllUpcoming } from "@/lib/getEvents";
+import type { SiftEvent } from "@/types/event";
+import type { UserProfile } from "@/types/user";
+
+export interface ScoredEvent {
+  event: SiftEvent;
+  score: number;
+  matchReasons: string[];
+}
+
+const INTEREST_TO_CATEGORY: Record<string, string> = {
+  live_music: "music",
+  art_exhibitions: "arts",
+  theater: "theater",
+  workshops: "workshops",
+  fitness: "fitness",
+  comedy: "comedy",
+  food: "food",
+  outdoor: "outdoors",
+  nightlife: "nightlife",
+  popups: "popups",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  music: "live music",
+  arts: "art",
+  comedy: "comedy",
+  outdoors: "outdoor activities",
+  fitness: "fitness",
+  food: "food events",
+  nightlife: "nightlife",
+  theater: "theater",
+  workshops: "workshops",
+  popups: "pop-ups",
+};
+
+const ADJACENT_BOROUGHS: Record<string, string[]> = {
+  Manhattan: ["Brooklyn", "Queens"],
+  Brooklyn: ["Manhattan", "Queens"],
+  Queens: ["Manhattan", "Brooklyn", "Bronx"],
+  Bronx: ["Manhattan", "Queens"],
+  "Staten Island": [],
+};
+
+// Keywords associated with each interest for description-level matching
+const INTEREST_KEYWORDS: Record<string, string[]> = {
+  live_music: ["music", "concert", "band", "dj", "jazz", "rock", "hip hop", "singer"],
+  art_exhibitions: ["art", "gallery", "exhibit", "museum", "painting", "sculpture", "sculptures", "installation", "collection", "retrospective", "masterpiece", "group show", "solo show", "on view", "showcasing", "curator", "posters", "prints"],
+  comedy: ["comedy", "comedian", "improv", "stand-up", "funny", "laugh"],
+  outdoor: ["park", "garden", "outdoor", "rooftop", "nature", "hike", "walk", "bike"],
+  fitness: ["yoga", "run", "fitness", "workout", "gym", "cycling", "marathon", "pilates"],
+  food: ["food", "tasting", "chef", "culinary", "cocktail", "wine", "brunch", "dinner", "bakery", "pastry", "chocolate"],
+  nightlife: ["club", "bar", "lounge", "dance", "party", "late night", "nightlife"],
+  theater: ["theater", "theatre", "musical", "broadway", "opera", "ballet", "dance", "production", "tony", "playwright", "encores", "stage show", "performing arts"],
+  workshops: ["workshop", "class", "learn", "seminar", "masterclass", "tutorial"],
+  popups: ["pop-up", "sample sale", "market", "bazaar", "trunk show"],
+};
+
+// Well-known NYC venues that signal "popular"
+const POPULAR_VENUES = [
+  "brooklyn steel", "terminal 5", "bowery ballroom", "webster hall",
+  "irving plaza", "radio city", "madison square garden", "barclays center",
+  "comedy cellar", "gotham comedy", "prospect park", "central park",
+  "moma", "whitney", "guggenheim", "brooklyn museum", "bam",
+  "house of yes", "elsewhere", "beacon theatre", "le poisson rouge",
+  "smorgasburg", "chelsea market", "lincoln center",
+];
+
+function getBudgetMax(budget: string): number | null {
+  switch (budget) {
+    case "free": return 0;
+    case "under_20": return 20;
+    case "under_50": return 50;
+    case "no_limit": return null;
+    default: return null;
+  }
+}
+
+function getDayOfWeek(dateStr: string): string {
+  const days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  return days[new Date(dateStr).getDay()];
+}
+
+function getTimeOfDay(timeStr: string): string {
+  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?/);
+  if (!match) return "evening";
+  let hour = parseInt(match[1], 10);
+  const ampm = match[3]?.toLowerCase();
+  if (ampm === "pm" && hour < 12) hour += 12;
+  if (ampm === "am" && hour === 12) hour = 0;
+  if (hour < 12) return "morning";
+  if (hour < 17) return "afternoon";
+  if (hour < 21) return "evening";
+  return "late_night";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
+  let score = 0;
+  const reasons: string[] = [];
+
+  const profileCategories = profile.interests.map(
+    (i) => INTEREST_TO_CATEGORY[i]
+  );
+
+  // ── Category match (25 points — reduced from 30 since we now have description matching)
+  if (profileCategories.includes(event.category)) {
+    score += 25;
+    reasons.push(
+      `you're into ${CATEGORY_LABELS[event.category] || event.category}`
+    );
+  }
+
+  // ── Description keyword matching (5-10 points)
+  // Gives partial credit when event description mentions interest-related keywords
+  // even if the category doesn't directly match
+  const descLower = `${event.description} ${event.title}`.toLowerCase();
+  let descBonus = 0;
+  for (const interest of profile.interests) {
+    const keywords = INTEREST_KEYWORDS[interest];
+    if (!keywords) continue;
+    // Skip if already matched by category
+    if (INTEREST_TO_CATEGORY[interest] === event.category) continue;
+    const matches = keywords.filter((kw) => descLower.includes(kw));
+    if (matches.length >= 2) {
+      descBonus = Math.max(descBonus, 10);
+      reasons.push(`mentions ${matches[0]} + ${matches[1]}`);
+    } else if (matches.length === 1) {
+      descBonus = Math.max(descBonus, 5);
+    }
+  }
+  score += descBonus;
+
+  // ── Borough match (20 points for same, 10 for adjacent)
+  if (event.borough === profile.borough) {
+    score += 20;
+    reasons.push(`it's in ${profile.borough}`);
+  } else if (ADJACENT_BOROUGHS[profile.borough]?.includes(event.borough)) {
+    score += 10;
+  }
+
+  // ── Neighborhood match (bonus 10 on top of borough)
+  if (
+    profile.neighborhood &&
+    event.address?.toLowerCase().includes(profile.neighborhood.toLowerCase())
+  ) {
+    score += 10;
+    reasons.push("it's in your neighborhood");
+  }
+
+  // ── Budget match (15 points)
+  const budgetMax = getBudgetMax(profile.budget);
+  if (event.price === 0 && profile.budget === "free") {
+    score += 15;
+    reasons.push("it's free");
+  } else if (budgetMax !== null && event.price <= budgetMax) {
+    score += 15;
+    if (budgetMax > 0) reasons.push(`under your $${budgetMax} budget`);
+  } else if (budgetMax === null) {
+    score += 15;
+  } else {
+    score -= 20; // over budget penalty
+  }
+
+  // ── Day match (15 points)
+  const eventDay = getDayOfWeek(event.startDate);
+  if (profile.freeDays?.includes(eventDay)) {
+    score += 15;
+    reasons.push(`you're free ${capitalize(eventDay)}`);
+  }
+
+  // ── Time match (10 points)
+  const eventTime = getTimeOfDay(event.time);
+  if (profile.freeTime?.includes(eventTime)) {
+    score += 10;
+  }
+
+  // ── Recency boost (8 points — events starting within 3 days)
+  const daysUntilStart = Math.ceil(
+    (new Date(event.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  );
+  if (daysUntilStart >= 0 && daysUntilStart <= 3) {
+    score += 8;
+    if (daysUntilStart === 0) reasons.push("happening today");
+    else if (daysUntilStart === 1) reasons.push("happening tomorrow");
+    else reasons.push("coming up soon");
+  }
+
+  // ── Ending soon boost (10 points — urgency)
+  if (event.endingSoon && event.daysLeft != null && event.daysLeft <= 7) {
+    score += 10;
+    reasons.push(
+      `ends in ${event.daysLeft} day${event.daysLeft === 1 ? "" : "s"}`
+    );
+  }
+
+  // ── Popular venue boost (5 points — when vibe = popular_spots)
+  if (profile.vibe === "popular_spots") {
+    const locationLower = event.location.toLowerCase();
+    if (POPULAR_VENUES.some((v) => locationLower.includes(v))) {
+      score += 5;
+      reasons.push("popular venue");
+    }
+  }
+
+  // ── Free event bonus (5 points)
+  if (event.price === 0) {
+    score += 5;
+  }
+
+  // ── Has image bonus (3 points)
+  if (event.imageUrl) {
+    score += 3;
+  }
+
+  // ── Vibe modifier
+  if (profile.vibe === "surprise_me") {
+    if (!profileCategories.includes(event.category)) {
+      score += 8;
+      reasons.push("something different for you");
+    }
+  } else if (profile.vibe === "hidden_gems") {
+    if (event.price <= 20) {
+      score += 5;
+    }
+  } else if (profile.vibe === "popular_spots") {
+    const popularTags = [
+      "arena", "festival", "concert", "stand-up", "club", "candlelight",
+    ];
+    if (event.tags.some((t) => popularTags.includes(t))) {
+      score += 5;
+    }
+  }
+
+  return { event, score, matchReasons: reasons };
+}
+
+/**
+ * Post-scoring diversification.
+ * Ensures no more than 2 consecutive events of the same category.
+ * If 3+ interests, ensures at least 2 categories in top 5.
+ */
+function diversify(scored: ScoredEvent[], profile: UserProfile): ScoredEvent[] {
+  if (scored.length <= 2) return scored;
+
+  const result = [...scored];
+
+  // Pass 1: Break runs of 3+ same-category events
+  for (let i = 2; i < result.length; i++) {
+    if (
+      result[i].event.category === result[i - 1].event.category &&
+      result[i].event.category === result[i - 2].event.category
+    ) {
+      // Find the next event with a different category and swap
+      for (let j = i + 1; j < result.length; j++) {
+        if (result[j].event.category !== result[i].event.category) {
+          const temp = result[i];
+          result[i] = result[j];
+          result[j] = temp;
+          break;
+        }
+      }
+    }
+  }
+
+  // Pass 2: If user has 3+ interests, ensure top 5 has at least 2 categories
+  if (profile.interests.length >= 3) {
+    const top5 = result.slice(0, 5);
+    const categories = new Set(top5.map((s) => s.event.category));
+    if (categories.size < 2) {
+      // Find first event outside top 5 with a different category
+      const dominantCategory = top5[0]?.event.category;
+      for (let j = 5; j < result.length; j++) {
+        if (result[j].event.category !== dominantCategory) {
+          // Swap it into position 2 (after the top 2 of the dominant category)
+          const temp = result[2];
+          result[2] = result[j];
+          result[j] = temp;
+          break;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Score all events against a user profile and return the top N.
+ * Includes diversity post-processing to ensure varied results.
+ */
+export function getRecommendations(
+  profile: UserProfile,
+  limit: number = 5
+): ScoredEvent[] {
+  const now = new Date();
+
+  const upcoming = events.filter((e) => {
+    const end = e.endDate ? new Date(e.endDate) : new Date(e.startDate);
+    return end >= now;
+  });
+
+  const scored = upcoming.map((e) => scoreEvent(e, profile));
+  scored.sort((a, b) => b.score - a.score);
+
+  const positive = scored.filter((s) => s.score > 0);
+  const diversified = diversify(positive, profile);
+
+  return diversified.slice(0, limit);
+}
+
+/**
+ * Async version: fetch events from Supabase, score against profile.
+ * Falls back to hardcoded data if Supabase fails.
+ */
+export async function getRecommendationsFromDB(
+  profile: UserProfile,
+  limit: number = 5
+): Promise<ScoredEvent[]> {
+  try {
+    const dbEvents = await fetchAllUpcoming(500);
+    if (dbEvents.length > 0) {
+      const scored = dbEvents.map((e) => scoreEvent(e, profile));
+      scored.sort((a, b) => b.score - a.score);
+      const positive = scored.filter((s) => s.score > 0);
+      const diversified = diversify(positive, profile);
+      return diversified.slice(0, limit);
+    }
+  } catch (err) {
+    console.warn("[recommend] Supabase fetch failed, using local data:", err);
+  }
+  // Fallback to hardcoded data
+  return getRecommendations(profile, limit);
+}
+
+/**
+ * For guest users: return upcoming events sorted by date, no scoring.
+ */
+export function getGuestRecommendations(
+  categories?: string[],
+  limit: number = 10
+): SiftEvent[] {
+  const now = new Date();
+
+  let upcoming = events.filter((e) => {
+    const end = e.endDate ? new Date(e.endDate) : new Date(e.startDate);
+    return end >= now;
+  });
+
+  if (categories?.length) {
+    upcoming = upcoming.filter((e) => categories.includes(e.category));
+  }
+
+  upcoming.sort(
+    (a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+
+  return upcoming.slice(0, limit);
+}

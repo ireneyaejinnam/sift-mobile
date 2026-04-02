@@ -3,7 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import { useToast } from "@/components/ui/Toast";
 import { colors, radius, typography } from "@/lib/theme";
 
-const BASE_URL = "https://sift.app/event";
+const BASE_URL = "https://sift-app-mvp.vercel.app/event";
 
 interface ShareSheetProps {
   eventId: string;

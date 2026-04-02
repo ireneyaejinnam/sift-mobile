@@ -2,6 +2,7 @@ import { View, Text, Pressable, ScrollView, StyleSheet, Platform } from "react-n
 import { useRouter } from "expo-router";
 import { User } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
+import { events } from "@/data/events";
 import CalendarSection from "@/components/profile/CalendarSection";
 import SavedListsSection from "@/components/profile/SavedListsSection";
 import { colors, radius, spacing, typography } from "@/lib/theme";
@@ -39,7 +40,9 @@ export default function ProfileTab() {
     userProfile,
     savedEvents,
     goingEvents,
+    sharedWithYou,
     createdAt,
+    signOut,
   } = useUser();
 
   const displayLabel = userDisplayName || userEmail || "Guest";
@@ -87,6 +90,33 @@ export default function ProfileTab() {
 
       {/* Calendar */}
       <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
+
+      {/* Shared with you */}
+      {sharedWithYou.length > 0 && (
+        <View style={st.section}>
+          <Text style={st.h3}>Shared with you</Text>
+          <View style={{ gap: 8 }}>
+            {sharedWithYou.map((s) => {
+              const ev = events.find((e) => e.id === s.eventId);
+              if (!ev) return null;
+              return (
+                <Pressable
+                  key={s.eventId}
+                  onPress={() => router.push(`/event/${s.eventId}`)}
+                  style={st.card}
+                >
+                  <Text style={st.prefLine}>
+                    <Text style={{ fontWeight: "600" }}>{ev.title}</Text>
+                  </Text>
+                  <Text style={st.prefLabel}>
+                    {ev.startDate} · {ev.location}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       {/* Saved Lists */}
       <SavedListsSection />
@@ -171,6 +201,19 @@ export default function ProfileTab() {
           </Text>
         )}
       </View>
+
+      {/* Sign out */}
+      {isLoggedIn && (
+        <Pressable
+          onPress={async () => {
+            await signOut();
+            router.replace("/(auth)/gate");
+          }}
+          style={st.signOutButton}
+        >
+          <Text style={st.signOutText}>Sign out</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -242,4 +285,13 @@ const st = StyleSheet.create({
   },
   statLabel: { ...typography.sm, color: colors.textSecondary },
   memberSince: { ...typography.xs, color: colors.textSecondary, marginTop: 12 },
+  signOutButton: {
+    alignItems: "center",
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 24,
+  },
+  signOutText: { ...typography.sm, color: colors.textSecondary },
 });

@@ -9,11 +9,13 @@ import {
 import type {
   GoingEvent,
   SavedEvent,
+  SharedWithYouEvent,
   SiftStorage,
   UserProfile,
 } from "@/types/user";
 import { DEFAULT_LISTS, initialStorage } from "@/types/user";
 import { loadStorage, saveStorage } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
 
 interface UserContextValue extends SiftStorage {
   ready: boolean;
@@ -34,6 +36,8 @@ interface UserContextValue extends SiftStorage {
   isGoing: (eventId: string) => boolean;
   addCustomList: (listName: string) => void;
   getAllListNames: () => string[];
+  addSharedWithYou: (eventId: string) => void;
+  signOut: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -42,12 +46,50 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [storage, setStorage] = useState<SiftStorage>(initialStorage);
   const [ready, setReady] = useState(false);
 
-  // Load from AsyncStorage on mount
+  // Load from AsyncStorage on mount + restore Supabase session
   useEffect(() => {
-    loadStorage().then((data) => {
+    loadStorage().then(async (data) => {
+      // Check for existing Supabase session
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user) {
+          const user = sessionData.session.user;
+          data = {
+            ...data,
+            isLoggedIn: true,
+            userEmail: user.email ?? data.userEmail,
+            userDisplayName:
+              (user.user_metadata?.display_name as string) ?? data.userDisplayName,
+          };
+        }
+      } catch {
+        // Supabase unavailable, use local storage as-is
+      }
       setStorage(data);
       setReady(true);
     });
+
+    // Listen for auth state changes (sign in/out from other tabs, token refresh)
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (session?.user) {
+          setStorage((prev) => ({
+            ...prev,
+            isLoggedIn: true,
+            userEmail: session.user.email ?? prev.userEmail,
+          }));
+        } else {
+          setStorage((prev) => ({
+            ...prev,
+            isLoggedIn: false,
+            userEmail: "",
+            userDisplayName: undefined,
+          }));
+        }
+      }
+    );
+
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   const persist = useCallback(
@@ -172,6 +214,31 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return [...DEFAULT_LISTS, ...storage.customLists];
   }, [storage.customLists]);
 
+  const signOut = useCallback(async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Supabase unavailable, just clear local state
+    }
+    persist({
+      ...initialStorage,
+      // Keep profile/preferences but clear auth
+      userProfile: storage.userProfile,
+    });
+  }, [storage, persist]);
+
+  const addSharedWithYou = useCallback(
+    (eventId: string) => {
+      if (storage.sharedWithYou.some((s) => s.eventId === eventId)) return;
+      const sharedWithYou = [
+        ...storage.sharedWithYou,
+        { eventId, sharedAt: new Date().toISOString() },
+      ];
+      persist({ ...storage, sharedWithYou });
+    },
+    [storage, persist]
+  );
+
   const value = useMemo<UserContextValue>(
     () => ({
       ...storage,
@@ -185,6 +252,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isGoing,
       addCustomList,
       getAllListNames,
+      addSharedWithYou,
+      signOut,
     }),
     [
       storage,
@@ -198,6 +267,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isGoing,
       addCustomList,
       getAllListNames,
+      addSharedWithYou,
+      signOut,
     ]
   );
 

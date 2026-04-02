@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Compass, User } from "lucide-react-native";
+import { CalendarCheck, Compass, User } from "lucide-react-native";
 import { colors, typography } from "@/lib/theme";
 import { Platform } from "react-native";
 
@@ -30,6 +30,15 @@ export default function TabLayout() {
           title: "Discover",
           tabBarIcon: ({ color, size }) => (
             <Compass size={size} color={color} strokeWidth={1.5} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="plan"
+        options={{
+          title: "Plan",
+          tabBarIcon: ({ color, size }) => (
+            <CalendarCheck size={size} color={color} strokeWidth={1.5} />
           ),
         }}
       />

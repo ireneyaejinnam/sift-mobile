@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { useUser } from "@/context/UserContext";
+import { fetchEventById } from "@/lib/getEvents";
 import { events } from "@/data/events";
+import type { SiftEvent } from "@/types/event";
 import { colors, radius, typography, spacing } from "@/lib/theme";
 
 export default function SavedListsSection() {
@@ -14,6 +16,20 @@ export default function SavedListsSection() {
   const [expandedList, setExpandedList] = useState<string | null>(null);
   const [newListName, setNewListName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
+  const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
+
+  // Fetch events from Supabase that aren't in hardcoded data
+  useEffect(() => {
+    const missingIds = savedEvents
+      .map((s) => s.eventId)
+      .filter((id) => !events.some((e) => e.id === id));
+    if (missingIds.length === 0) return;
+    Promise.all(missingIds.map((id) => fetchEventById(id))).then((results) => {
+      setDbEvents(results.filter((e): e is SiftEvent => e !== null));
+    });
+  }, [savedEvents]);
+
+  const allEventsPool = [...events, ...dbEvents];
 
   const listNames = getAllListNames();
   const eventsByList = listNames.map((listName) => ({
@@ -53,7 +69,7 @@ export default function SavedListsSection() {
                 ) : (
                   <View style={{ gap: 10 }}>
                     {items.map((s) => {
-                      const ev = events.find((e) => e.id === s.eventId);
+                      const ev = allEventsPool.find((e) => e.id === s.eventId);
                       if (!ev) return null;
                       return (
                         <View key={s.eventId} style={st.eventRow}>

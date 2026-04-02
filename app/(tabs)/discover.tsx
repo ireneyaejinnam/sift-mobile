@@ -1,19 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
   Pressable,
   FlatList,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, CalendarCheck } from "lucide-react-native";
 import ProgressBar from "@/components/layout/ProgressBar";
 import OptionCard from "@/components/quiz/OptionCard";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
+import SkeletonCard from "@/components/ui/SkeletonCard";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
@@ -22,6 +24,10 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
+import { getRecommendations, getRecommendationsFromDB } from "@/lib/recommend";
+import type { ScoredEvent } from "@/lib/recommend";
+import { fetchEvents } from "@/lib/getEvents";
+import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
@@ -53,7 +59,18 @@ interface Slot {
 export default function DiscoverScreen() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { userProfile } = useUser();
+  const { userProfile, userEmail, savedEvents, goingEvents } = useUser();
+  const planCount = new Set([
+    ...savedEvents.map((e) => e.eventId),
+    ...goingEvents.map((e) => e.eventId),
+  ]).size;
+
+  useEffect(() => {
+    if (userEmail) {
+      setTrackingUserId(userEmail);
+    }
+    track("app_open", { has_profile: !!userProfile });
+  }, []);
 
   const [step, setStep] = useState<Step>("welcome");
   const [filters, setFilters] = useState<Filters>({});
@@ -62,6 +79,8 @@ export default function DiscoverScreen() {
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
   const [saveSheetEventId, setSaveSheetEventId] = useState<string | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const reset = useCallback(() => {
     setStep("welcome");
@@ -77,27 +96,73 @@ export default function DiscoverScreen() {
     if (idx > 0) setStep(flow[idx - 1]);
   }, [step]);
 
-  const goToResults = useCallback((f: Filters) => {
-    const candidates = getAllCandidates(f);
-    const initial: Slot[] = candidates.slice(0, 3).map((e) => ({
+  const goToResults = useCallback(async (f: Filters) => {
+    setLoading(true);
+    setStep("results");
+
+    let resultEvents: SiftEvent[];
+
+    try {
+      if (userProfile) {
+        // Async: fetch from Supabase, score against profile
+        const scored = await getRecommendationsFromDB(userProfile, 20);
+        resultEvents = scored
+          .map((s) => ({
+            ...s.event,
+            matchReason: s.matchReasons.length > 0
+              ? s.matchReasons.slice(0, 3).join(" · ")
+              : "Picked for you",
+          }))
+          .filter((e) => {
+            if (f.categories?.length && !f.categories.includes(e.category)) return false;
+            if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+            if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+            return true;
+          });
+      } else {
+        // Guest: try Supabase first, fall back to local
+        const dbEvents = await fetchEvents(f);
+        resultEvents = dbEvents.length > 0 ? dbEvents : getAllCandidates(f);
+      }
+    } catch {
+      // Fallback to local hardcoded data
+      if (userProfile) {
+        const scored = getRecommendations(userProfile, 20);
+        resultEvents = scored.map((s) => ({
+          ...s.event,
+          matchReason: s.matchReasons.length > 0
+            ? s.matchReasons.slice(0, 3).join(" · ")
+            : "Picked for you",
+        }));
+      } else {
+        resultEvents = getAllCandidates(f);
+      }
+    }
+
+    const initial: Slot[] = resultEvents.slice(0, 5).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
     }));
     setSlots(initial);
     setDismissedIds([]);
-    setStep("results");
-  }, []);
+    setLoading(false);
+    track("recommendations_viewed", {
+      count: initial.length,
+      categories: f.categories,
+    });
+  }, [userProfile]);
 
-  const handleFiltersChange = useCallback((newFilters: Filters) => {
+  const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
-    const candidates = getAllCandidates(newFilters);
-    const newSlots: Slot[] = candidates.slice(0, 3).map((e) => ({
-      event: e,
-      key: `${e.id}-${Date.now()}-${Math.random()}`,
-    }));
-    setSlots(newSlots);
-    setDismissedIds([]);
-  }, []);
+    // Re-use goToResults which already handles Supabase + fallback
+    await goToResults(newFilters);
+  }, [goToResults]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    goToResults(filters);
+    setTimeout(() => setRefreshing(false), 600);
+  }, [filters, goToResults]);
 
   const handleDismissEvent = useCallback(
     (eventId: string) => {
@@ -293,6 +358,13 @@ export default function DiscoverScreen() {
         keyExtractor={(item) => item.key}
         contentContainerStyle={s.resultsScroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+          />
+        }
         ListHeaderComponent={
           <View style={{ marginBottom: 20 }}>
             {userProfile ? (
@@ -311,16 +383,60 @@ export default function DiscoverScreen() {
               </Pressable>
             )}
             <Text style={s.heading}>
-              {slots.length > 0 ? "Here's what we found" : "Hmm, nothing matched"}
+              {slots.length > 0
+                ? userProfile
+                  ? `Your top ${slots.length} picks`
+                  : "Here's what we found"
+                : "Hmm, nothing matched"}
             </Text>
             <Text style={s.sub}>
               {slots.length > 0
-                ? "Swipe left to skip, or tap a card to learn more."
+                ? userProfile
+                  ? "Ranked by your interests, location, and schedule."
+                  : "Swipe left to skip, or tap a card to learn more."
                 : "Try broadening your filters — or just explore everything."}
             </Text>
             <View style={{ marginTop: 12 }}>
               <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
             </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginTop: 10 }}
+              contentContainerStyle={{ gap: 8 }}
+            >
+              {categories.map((c) => {
+                const isActive = filters.categories?.includes(c.value);
+                return (
+                  <Pressable
+                    key={c.value}
+                    onPress={() => {
+                      const current = filters.categories ?? [];
+                      const next = isActive
+                        ? current.filter((x) => x !== c.value)
+                        : [...current, c.value];
+                      handleFiltersChange({
+                        ...filters,
+                        categories: next.length > 0 ? next : undefined,
+                      });
+                    }}
+                    style={[
+                      s.categoryPill,
+                      isActive && s.categoryPillActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        s.categoryPillText,
+                        isActive && s.categoryPillTextActive,
+                      ]}
+                    >
+                      {c.emoji} {c.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
             <Pressable onPress={reset} style={{ marginTop: 12 }}>
               <Text style={{ ...typography.sm, color: colors.primary, fontWeight: "500" }}>
                 Start over
@@ -331,17 +447,57 @@ export default function DiscoverScreen() {
         renderItem={({ item }) => (
           <EventCard
             event={item.event}
-            onPress={() => setSelectedEvent(item.event)}
+            onPress={() => {
+              track("card_tap", { event_id: item.event.id, category: item.event.category });
+              setSelectedEvent(item.event);
+            }}
             onDismiss={() => handleDismissEvent(item.event.id)}
             onRequestSignIn={() => router.push("/(auth)/signin")}
-            onBookmarkPress={() => setSaveSheetEventId(item.event.id)}
-            onSharePress={() => setShareSheetEvent(item.event)}
+            onBookmarkPress={() => {
+              track("event_saved", { event_id: item.event.id });
+              setSaveSheetEventId(item.event.id);
+            }}
+            onSharePress={() => {
+              track("share_tap", { event_id: item.event.id });
+              setShareSheetEvent(item.event);
+            }}
           />
         )}
         ListEmptyComponent={
-          <View style={{ paddingVertical: 48, alignItems: "center" }}>
-            <Text style={s.sub}>No events matched all your filters.</Text>
-          </View>
+          loading ? (
+            <View>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </View>
+          ) : (
+            <View style={{ paddingVertical: 48, alignItems: "center" }}>
+              <Text style={s.heading}>No events matched</Text>
+              <Text style={[s.sub, { textAlign: "center", maxWidth: 260 }]}>
+                Try broadening your filters or explore a different category.
+              </Text>
+              <Pressable onPress={reset} style={s.primaryButton}>
+                <Text style={s.primaryButtonText}>Start over</Text>
+              </Pressable>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          planCount > 0 && slots.length > 0 ? (
+            <Pressable
+              onPress={() => router.push("/(tabs)/plan")}
+              style={s.planCta}
+            >
+              <CalendarCheck size={18} strokeWidth={1.5} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.planCtaTitle}>Plan your weekend</Text>
+                <Text style={s.planCtaSub}>
+                  {planCount} event{planCount !== 1 ? "s" : ""} saved
+                </Text>
+              </View>
+              <Text style={s.planCtaArrow}>→</Text>
+            </Pressable>
+          ) : null
         }
       />
 
@@ -434,5 +590,52 @@ const s = StyleSheet.create({
     color: colors.primary,
     textDecorationLine: "underline",
     marginBottom: 12,
+  },
+  categoryPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  categoryPillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  categoryPillText: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    fontWeight: "500",
+  },
+  categoryPillTextActive: {
+    color: colors.white,
+  },
+  planCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.primaryLight,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: 14,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  planCtaTitle: {
+    ...typography.sm,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  planCtaSub: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  planCtaArrow: {
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: "600",
   },
 });

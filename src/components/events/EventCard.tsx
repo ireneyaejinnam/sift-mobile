@@ -4,6 +4,7 @@ import {
   Text,
   Image,
   Pressable,
+  Linking,
   StyleSheet,
   Dimensions,
 } from "react-native";
@@ -21,14 +22,17 @@ import {
   CalendarDays,
   Check,
   DollarSign,
+  ExternalLink,
   ImageIcon,
   MapPin,
   Share2,
   Sparkles,
+  Ticket,
   X,
 } from "lucide-react-native";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
+import { track } from "@/lib/track";
 import type { EventCategory, SiftEvent } from "@/types/event";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
@@ -157,6 +161,7 @@ export default function EventCard({
       eventTitle: event.title,
       eventDate: event.startDate,
     });
+    track("event_going", { event_id: event.id });
     showToast("Marked as going");
   };
 
@@ -180,7 +185,7 @@ export default function EventCard({
       </View>
 
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.card, animatedCardStyle]}>
+        <Animated.View style={[styles.card, animatedCardStyle, event.endingSoon && styles.cardEndingSoon]}>
           <Pressable onPress={onPress} style={styles.cardInner}>
             {/* Image */}
             {event.imageUrl ? (
@@ -310,8 +315,34 @@ export default function EventCard({
               )}
             </View>
 
-            {/* Going button */}
+            {/* Action buttons */}
             <View style={styles.footer}>
+              {event.ticketUrl ? (
+                <Pressable
+                  onPress={() => {
+                    track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
+                    Linking.openURL(event.ticketUrl!);
+                  }}
+                  style={styles.ticketButton}
+                >
+                  <Ticket size={14} strokeWidth={1.5} color={colors.white} />
+                  <Text style={styles.ticketButtonText}>Get tickets</Text>
+                </Pressable>
+              ) : event.onSaleDate && new Date(event.onSaleDate) > new Date() ? (
+                <View style={styles.onSaleBadge}>
+                  <Text style={styles.onSaleText}>
+                    Tickets drop {new Date(event.onSaleDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </Text>
+                </View>
+              ) : event.eventUrl ? (
+                <Pressable
+                  onPress={() => Linking.openURL(event.eventUrl!)}
+                  style={styles.viewEventButton}
+                >
+                  <ExternalLink size={14} strokeWidth={1.5} color={colors.primary} />
+                  <Text style={styles.viewEventText}>View event</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={handleGoingPress}
                 style={[
@@ -364,6 +395,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     overflow: "hidden",
     ...shadows.card,
+  },
+  cardEndingSoon: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
   },
   cardInner: {
     overflow: "hidden",
@@ -483,7 +518,53 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
+  ticketButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  ticketButtonText: {
+    ...typography.sm,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  onSaleBadge: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(232, 170, 106, 0.15)",
+  },
+  onSaleText: {
+    ...typography.xs,
+    fontWeight: "500",
+    color: colors.accent,
+  },
+  viewEventButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+  },
+  viewEventText: {
+    ...typography.sm,
+    fontWeight: "500",
+    color: colors.primary,
+  },
   goingButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
