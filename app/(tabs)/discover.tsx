@@ -75,6 +75,7 @@ export default function DiscoverScreen() {
   const [step, setStep] = useState<Step>("welcome");
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [resultPool, setResultPool] = useState<SiftEvent[]>([]);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
   const [saveSheetEventId, setSaveSheetEventId] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export default function DiscoverScreen() {
     setStep("welcome");
     setFilters({});
     setSlots([]);
+    setResultPool([]);
     setDismissedIds([]);
     setSelectedEvent(null);
   }, []);
@@ -106,19 +108,28 @@ export default function DiscoverScreen() {
       if (userProfile) {
         // Async: fetch from Supabase, score against profile
         const scored = await getRecommendationsFromDB(userProfile, 20);
-        resultEvents = scored
-          .map((s) => ({
-            ...s.event,
-            matchReason: s.matchReasons.length > 0
-              ? s.matchReasons.slice(0, 3).join(" · ")
-              : "Picked for you",
-          }))
-          .filter((e) => {
-            if (f.categories?.length && !f.categories.includes(e.category)) return false;
-            if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-            if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-            return true;
-          });
+        const allScored = scored.map((s) => ({
+          ...s.event,
+          matchReason: s.matchReasons.length > 0
+            ? s.matchReasons.slice(0, 3).join(" · ")
+            : "Picked for you",
+        }));
+
+        // Apply distance filter to all results
+        const distanceFiltered = allScored.filter((e) => {
+          if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+          if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+          return true;
+        });
+
+        // Priority: quiz category matches first, then everything else
+        const quizMatches = distanceFiltered.filter(
+          (e) => !f.categories?.length || f.categories.includes(e.category)
+        );
+        const rest = distanceFiltered.filter(
+          (e) => f.categories?.length && !f.categories.includes(e.category)
+        );
+        resultEvents = [...quizMatches, ...rest];
       } else {
         // Guest: try Supabase first, fall back to local
         const dbEvents = await fetchEvents(f);
@@ -128,17 +139,25 @@ export default function DiscoverScreen() {
       // Fallback to local hardcoded data
       if (userProfile) {
         const scored = getRecommendations(userProfile, 20);
-        resultEvents = scored.map((s) => ({
+        const allFallback = scored.map((s) => ({
           ...s.event,
           matchReason: s.matchReasons.length > 0
             ? s.matchReasons.slice(0, 3).join(" · ")
             : "Picked for you",
         }));
+        const fbQuiz = allFallback.filter(
+          (e) => !f.categories?.length || f.categories.includes(e.category)
+        );
+        const fbRest = allFallback.filter(
+          (e) => f.categories?.length && !f.categories.includes(e.category)
+        );
+        resultEvents = [...fbQuiz, ...fbRest];
       } else {
         resultEvents = getAllCandidates(f, [], userProfile);
       }
     }
 
+    setResultPool(resultEvents);
     const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
@@ -171,9 +190,13 @@ export default function DiscoverScreen() {
       setSlots((prev) => {
         const idx = prev.findIndex((s) => s.event.id === eventId);
         if (idx === -1) return prev;
-        const shownIds = prev.map((s) => s.event.id).filter((id) => id !== eventId);
-        const excluded = [...nextDismissed, ...shownIds];
-        const next = getNextCandidate(excluded, filters, userProfile);
+        const shownIds = new Set(prev.map((s) => s.event.id));
+        const excludedIds = new Set([...nextDismissed, ...shownIds]);
+
+        // Draw next from the pre-ranked result pool (preserves priority order)
+        const next = resultPool.find((e) => !excludedIds.has(e.id))
+          ?? getNextCandidate([...excludedIds], filters, userProfile);
+
         if (!next) return prev.filter((_, i) => i !== idx);
         const updated = [...prev];
         updated[idx] = {
@@ -183,7 +206,7 @@ export default function DiscoverScreen() {
         return updated;
       });
     },
-    [dismissedIds, filters, userProfile]
+    [dismissedIds, filters, userProfile, resultPool]
   );
 
   // ── Event detail view ──────────────────────────────────
