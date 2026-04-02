@@ -51,16 +51,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     loadStorage().then(async (data) => {
       // Check for existing Supabase session
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData.session?.user) {
-          const user = sessionData.session.user;
-          data = {
-            ...data,
-            isLoggedIn: true,
-            userEmail: user.email ?? data.userEmail,
-            userDisplayName:
-              (user.user_metadata?.display_name as string) ?? data.userDisplayName,
-          };
+        if (supabase) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData.session?.user) {
+            const user = sessionData.session.user;
+            data = {
+              ...data,
+              isLoggedIn: true,
+              userEmail: user.email ?? data.userEmail,
+              userDisplayName:
+                (user.user_metadata?.display_name as string) ?? data.userDisplayName,
+            };
+          }
         }
       } catch {
         // Supabase unavailable, use local storage as-is
@@ -70,6 +72,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Listen for auth state changes (sign in/out from other tabs, token refresh)
+    if (!supabase) return;
+
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (session?.user) {
@@ -216,7 +220,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
+      if (supabase) await supabase.auth.signOut();
     } catch {
       // Supabase unavailable, just clear local state
     }

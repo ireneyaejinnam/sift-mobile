@@ -116,6 +116,8 @@ export async function fetchEvents(
   const dateFrom = filters.dateFrom ?? now;
   const dateTo = filters.dateTo ? filters.dateTo + "T23:59:59Z" : null;
 
+  if (!supabase) return [];
+
   let query = supabase
     .from("events")
     .select("*")
@@ -156,6 +158,8 @@ export async function fetchEvents(
 export async function fetchEventById(
   id: string
 ): Promise<SiftEvent | null> {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from("events")
     .select("*")
@@ -174,6 +178,8 @@ export async function fetchEventById(
  * Fetch all upcoming events (for recommendation engine).
  */
 export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
+  if (!supabase) return [];
+
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("events")
