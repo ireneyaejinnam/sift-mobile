@@ -2,6 +2,7 @@
   "crons": [
     { "path": "/api/cron/ingest-sources-1", "schedule": "0 7 * * *" },
     { "path": "/api/cron/ingest-sources-2", "schedule": "5 7 * * *" },
-    { "path": "/api/cron/ingest-postprocess", "schedule": "10 7 * * *" }
+    { "path": "/api/cron/ingest-sources-3", "schedule": "10 7 * * *" },
+    { "path": "/api/cron/ingest-postprocess", "schedule": "15 7 * * *" }
   ]
 }

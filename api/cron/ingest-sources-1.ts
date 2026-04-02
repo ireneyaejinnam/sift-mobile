@@ -1,5 +1,4 @@
 import { ingestTicketmaster } from '../../lib/ingest/ticketmaster';
-import { ingestEventbrite } from '../../lib/ingest/eventbrite';
 
 async function run(name: string, fn: () => Promise<void>) {
   try { await fn(); }
@@ -13,10 +12,9 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const start = Date.now();
-  console.log('[Cron] Ingest sources batch 1 (Ticketmaster + Eventbrite)...');
+  console.log('[Cron] Ingest batch 1 (Ticketmaster)...');
 
   await run('Ticketmaster', ingestTicketmaster);
-  await run('Eventbrite',   ingestEventbrite);
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[Cron] Batch 1 done in ${elapsed}s`);
