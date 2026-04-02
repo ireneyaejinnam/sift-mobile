@@ -1,11 +1,9 @@
 {
-  "buildCommand": "npx expo export --platform web",
-  "outputDirectory": "dist",
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
-  ],
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "@vercel/node@3"
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/ingest",
