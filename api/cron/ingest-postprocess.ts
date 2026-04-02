@@ -8,10 +8,10 @@ async function run(name: string, fn: () => Promise<void>) {
   catch (e) { console.error(`[Cron] ${name} failed:`, e); }
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  const authHeader = req.headers.get('authorization');
+export default async function handler(req: any, res: any) {
+  const authHeader = req.headers['authorization'] as string | undefined;
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response('Unauthorized', { status: 401 });
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const start = Date.now();
@@ -25,7 +25,5 @@ export default async function handler(req: Request): Promise<Response> {
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`[Cron] Post-processing done in ${elapsed}s`);
 
-  return new Response(JSON.stringify({ ok: true, stage: 'postprocess', elapsed }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return res.status(200).json({ ok: true, stage: 'postprocess', elapsed });
 }
