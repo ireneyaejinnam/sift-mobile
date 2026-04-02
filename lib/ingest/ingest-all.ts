@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { ingestTicketmaster } from './ticketmaster';
 import { ingestEventbrite } from './eventbrite';
 import { ingestNYCParks } from './nyc-parks';

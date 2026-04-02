@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { EVENTBRITE_SEED_ORGS, EVENTBRITE_CATEGORY_MAP } from './config';
 import { normalizeEvent } from './normalize';
 import { upsertEvents } from './upsert';

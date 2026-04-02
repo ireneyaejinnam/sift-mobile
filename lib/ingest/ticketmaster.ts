@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { TICKETMASTER_CATEGORY_MAP } from './config';
 import { normalizeEvent } from './normalize';
 import { upsertEvents } from './upsert';

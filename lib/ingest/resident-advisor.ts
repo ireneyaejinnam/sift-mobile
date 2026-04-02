@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { normalizeEvent } from './normalize';
 import { upsertEvents } from './upsert';
 import { SiftEvent } from './schema';

@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { MUSEUM_CONFIG } from './config';
 import { normalizeEvent } from './normalize';
 import { upsertEvents } from './upsert';
