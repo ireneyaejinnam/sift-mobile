@@ -5,7 +5,9 @@ A curated event discovery app for NYC. Instead of overwhelming users with search
 ## Features
 
 - **Discovery quiz** — pick categories, date range, and travel distance to get personalized event picks
-- **Curated NYC events** — arts, music, comedy, food, outdoors, nightlife, fitness, theater, workshops, pop-ups
+- **Smart recommendations** — scoring engine weighs category, location, budget, schedule, recency, and more
+- **Event detail** — full event info with tickets, calendar export, and sharing
+- **Plan your weekend** — shortlist saved events, confirm a plan, and export to Google Calendar or Apple Calendar
 - **Save & organize** — save events to custom lists ("Date ideas", "Free stuff", "With friends", etc.)
 - **Calendar view** — track events you're going to
 - **Guest mode** — browse without signing in; sign in to persist saves across sessions
@@ -18,26 +20,42 @@ A curated event discovery app for NYC. Instead of overwhelming users with search
 | Framework | React Native (Expo ~52) |
 | Navigation | Expo Router (file-based) |
 | State | React Context API |
-| Persistence | AsyncStorage + Expo Secure Store |
+| Auth & Database | Supabase (Auth + PostgreSQL) |
+| Local Persistence | AsyncStorage + Expo Secure Store |
 | Animations | React Native Reanimated |
 | Icons | lucide-react-native |
+| API / Cron | Vercel Serverless Functions |
 
 ## Project Structure
 
 ```
 sift-mobile/
-├── app/                    # Expo Router pages
-│   ├── index.tsx           # Root / auth gate
-│   ├── (auth)/             # Sign-in screens
-│   ├── (onboarding)/       # Preference setup wizard
-│   └── (tabs)/             # Main tab screens (Discover, Profile)
-└── src/
-    ├── components/         # Reusable UI components
-    ├── context/            # UserContext (auth, saved events, preferences)
-    ├── data/               # Hardcoded NYC event data
-    ├── lib/                # Recommendation engine, storage, theme
-    └── types/              # TypeScript interfaces
+├── api/                        # Vercel serverless functions
+│   └── cron/ingest.ts          # Daily event ingestion cron job
+├── app/                        # Expo Router pages
+│   ├── index.tsx               # Root / auth gate
+│   ├── (auth)/                 # Sign-in screens
+│   ├── (onboarding)/           # 4-step preference wizard
+│   ├── (tabs)/                 # Main tabs (Discover, Plan, Profile)
+│   └── event/[id].tsx          # Event detail screen
+├── lib/
+│   └── ingest/                 # Event ingestion pipeline (14 sources)
+├── src/
+│   ├── components/             # Reusable UI components
+│   ├── context/                # UserContext (auth, saved events, preferences)
+│   ├── data/                   # Fallback event data
+│   ├── lib/                    # Recommendation engine, Supabase client, calendar, analytics
+│   └── types/                  # TypeScript interfaces
+└── vercel.json                 # Cron schedule config
 ```
+
+## Event Ingestion Pipeline
+
+A Vercel cron job runs daily at 7 AM UTC, pulling events from 14 sources:
+
+**Ticketmaster** · **Eventbrite** · **NYC Parks** · **Museums** (MoMA, Whitney, New Museum, Brooklyn Museum) · **Pop-ups** · **NYCForFree** · **CozyCreatives** · **NYC Tourism** · **Meetup** · **Yelp** · **Dice.fm** · **Resident Advisor** · **NYC.gov** · **The Skint**
+
+After fetching, events go through: normalize → geocode → reclassify → deduplicate → cleanup → upsert to Supabase.
 
 ## Quick Setup
 
@@ -45,10 +63,31 @@ sift-mobile/
 
 - Node.js 18+
 - [Expo CLI](https://docs.expo.dev/get-started/installation/) — `npm install -g expo-cli`
+- A [Supabase](https://supabase.com) project
+- A [Vercel](https://vercel.com) account (for the cron job)
 - For iOS: Xcode + iOS Simulator
 - For Android: Android Studio + emulator, or a physical device with Expo Go
 
-### Install
+### Environment Variables
+
+Copy `.env.example` and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+Required variables:
+
+| Variable | Description |
+|---|---|
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `SUPABASE_URL` | Supabase project URL (server-side) |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key (server-side) |
+| `TICKETMASTER_API_KEY` | Ticketmaster API key |
+| `EVENTBRITE_OAUTH_TOKEN` | Eventbrite OAuth token |
+
+### Install & Run
 
 ```bash
 git clone <repo-url>
@@ -56,23 +95,22 @@ cd sift-mobile
 npm install
 ```
 
-### Run
-
 ```bash
-# Start Expo dev server (opens QR code + browser DevTools)
+# Start Expo dev server
 npm start
 
-# Run directly on iOS Simulator
+# Run on iOS Simulator
 npm run ios
 
 # Run on Android emulator / device
 npm run android
-
-# Run in browser (limited native feature support)
-npm run web
 ```
 
-Once the dev server is running, scan the QR code with **Expo Go** (iOS/Android) to run on a physical device.
+Scan the QR code with **Expo Go** (iOS/Android) to run on a physical device.
+
+### Deploy API (Vercel)
+
+The Vercel project only hosts the `/api` serverless functions (no web build). Push to `main` and Vercel will auto-deploy the cron job.
 
 ## Path Aliases
 
@@ -85,6 +123,6 @@ import { theme } from '@/lib/theme';
 
 ## Notes
 
-- Event data is hardcoded in `src/data/events.ts` (NYC events, March 2026 demo dataset)
-- Auth is local-only (no backend) — credentials are stored via Expo Secure Store
-- The app works fully in guest mode; sign-in enables cross-session persistence of saved events
+- If Supabase is unreachable, the app falls back to hardcoded event data in `src/data/events.ts`
+- Auth is handled by Supabase; guest mode works fully without sign-in
+- Analytics events are tracked locally via AsyncStorage (fire-and-forget)
