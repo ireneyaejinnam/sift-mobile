@@ -21,7 +21,8 @@ import {
   Ticket,
 } from "lucide-react-native";
 import BottomSheet from "@/components/ui/BottomSheet";
-import SaveToListSheet from "@/components/events/SaveToListSheet";
+import SaveEventSheet from "@/components/events/SaveEventSheet";
+import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
@@ -55,6 +56,7 @@ export default function EventDetail({
     isGoing,
   } = useUser();
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
+  const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
 
   const savedList = getSavedListForEvent(event.id);
@@ -69,17 +71,25 @@ export default function EventDetail({
     }
   };
 
+  const isMultiDate = (event.dates && event.dates.length > 1) ||
+    (!!event.endDate && event.endDate !== event.startDate);
+
   const handleGoingPress = () => {
     if (going) {
       toggleGoing({
         eventId: event.id,
         eventTitle: event.title,
         eventDate: event.startDate,
+        eventEndDate: event.endDate,
       });
       return;
     }
     if (!isLoggedIn && onRequestSignIn) {
       onRequestSignIn();
+      return;
+    }
+    if (isMultiDate) {
+      setGoingSheetOpen(true);
       return;
     }
     toggleGoing({
@@ -271,8 +281,8 @@ export default function EventDetail({
         onClose={() => setSaveSheetOpen(false)}
         title="Save to list"
       >
-        <SaveToListSheet
-          eventId={event.id}
+        <SaveEventSheet
+          event={event}
           currentListName={savedList}
           onClose={() => setSaveSheetOpen(false)}
           onSaved={(name) => showToast(`Saved to ${name}`)}
@@ -287,6 +297,26 @@ export default function EventDetail({
           eventId={event.id}
           eventTitle={event.title}
           onClose={() => setShareSheetOpen(false)}
+        />
+      </BottomSheet>
+      <BottomSheet
+        open={goingSheetOpen}
+        onClose={() => setGoingSheetOpen(false)}
+        title="Pick a date"
+      >
+        <GoingDateSheet
+          event={event}
+          onConfirm={(date) => {
+            toggleGoing({
+              eventId: event.id,
+              eventTitle: event.title,
+              eventDate: date,
+              eventEndDate: event.endDate,
+            });
+            setGoingSheetOpen(false);
+            showToast("Marked as going");
+          }}
+          onCancel={() => setGoingSheetOpen(false)}
         />
       </BottomSheet>
     </View>

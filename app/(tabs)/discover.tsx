@@ -19,7 +19,7 @@ import SkeletonCard from "@/components/ui/SkeletonCard";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
-import SaveToListSheet from "@/components/events/SaveToListSheet";
+import SaveEventSheet from "@/components/events/SaveEventSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
@@ -78,7 +78,7 @@ export default function DiscoverScreen() {
   const [resultPool, setResultPool] = useState<SiftEvent[]>([]);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
-  const [saveSheetEventId, setSaveSheetEventId] = useState<string | null>(null);
+  const [saveSheetEvent, setSaveSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -390,6 +390,13 @@ export default function DiscoverScreen() {
         }
         ListHeaderComponent={
           <View style={{ marginBottom: 20 }}>
+            <Text style={s.heading}>
+              {slots.length > 0
+                ? userProfile
+                  ? `Your top ${slots.length} picks`
+                  : "Here's what we found"
+                : "Hmm, nothing matched"}
+            </Text>
             {userProfile ? (
               <Text style={s.personalizeHint}>
                 Recommendations for you · {userProfile.neighborhood || "NYC"} ·{" "}
@@ -401,24 +408,17 @@ export default function DiscoverScreen() {
                   .join(", ")}
               </Text>
             ) : (
+              <Text style={s.sub}>
+                {slots.length > 0
+                  ? "Swipe left to skip, or tap a card to learn more."
+                  : "Try broadening your filters — or just explore everything."}
+              </Text>
+            )}
+            {!userProfile && (
               <Pressable onPress={() => router.push("/(auth)/signin")}>
                 <Text style={s.personalizeLink}>Personalize your results →</Text>
               </Pressable>
             )}
-            <Text style={s.heading}>
-              {slots.length > 0
-                ? userProfile
-                  ? `Your top ${slots.length} picks`
-                  : "Here's what we found"
-                : "Hmm, nothing matched"}
-            </Text>
-            <Text style={s.sub}>
-              {slots.length > 0
-                ? userProfile
-                  ? "Ranked by your interests, location, and schedule."
-                  : "Swipe left to skip, or tap a card to learn more."
-                : "Try broadening your filters — or just explore everything."}
-            </Text>
             <View style={{ marginTop: 12 }}>
               <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
             </View>
@@ -478,7 +478,7 @@ export default function DiscoverScreen() {
             onRequestSignIn={() => router.push("/(auth)/signin")}
             onBookmarkPress={() => {
               track("event_saved", { event_id: item.event.id });
-              setSaveSheetEventId(item.event.id);
+              setSaveSheetEvent(item.event);
             }}
             onSharePress={() => {
               track("share_tap", { event_id: item.event.id });
@@ -525,15 +525,15 @@ export default function DiscoverScreen() {
       />
 
       <BottomSheet
-        open={!!saveSheetEventId}
-        onClose={() => setSaveSheetEventId(null)}
+        open={!!saveSheetEvent}
+        onClose={() => setSaveSheetEvent(null)}
         title="Save to list"
       >
-        {saveSheetEventId && (
-          <SaveToListSheet
-            eventId={saveSheetEventId}
+        {saveSheetEvent && (
+          <SaveEventSheet
+            event={saveSheetEvent}
             currentListName={null}
-            onClose={() => setSaveSheetEventId(null)}
+            onClose={() => setSaveSheetEvent(null)}
             onSaved={(name) => showToast(`Saved to ${name}`)}
           />
         )}

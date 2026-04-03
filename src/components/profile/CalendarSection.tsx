@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
+import { useRouter } from "expo-router";
 import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
 import type { GoingEvent, SavedEvent } from "@/types/user";
 import { useUser } from "@/context/UserContext";
@@ -25,6 +26,7 @@ export default function CalendarSection({
   goingEvents,
   savedEvents,
 }: CalendarSectionProps) {
+  const router = useRouter();
   const { removeSavedEvent, toggleGoing } = useUser();
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -36,6 +38,7 @@ export default function CalendarSection({
     year: "numeric",
   });
   const days = useMemo(() => getDaysInMonth(viewYear, viewMonth), [viewYear, viewMonth]);
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   const { dateToGoing, dateToSaved } = useMemo(() => {
     const dg = new Map<string, GoingEvent[]>();
@@ -110,13 +113,21 @@ export default function CalendarSection({
           const hasGoing = (dateToGoing.get(key) ?? []).length > 0;
           const hasSaved = (dateToSaved.get(key) ?? []).length > 0;
           const isSelected = selectedDate === key;
+          const isToday = key === todayKey;
           return (
             <Pressable
               key={key}
               onPress={() => setSelectedDate(isSelected ? null : key)}
-              style={[st.dayCell, st.dayButton, isSelected && st.daySelected]}
+              style={[
+                st.dayCell,
+                st.dayButton,
+                hasGoing && st.dayGoing,
+                hasSaved && !hasGoing && st.daySaved,
+                isToday && st.dayToday,
+                isSelected && st.daySelected,
+              ]}
             >
-              <Text style={st.dayText}>{day}</Text>
+              <Text style={[st.dayText, isToday && st.dayTextToday]}>{day}</Text>
               <View style={st.dots}>
                 {hasGoing && <View style={st.dotGoing} />}
                 {hasSaved && <View style={st.dotSaved} />}
@@ -139,7 +150,7 @@ export default function CalendarSection({
             <View style={{ marginBottom: 8 }}>
               <Text style={st.detailLabel}>Going:</Text>
               {selGoing.map((e) => (
-                <View key={e.eventId} style={st.eventRow}>
+                <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
                   <View style={{ flex: 1 }}>
                     <Text style={st.detailItem}>{e.eventTitle}</Text>
                     {e.eventEndDate && e.eventEndDate !== e.eventDate && (
@@ -153,7 +164,7 @@ export default function CalendarSection({
                   >
                     <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
                   </Pressable>
-                </View>
+                </Pressable>
               ))}
             </View>
           )}
@@ -161,7 +172,7 @@ export default function CalendarSection({
             <View>
               <Text style={st.detailLabel}>Saved:</Text>
               {selSaved.map((s) => (
-                <View key={s.eventId} style={st.eventRow}>
+                <Pressable key={s.eventId} style={st.eventRow} onPress={() => router.push(`/event/${s.eventId}`)}>
                   <View style={{ flex: 1 }}>
                     <Text style={st.detailItem}>{s.eventTitle}</Text>
                     {s.eventEndDate && s.eventEndDate !== s.eventStartDate && (
@@ -175,7 +186,7 @@ export default function CalendarSection({
                   >
                     <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
                   </Pressable>
-                </View>
+                </Pressable>
               ))}
             </View>
           )}
@@ -210,9 +221,24 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  daySelected: {
-    borderColor: colors.primary,
+  dayGoing: {
     backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  daySaved: {
+    backgroundColor: "rgba(232, 170, 106, 0.1)",
+    borderColor: colors.accent,
+  },
+  dayToday: {
+    borderColor: colors.foreground,
+    borderWidth: 1.5,
+  },
+  dayTextToday: {
+    fontWeight: "700" as const,
+  },
+  daySelected: {
+    borderColor: colors.foreground,
+    backgroundColor: colors.muted,
   },
   dayText: { ...typography.sm, color: colors.foreground },
   dots: { flexDirection: "row", gap: 2, marginTop: 2, height: 6 },

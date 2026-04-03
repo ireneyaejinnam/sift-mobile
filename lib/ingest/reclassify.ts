@@ -174,7 +174,7 @@ const RULES: Rule[] = [
       'sculpture center', 'swiss institute', 'drawing center',
       'new york historical', 'cooper hewitt',
       'moma ps1', 'ps1', 'bric', 'smack mellon',
-      'invisible dog', 'brooklyn art haus',
+      'invisible dog',
     ],
   },
   // ── Outdoors ──

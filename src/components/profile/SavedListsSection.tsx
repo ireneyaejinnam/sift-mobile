@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
+import { useRouter } from "expo-router";
 import { useUser } from "@/context/UserContext";
 import { fetchEventById } from "@/lib/getEvents";
 import { events } from "@/data/events";
@@ -7,6 +8,7 @@ import type { SiftEvent } from "@/types/event";
 import { colors, radius, typography, spacing } from "@/lib/theme";
 
 export default function SavedListsSection() {
+  const router = useRouter();
   const {
     savedEvents,
     removeSavedEvent,
@@ -72,7 +74,7 @@ export default function SavedListsSection() {
                       const ev = allEventsPool.find((e) => e.id === s.eventId);
                       if (!ev) return null;
                       return (
-                        <View key={s.eventId} style={st.eventRow}>
+                        <Pressable key={s.eventId} style={st.eventRow} onPress={() => router.push(`/event/${s.eventId}`)}>
                           <View style={{ flex: 1 }}>
                             <Text style={st.eventTitle}>{ev.title}</Text>
                             <Text style={st.eventMeta}>
@@ -82,7 +84,7 @@ export default function SavedListsSection() {
                           <Pressable onPress={() => removeSavedEvent(s.eventId)}>
                             <Text style={st.unsave}>Unsave</Text>
                           </Pressable>
-                        </View>
+                        </Pressable>
                       );
                     })}
                   </View>

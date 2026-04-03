@@ -13,12 +13,16 @@ export interface SavedEvent {
   eventId: string;
   listName: string;
   savedAt: string;
+  eventTitle?: string;
+  eventStartDate?: string;
+  eventEndDate?: string;
 }
 
 export interface GoingEvent {
   eventId: string;
   eventTitle: string;
   eventDate: string;
+  eventEndDate?: string;
   markedAt: string;
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   View,
   Text,
   Pressable,
@@ -71,7 +72,7 @@ function formatTimeShort(time: string): string {
 export default function PlanScreen() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { goingEvents, savedEvents, toggleGoing } = useUser();
+  const { goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
   const [removedIds, setRemovedIds] = useState<string[]>([]);
 
@@ -97,8 +98,9 @@ export default function PlanScreen() {
 
   const shortlistEvents = useMemo(() => {
     const combined = [...allEvents, ...dbEvents];
+    const activeIds = allIds.filter((id) => !removedIds.includes(id));
     return combined
-      .filter((e) => allIds.includes(e.id) && !removedIds.includes(e.id))
+      .filter((e) => activeIds.includes(e.id))
       .sort(
         (a, b) =>
           new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
@@ -110,8 +112,18 @@ export default function PlanScreen() {
   const handleRemove = useCallback(
     (eventId: string) => {
       setRemovedIds((prev) => [...prev, eventId]);
+      // Also remove from saved and going in context
+      removeSavedEvent(eventId);
+      const goingEntry = goingEvents.find((g) => g.eventId === eventId);
+      if (goingEntry) {
+        toggleGoing({
+          eventId: goingEntry.eventId,
+          eventTitle: goingEntry.eventTitle,
+          eventDate: goingEntry.eventDate,
+        });
+      }
     },
-    []
+    [goingEvents, toggleGoing, removeSavedEvent]
   );
 
   const handleConfirm = useCallback(() => {
@@ -125,6 +137,7 @@ export default function PlanScreen() {
           eventId: event.id,
           eventTitle: event.title,
           eventDate: event.startDate,
+          eventEndDate: event.endDate,
         });
       }
     }
@@ -207,7 +220,9 @@ export default function PlanScreen() {
                     {formatTimeShort(event.time)}
                   </Text>
                 </View>
-                <Text style={s.timelineTitle}>{event.title}</Text>
+                <Pressable onPress={() => router.push(`/event/${event.id}`)}>
+                  <Text style={s.timelineTitleLink}>{event.title}</Text>
+                </Pressable>
                 <View style={s.timelineRow}>
                   <MapPin
                     size={13}
@@ -229,8 +244,24 @@ export default function PlanScreen() {
                 <View style={s.timelineActions}>
                   <Pressable
                     onPress={() => {
-                      track("calendar_export", { event_id: event.id });
-                      Linking.openURL(generateGoogleCalendarUrl(event));
+                      Alert.alert("Add to calendar", "Choose your calendar", [
+                        {
+                          text: "Google Calendar",
+                          onPress: () => {
+                            track("calendar_export", { event_id: event.id, method: "google" });
+                            Linking.openURL(generateGoogleCalendarUrl(event));
+                          },
+                        },
+                        {
+                          text: "Apple Calendar",
+                          onPress: async () => {
+                            track("calendar_export", { event_id: event.id, method: "ics" });
+                            const ok = await shareICSFile([event]);
+                            if (!ok) showToast("Couldn't open calendar");
+                          },
+                        },
+                        { text: "Cancel", style: "cancel" },
+                      ]);
                     }}
                     style={s.calendarLink}
                   >
@@ -239,22 +270,7 @@ export default function PlanScreen() {
                       strokeWidth={1.5}
                       color={colors.primary}
                     />
-                    <Text style={s.calendarLinkText}>Google Cal</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={async () => {
-                      track("calendar_export", { event_id: event.id, method: "ics" });
-                      const ok = await shareICSFile([event]);
-                      if (!ok) showToast("Couldn't open calendar");
-                    }}
-                    style={s.calendarLink}
-                  >
-                    <CalendarPlus
-                      size={14}
-                      strokeWidth={1.5}
-                      color={colors.primary}
-                    />
-                    <Text style={s.calendarLinkText}>Apple Cal</Text>
+                    <Text style={s.calendarLinkText}>Calendar</Text>
                   </Pressable>
                   {event.ticketUrl && (
                     <Pressable
@@ -330,7 +346,9 @@ export default function PlanScreen() {
                     {formatTimeShort(event.time)}
                   </Text>
                 </View>
-                <Text style={s.timelineTitle}>{event.title}</Text>
+                <Pressable onPress={() => router.push(`/event/${event.id}`)}>
+                  <Text style={s.timelineTitleLink}>{event.title}</Text>
+                </Pressable>
                 <View style={s.timelineRow}>
                   <MapPin
                     size={13}
@@ -557,6 +575,14 @@ const s = StyleSheet.create({
     color: colors.foreground,
     marginBottom: 6,
     marginTop: 2,
+  },
+  timelineTitleLink: {
+    ...typography.body,
+    fontWeight: "600",
+    color: colors.primary,
+    marginBottom: 6,
+    marginTop: 2,
+    textDecorationLine: "underline" as const,
   },
   timelineMeta: {
     ...typography.xs,

@@ -1,6 +1,7 @@
-import { View, Text, Pressable, ScrollView, StyleSheet, Platform } from "react-native";
+import { useState } from "react";
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Platform } from "react-native";
 import { useRouter } from "expo-router";
-import { User } from "lucide-react-native";
+import { User, Pencil, Check } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { events } from "@/data/events";
 import CalendarSection from "@/components/profile/CalendarSection";
@@ -42,8 +43,12 @@ export default function ProfileTab() {
     goingEvents,
     sharedWithYou,
     createdAt,
+    updateDisplayName,
     signOut,
   } = useUser();
+
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(userDisplayName || "");
 
   const displayLabel = userDisplayName || userEmail || "Guest";
   const avatarLetter =
@@ -72,7 +77,35 @@ export default function ProfileTab() {
             )}
           </View>
           <View>
-            <Text style={st.displayName}>{displayLabel}</Text>
+            {editingName ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <TextInput
+                  style={[st.displayName, { borderBottomWidth: 1, borderBottomColor: colors.primary, minWidth: 120, padding: 0 }]}
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  autoFocus
+                  autoCapitalize="none"
+                />
+                <Pressable onPress={() => {
+                  if (nameInput.trim()) updateDisplayName(nameInput.trim());
+                  setEditingName(false);
+                }}>
+                  <Check size={16} color={colors.primary} />
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={st.displayName}>{displayLabel}</Text>
+                {isLoggedIn && (
+                  <Pressable onPress={() => { setNameInput(userDisplayName || ""); setEditingName(true); }} hitSlop={8}>
+                    <Pencil size={13} color={colors.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+            )}
+            {isLoggedIn && userEmail ? (
+              <Text style={st.emailLabel}>{userEmail}</Text>
+            ) : null}
             <Pressable onPress={() => router.push("/(onboarding)/flow")}>
               <Text style={st.editLink}>Edit preferences</Text>
             </Pressable>
@@ -236,7 +269,8 @@ const st = StyleSheet.create({
   avatarLoggedIn: { backgroundColor: colors.primary },
   avatarGuest: { borderWidth: 2, borderColor: colors.border },
   avatarText: { fontSize: 20, fontWeight: "600", color: colors.white },
-  displayName: { ...typography.body, fontWeight: "600", color: colors.foreground, marginBottom: 4 },
+  displayName: { ...typography.body, fontWeight: "600", color: colors.foreground, marginBottom: 2 },
+  emailLabel: { ...typography.xs, color: colors.textSecondary, marginBottom: 4 },
   editLink: { ...typography.sm, color: colors.textSecondary },
   signInButton: {
     backgroundColor: colors.primary,

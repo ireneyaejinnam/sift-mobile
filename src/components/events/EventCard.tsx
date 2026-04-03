@@ -30,6 +30,8 @@ import {
   Ticket,
   X,
 } from "lucide-react-native";
+import BottomSheet from "@/components/ui/BottomSheet";
+import GoingDateSheet from "@/components/events/GoingDateSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
@@ -85,6 +87,7 @@ export default function EventCard({
     toggleGoing,
     isGoing,
   } = useUser();
+  const [goingSheetOpen, setGoingSheetOpen] = useState(false);
 
   const interests = userProfile?.interests ?? [];
   const matchesInterests =
@@ -143,17 +146,25 @@ export default function EventCard({
 
   // ── Going handler ────────────────────────────────────────
 
+  const isMultiDate = (event.dates && event.dates.length > 1) ||
+    (!!event.endDate && event.endDate !== event.startDate);
+
   const handleGoingPress = () => {
     if (going) {
       toggleGoing({
         eventId: event.id,
         eventTitle: event.title,
         eventDate: event.startDate,
+        eventEndDate: event.endDate,
       });
       return;
     }
     if (!isLoggedIn && onRequestSignIn) {
       onRequestSignIn();
+      return;
+    }
+    if (isMultiDate) {
+      setGoingSheetOpen(true);
       return;
     }
     toggleGoing({
@@ -366,6 +377,27 @@ export default function EventCard({
           </Pressable>
         </Animated.View>
       </GestureDetector>
+      <BottomSheet
+        open={goingSheetOpen}
+        onClose={() => setGoingSheetOpen(false)}
+        title="Pick a date"
+      >
+        <GoingDateSheet
+          event={event}
+          onConfirm={(date) => {
+            toggleGoing({
+              eventId: event.id,
+              eventTitle: event.title,
+              eventDate: date,
+              eventEndDate: event.endDate,
+            });
+            setGoingSheetOpen(false);
+            track("event_going", { event_id: event.id });
+            showToast("Marked as going");
+          }}
+          onCancel={() => setGoingSheetOpen(false)}
+        />
+      </BottomSheet>
     </View>
   );
 }

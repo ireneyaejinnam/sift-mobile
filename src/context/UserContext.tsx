@@ -16,6 +16,8 @@ import type {
 import { DEFAULT_LISTS, initialStorage } from "@/types/user";
 import { loadStorage, saveStorage, setOnboardingDoneFlag } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
+import { fetchEventById } from "@/lib/getEvents";
+import { events as localEvents } from "@/data/events";
 
 interface UserContextValue extends SiftStorage {
   ready: boolean;
@@ -25,18 +27,20 @@ interface UserContextValue extends SiftStorage {
     userDisplayName?: string
   ) => void;
   setUserProfile: (profile: UserProfile) => void;
-  addSavedEvent: (eventId: string, listName: string) => void;
+  addSavedEvent: (eventId: string, listName: string, meta?: { title?: string; startDate?: string; endDate?: string }) => void;
   removeSavedEvent: (eventId: string) => void;
   getSavedListForEvent: (eventId: string) => string | null;
   toggleGoing: (event: {
     eventId: string;
     eventTitle: string;
     eventDate: string;
+    eventEndDate?: string;
   }) => boolean;
   isGoing: (eventId: string) => boolean;
   addCustomList: (listName: string) => void;
   getAllListNames: () => string[];
   addSharedWithYou: (eventId: string) => void;
+  updateDisplayName: (name: string) => void;
   signOut: () => Promise<void>;
 }
 
@@ -79,6 +83,37 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Supabase unavailable, use local storage as-is
       }
+
+      // If user has a saved profile from a previous session, mark onboarding done
+      if (data.userProfile) {
+        setOnboardingDoneFlag();
+      }
+
+      // Backfill eventStartDate for saved events missing it
+      const needsBackfill = data.savedEvents.filter((s) => !s.eventStartDate);
+      if (needsBackfill.length > 0) {
+        const updated = await Promise.all(
+          data.savedEvents.map(async (s) => {
+            if (s.eventStartDate) return s;
+            // Try local data first
+            const local = localEvents.find((e) => e.id === s.eventId);
+            if (local) {
+              return { ...s, eventTitle: s.eventTitle || local.title, eventStartDate: local.startDate, eventEndDate: local.endDate };
+            }
+            // Try Supabase
+            try {
+              const db = await fetchEventById(s.eventId);
+              if (db) {
+                return { ...s, eventTitle: s.eventTitle || db.title, eventStartDate: db.startDate, eventEndDate: db.endDate };
+              }
+            } catch {}
+            return s;
+          })
+        );
+        data = { ...data, savedEvents: updated };
+        saveStorage(data);
+      }
+
       setStorage(data);
       setReady(true);
     });
@@ -147,11 +182,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addSavedEvent = useCallback(
-    (eventId: string, listName: string) => {
+    (eventId: string, listName: string, meta?: { title?: string; startDate?: string; endDate?: string }) => {
       const savedAt = new Date().toISOString();
       const savedEvents = [
         ...storage.savedEvents.filter((s) => s.eventId !== eventId),
-        { eventId, listName, savedAt },
+        { eventId, listName, savedAt, eventTitle: meta?.title, eventStartDate: meta?.startDate, eventEndDate: meta?.endDate },
       ];
       persist({ ...storage, savedEvents });
     },
@@ -181,6 +216,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       eventId: string;
       eventTitle: string;
       eventDate: string;
+      eventEndDate?: string;
     }): boolean => {
       const exists = storage.goingEvents.some(
         (e) => e.eventId === event.eventId
@@ -198,6 +234,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             eventId: event.eventId,
             eventTitle: event.eventTitle,
             eventDate: event.eventDate,
+            eventEndDate: event.eventEndDate,
             markedAt,
           },
         ];
@@ -229,6 +266,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const getAllListNames = useCallback(() => {
     return [...DEFAULT_LISTS, ...storage.customLists];
   }, [storage.customLists]);
+
+  const updateDisplayName = useCallback(
+    (name: string) => {
+      persist({ ...storage, userDisplayName: name });
+    },
+    [storage, persist]
+  );
 
   const signOut = useCallback(async () => {
     try {
@@ -269,6 +313,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       addCustomList,
       getAllListNames,
       addSharedWithYou,
+      updateDisplayName,
       signOut,
     }),
     [
@@ -284,6 +329,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       addCustomList,
       getAllListNames,
       addSharedWithYou,
+      updateDisplayName,
       signOut,
     ]
   );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import {
+  Alert,
   View,
   Text,
   Image,
@@ -49,6 +50,7 @@ export default function SharedEventPage() {
   const {
     isLoggedIn,
     getSavedListForEvent,
+    isGoing,
     removeSavedEvent,
     addSavedEvent,
     addSharedWithYou,
@@ -67,16 +69,45 @@ export default function SharedEventPage() {
     }
   }, [id, localEvent]);
 
+  // Only auto-save when arriving from an external shared link (not already saved/going)
   useEffect(() => {
-    if (event) {
-      track("shared_link_opened", { event_id: event.id, has_profile: isLoggedIn });
-      if (isLoggedIn) {
+    if (event && isLoggedIn) {
+      const alreadySaved = getSavedListForEvent(event.id);
+      const alreadyGoing = isGoing(event.id);
+      if (!alreadySaved && !alreadyGoing) {
+        track("shared_link_opened", { event_id: event.id, has_profile: isLoggedIn });
         addSharedWithYou(event.id);
-        addSavedEvent(event.id, "Want to go");
+        addSavedEvent(event.id, "Want to go", {
+          title: event.title,
+          startDate: event.startDate,
+          endDate: event.endDate,
+        });
         showToast("Shared with you — saved to your list");
       }
     }
   }, [event?.id]);
+
+  // Set web page title for shared links
+  useEffect(() => {
+    if (Platform.OS === "web" && event) {
+      document.title = `${event.title} | Sift`;
+    }
+  }, [event]);
+
+  const savedList = event ? getSavedListForEvent(event.id) : null;
+
+  const handleBookmark = () => {
+    if (!event) return;
+    if (savedList) {
+      removeSavedEvent(event.id);
+      showToast("Removed from list");
+    } else if (isLoggedIn) {
+      setSaveSheetOpen(true);
+    } else {
+      addSavedEvent(event.id, "Want to go", { title: event.title, startDate: event.startDate, endDate: event.endDate });
+      showToast("Saved to Want to go");
+    }
+  };
 
   if (!event) {
     return (
@@ -89,27 +120,6 @@ export default function SharedEventPage() {
       </View>
     );
   }
-
-  const savedList = getSavedListForEvent(event.id);
-
-  const handleBookmark = () => {
-    if (savedList) {
-      removeSavedEvent(event.id);
-      showToast("Removed from list");
-    } else if (isLoggedIn) {
-      setSaveSheetOpen(true);
-    } else {
-      addSavedEvent(event.id, "Want to go");
-      showToast("Saved to Want to go");
-    }
-  };
-
-  // Set web page title for shared links
-  useEffect(() => {
-    if (Platform.OS === "web" && event) {
-      document.title = `${event.title} | Sift`;
-    }
-  }, [event]);
 
   return (
     <View style={s.container}>
@@ -232,8 +242,24 @@ export default function SharedEventPage() {
             <View style={s.actionRow}>
               <Pressable
                 onPress={() => {
-                  track("calendar_export", { event_id: event.id, method: "google" });
-                  Linking.openURL(generateGoogleCalendarUrl(event));
+                  Alert.alert("Add to calendar", "Choose your calendar", [
+                    {
+                      text: "Google Calendar",
+                      onPress: () => {
+                        track("calendar_export", { event_id: event.id, method: "google" });
+                        Linking.openURL(generateGoogleCalendarUrl(event));
+                      },
+                    },
+                    {
+                      text: "Apple Calendar",
+                      onPress: async () => {
+                        track("calendar_export", { event_id: event.id, method: "ics" });
+                        const ok = await shareICSFile([event]);
+                        if (!ok) showToast("Couldn't open calendar");
+                      },
+                    },
+                    { text: "Cancel", style: "cancel" },
+                  ]);
                 }}
                 style={s.actionButton}
               >
@@ -242,22 +268,7 @@ export default function SharedEventPage() {
                   strokeWidth={1.5}
                   color={colors.primary}
                 />
-                <Text style={s.actionButtonText}>Google Cal</Text>
-              </Pressable>
-              <Pressable
-                onPress={async () => {
-                  track("calendar_export", { event_id: event.id, method: "ics" });
-                  const ok = await shareICSFile([event]);
-                  if (!ok) showToast("Couldn't open calendar");
-                }}
-                style={s.actionButton}
-              >
-                <CalendarPlus
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.primary}
-                />
-                <Text style={s.actionButtonText}>Apple Cal</Text>
+                <Text style={s.actionButtonText}>Calendar</Text>
               </Pressable>
               <Pressable onPress={handleBookmark} style={s.actionButton}>
                 <Bookmark
@@ -323,6 +334,7 @@ export default function SharedEventPage() {
       >
         <SaveToListSheet
           eventId={event.id}
+          eventMeta={{ title: event.title, startDate: event.startDate, endDate: event.endDate, location: event.location }}
           currentListName={savedList}
           onClose={() => setSaveSheetOpen(false)}
           onSaved={(name) => showToast(`Saved to ${name}`)}
