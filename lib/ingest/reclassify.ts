@@ -331,13 +331,15 @@ export async function reclassifyEvents(): Promise<void> {
   const { data: lowConfEvents, error: err1 } = await supabase
     .from('events')
     .select('id, title, description, venue_name, tags, category, source')
-    .in('category', LOW_CONFIDENCE_CATEGORIES);
+    .in('category', LOW_CONFIDENCE_CATEGORIES)
+    .limit(2000);
 
   // Also fetch events from sources with poor categorization (all categories)
   const { data: sourceEvents, error: err2 } = await supabase
     .from('events')
     .select('id, title, description, venue_name, tags, category, source')
-    .in('source', RECHECK_ALL_SOURCES);
+    .in('source', RECHECK_ALL_SOURCES)
+    .limit(3000);
 
   if ((err1 && err2) || (!lowConfEvents && !sourceEvents)) {
     console.error('[Reclassify] Failed to fetch events:', err1 || err2);
@@ -353,7 +355,8 @@ export async function reclassifyEvents(): Promise<void> {
 
   console.log(`[Reclassify] Found ${events.length} events to evaluate`);
 
-  let reclassified = 0;
+  // Collect updates grouped by new category, then batch update by ID list
+  const updates = new Map<string, { id: string; title: string; oldCat: string }[]>();
   let skipped = 0;
 
   for (const event of events) {
@@ -368,25 +371,35 @@ export async function reclassifyEvents(): Promise<void> {
     if (
       result &&
       (result.confidence === 'high' || result.confidence === 'medium') &&
-      result.newCategory !== event.category // only update if actually different
+      result.newCategory !== event.category
     ) {
-      const { error: updateError } = await supabase
-        .from('events')
-        .update({ category: result.newCategory })
-        .eq('id', event.id);
-
-      if (updateError) {
-        console.error(`[Reclassify] Failed to update "${event.title}":`, updateError.message);
-      } else {
-        console.log(
-          `[Reclassify] "${event.title}" ${event.category} → ${result.newCategory} ` +
-            `(${result.confidence}: "${result.matchedKeyword}" in ${result.matchSource})`
-        );
-        reclassified++;
-      }
+      if (!updates.has(result.newCategory)) updates.set(result.newCategory, []);
+      updates.get(result.newCategory)!.push({ id: event.id, title: event.title, oldCat: event.category });
     } else {
       skipped++;
     }
+  }
+
+  // Batch update: one query per category
+  let reclassified = 0;
+  for (const [newCategory, items] of updates) {
+    const ids = items.map((i) => i.id);
+    for (let i = 0; i < ids.length; i += 100) {
+      const batch = ids.slice(i, i + 100);
+      const { error: updateError } = await supabase
+        .from('events')
+        .update({ category: newCategory })
+        .in('id', batch);
+
+      if (updateError) {
+        console.error(`[Reclassify] Batch update to ${newCategory} failed:`, updateError.message);
+      } else {
+        reclassified += batch.length;
+      }
+    }
+    // Log a few examples per category
+    const examples = items.slice(0, 3).map((i) => `"${i.title}" (${i.oldCat})`).join(', ');
+    console.log(`[Reclassify] → ${newCategory}: ${items.length} events (e.g. ${examples})`);
   }
 
   console.log(`[Reclassify] Done: ${reclassified} reclassified, ${skipped} kept as-is`);
