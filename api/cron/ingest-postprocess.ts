@@ -1,4 +1,3 @@
-import { geocodeAllEvents } from '../../lib/ingest/geocode';
 import { reclassifyEvents } from '../../lib/ingest/reclassify';
 import { deduplicateEvents } from '../../lib/ingest/dedup';
 import { cleanupExpired } from '../../lib/ingest/cleanup';
@@ -15,9 +14,8 @@ export default async function handler(req: any, res: any) {
   }
 
   const start = Date.now();
-  console.log('[Cron] Post-processing (geocode, reclassify, dedup, cleanup)...');
+  console.log('[Cron] Post-processing (reclassify, dedup, cleanup)...');
 
-  await run('Geocode',    geocodeAllEvents);
   await run('Reclassify', reclassifyEvents);
   await run('Dedup',      deduplicateEvents);
   await run('Cleanup',    cleanupExpired);

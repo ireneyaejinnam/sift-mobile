@@ -169,7 +169,7 @@ export async function geocodeAllEvents(): Promise<void> {
     .is('borough', null)
     .not('latitude', 'is', null)
     .not('longitude', 'is', null)
-    .limit(200); // cap at 200 to respect rate limit (~3 min)
+    .limit(50); // cap at 50 per run to stay under Vercel 300s timeout
 
   if (!needsNominatim?.length) {
     console.log('[Geocode] No events need Nominatim reverse geocoding.');
@@ -198,7 +198,7 @@ export async function geocodeAllEvents(): Promise<void> {
     .select('id, address, venue_name')
     .is('borough', null)
     .is('latitude', null)
-    .limit(100); // cap at 100 to respect rate limit (~2 min)
+    .limit(50); // cap at 50 per run to stay under Vercel 300s timeout
 
   if (needsForward?.length) {
     console.log(`[Geocode] Pass 3: Nominatim forward geocoding ${needsForward.length} events by address...`);
