@@ -14,6 +14,8 @@ install! 'cocoapods',
 prepare_react_native_project!
 
 target 'Sift' do
+  pod 'GoogleUtilities', :modular_headers => true
+
   use_expo_modules!
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
@@ -51,6 +53,15 @@ target 'Sift' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
+
+    # Fix fmt consteval incompatibility with Xcode 16 / Apple Clang C++20
+    installer.pods_project.targets.each do |target|
+      if target.name == 'fmt'
+        target.build_configurations.each do |config|
+          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+    end
 
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.

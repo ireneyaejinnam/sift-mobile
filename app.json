@@ -31,9 +31,7 @@
       "expo-router",
       "expo-secure-store",
       "expo-asset",
-      "expo-font",
-      "@react-native-firebase/app",
-      "@react-native-firebase/analytics"
+      "expo-font"
     ]
   }
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useUser } from "@/context/UserContext";
 import { supabase } from "@/lib/supabase";
 import { setGuestFlag, hasOnboardingDoneFlag } from "@/lib/storage";
 import { useToast } from "@/components/ui/Toast";
+import { track } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 
 export default function SignInScreen() {
@@ -28,6 +29,10 @@ export default function SignInScreen() {
   const [loading, setLoading] = useState(false);
 
   const canSubmit = email.trim().length > 0 && password.trim().length >= 6;
+
+  useEffect(() => {
+    if (isCreateAccount) track("sign_up_started");
+  }, [isCreateAccount]);
 
   const handleSubmit = async () => {
     if (!canSubmit || loading) return;
@@ -45,6 +50,7 @@ export default function SignInScreen() {
           setLoading(false);
           return;
         }
+        track("sign_up_completed", { method: "email" });
         showToast("Account created");
       } else {
         const { error } = await supabase.auth.signInWithPassword({

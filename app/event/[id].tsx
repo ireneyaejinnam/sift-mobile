@@ -23,6 +23,7 @@ import {
   Share2,
   Ticket,
 } from "lucide-react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveToListSheet from "@/components/events/SaveToListSheet";
 import ShareSheet from "@/components/events/ShareSheet";
@@ -85,6 +86,16 @@ export default function SharedEventPage() {
         showToast("Shared with you — saved to your list");
       }
     }
+  }, [event?.id]);
+
+  useEffect(() => {
+    if (!event) return;
+    AsyncStorage.getItem("sift_first_event_viewed").then((val) => {
+      if (!val) {
+        track("first_event_viewed", { event_id: event.id, category: event.category });
+        AsyncStorage.setItem("sift_first_event_viewed", "1").catch(() => {});
+      }
+    }).catch(() => {});
   }, [event?.id]);
 
   // Set web page title for shared links

@@ -1,20 +1,14 @@
 /**
  * Analytics tracking — fire-and-forget.
  *
- * Fans out to three destinations in parallel:
- *   1. AsyncStorage  — local rolling buffer (max 5,000 events)
- *   2. Firebase Analytics — GA4-backed, configured via native config files
- *   3. Amplitude — via @amplitude/analytics-react-native SDK
+ * Fans out to two destinations:
+ *   1. AsyncStorage — local rolling buffer (max 5,000 events)
+ *   2. Amplitude    — via @amplitude/analytics-react-native SDK
  *
- * Setup checklist:
- *   iOS:     add GoogleService-Info.plist to ios/
- *   Android: add google-services.json to android/app/
- *   Both:    set EXPO_PUBLIC_AMPLITUDE_API_KEY in .env
- *   Then:    npx pod-install && npx expo run:ios
+ * Setup: set EXPO_PUBLIC_AMPLITUDE_API_KEY in .env
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import analytics from "@react-native-firebase/analytics";
 import { track as amplitudeTrack, setUserId } from "@amplitude/analytics-react-native";
 
 const ANALYTICS_KEY = "sift_analytics";
@@ -27,6 +21,9 @@ export type AnalyticsEventType =
   | "onboarding_step_2_complete"
   | "onboarding_step_3_complete"
   | "onboarding_complete"
+  | "sign_up_started"
+  | "sign_up_completed"
+  | "first_event_viewed"
   | "recommendations_viewed"
   | "card_tap"
   | "event_saved"
@@ -53,12 +50,7 @@ function getUserId(): string {
 
 export function setTrackingUserId(userId: string) {
   cachedUserId = userId;
-
-  // Identify user in both SDKs
   setUserId(userId).catch(() => {});
-  analytics()
-    .setUserId(userId)
-    .catch(() => {});
 }
 
 /**
@@ -77,26 +69,6 @@ export function track(
   };
 
   persistEvent(entry).catch(() => {});
-  sendToFirebase(eventType, metadata).catch(() => {});
-  sendToAmplitude(eventType, metadata).catch(() => {});
-}
-
-// ── Firebase Analytics ──────────────────────────────────────────────────────
-
-async function sendToFirebase(
-  eventType: string,
-  metadata?: Record<string, any>
-) {
-  // Firebase event names must be <= 40 chars, alphanumeric + underscore
-  await analytics().logEvent(eventType, metadata ?? {});
-}
-
-// ── Amplitude ───────────────────────────────────────────────────────────────
-
-async function sendToAmplitude(
-  eventType: string,
-  metadata?: Record<string, any>
-) {
   amplitudeTrack(eventType, metadata ?? {});
 }
 
