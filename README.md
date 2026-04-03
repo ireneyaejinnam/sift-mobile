@@ -22,7 +22,7 @@ A curated event discovery app for NYC. Instead of overwhelming users with search
 | State | React Context API |
 | Auth & Database | Supabase (Auth + PostgreSQL) |
 | Local Persistence | AsyncStorage + Expo Secure Store |
-| Analytics | Firebase Analytics (GA4) + Amplitude |
+| Analytics | Amplitude |
 | Animations | React Native Reanimated |
 | Icons | lucide-react-native |
 | API / Cron | Vercel Serverless Functions |
@@ -69,7 +69,6 @@ After fetching, events go through: normalize → geocode → reclassify → dedu
 - A [Vercel](https://vercel.com) account (for the cron job)
 - For iOS: Xcode + iOS Simulator
 - For Android: Android Studio + emulator, or a physical device with Expo Go
-- A [Firebase](https://console.firebase.google.com) project (for Analytics)
 - An [Amplitude](https://amplitude.com) project (free tier)
 
 ### Environment Variables
@@ -113,18 +112,6 @@ npm run android
 
 Scan the QR code with **Expo Go** (iOS/Android) to run on a physical device.
 
-### Firebase Setup (required for Analytics)
-
-1. Create a project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Add an iOS app with bundle ID `com.sift.mobile` → download `GoogleService-Info.plist` → place in `ios/`
-3. Add an Android app with package `com.sift.mobile` → download `google-services.json` → place in `android/app/`
-4. After adding the files, rebuild the native app:
-
-```bash
-npx pod-install
-npx expo run:ios
-```
-
 ### Deploy API (Vercel)
 
 The Vercel project only hosts the `/api` serverless functions (no web build). Push to `main` and Vercel will auto-deploy the cron job.
@@ -142,6 +129,8 @@ import { theme } from '@/lib/theme';
 
 - If Supabase is unreachable, the app falls back to hardcoded event data in `src/data/events.ts`
 - Auth is handled by Supabase; guest mode works fully without sign-in
-- Analytics events fan out to Firebase Analytics (GA4), Amplitude, and a local AsyncStorage buffer — all fire-and-forget, never blocking the UI
+- Analytics events fan out to Amplitude and a local AsyncStorage buffer — all fire-and-forget, never blocking the UI
 - Onboarding funnel events: `onboarding_started` → `onboarding_step_1_complete` → `onboarding_step_2_complete` → `onboarding_step_3_complete` → `onboarding_complete`
+- Sign-up funnel events: `sign_up_started` → `sign_up_completed`
+- Activation event: `first_event_viewed` (fires once per install)
 - `GET /api/user-count` is a public endpoint returning total registered users as `{ user_count: N }`, cached for 5 minutes
