@@ -204,19 +204,18 @@ const st = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap" },
   weekdayCell: { width: "14.28%", alignItems: "center", marginBottom: 4 },
   weekday: { ...typography.xs, fontWeight: "600", color: colors.textSecondary },
-  dayCell: { width: "14.28%", aspectRatio: 1, alignItems: "center", justifyContent: "center" },
+  dayCell: { width: "14.28%", height: 44, alignItems: "center", justifyContent: "flex-start", paddingTop: 8 },
   dayButton: {
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
   daySelected: {
-    borderWidth: 2,
     borderColor: colors.primary,
     backgroundColor: colors.primaryLight,
   },
   dayText: { ...typography.sm, color: colors.foreground },
-  dots: { flexDirection: "row", gap: 2, marginTop: 2 },
+  dots: { flexDirection: "row", gap: 2, marginTop: 2, height: 6 },
   dotGoing: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.primary },
   dotSaved: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent },
   detail: {

@@ -14,7 +14,7 @@ import type {
   UserProfile,
 } from "@/types/user";
 import { DEFAULT_LISTS, initialStorage } from "@/types/user";
-import { loadStorage, saveStorage } from "@/lib/storage";
+import { loadStorage, saveStorage, setOnboardingDoneFlag } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 
 interface UserContextValue extends SiftStorage {
@@ -61,6 +61,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               userEmail: user.email ?? data.userEmail,
               userDisplayName:
                 (user.user_metadata?.display_name as string) ?? data.userDisplayName,
+            };
+            // Returning user with saved profile — skip onboarding
+            if (data.userProfile) {
+              setOnboardingDoneFlag();
+            }
+          } else {
+            // No active Supabase session — clear stale auth data (fixes guest mode showing old user info)
+            data = {
+              ...data,
+              isLoggedIn: false,
+              userEmail: "",
+              userDisplayName: undefined,
             };
           }
         }

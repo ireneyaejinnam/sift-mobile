@@ -112,17 +112,21 @@ export default function SignInScreen() {
             experience.
           </Text>
 
-          {/* Username */}
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            style={styles.input}
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="How we'll show you on profile"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          {/* Username — only for signup */}
+          {isCreateAccount && (
+            <>
+              <Text style={styles.label}>Username</Text>
+              <TextInput
+                style={styles.input}
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="How we'll show you on profile"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </>
+          )}
 
           {/* Email */}
           <Text style={styles.label}>Email</Text>

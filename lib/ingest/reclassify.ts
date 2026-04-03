@@ -39,7 +39,7 @@ interface Rule {
 }
 
 const RULES: Rule[] = [
-  // ── Theater (check before art so "musical" and "production" catch theater first) ──
+  // ── Theater (highest priority — catch Broadway/musical/production first) ──
   {
     target: 'theater',
     keywords: [
@@ -47,7 +47,6 @@ const RULES: Rule[] = [
       'musical', 'opera', 'ballet', 'dance performance',
       'one-man show', 'one-woman show', 'monologue', 'curtain call',
       'production', 'tony winning', 'tony award', 'tony-winning', 'new play',
-      // Well-known Broadway/theater show titles
       'little mermaid', 'lion king', 'wicked', 'hamilton',
       'phantom of the opera', 'les miserables', 'les mis',
       'book of mormon', 'dear evan hansen', 'moulin rouge',
@@ -55,15 +54,15 @@ const RULES: Rule[] = [
       'beetlejuice', 'back to the future', 'sweeney todd',
       'merrily we roll along', 'the outsiders', 'suffs',
       'the notebook', 'water for elephants', 'the great gatsby',
-      'staged reading', 'preview performance', 'matinee',
+      'staged reading', 'preview performance',
       'revival', 'repertory', 'playwright', 'dramaturgy',
       'encores', 'three shows', 'two shows', 'stage show',
       'performing arts', 'theatrical', 'playhouse',
       'act one', 'act two', 'intermission', 'opening night',
     ],
-    antiKeywords: ['pop-up shop', 'sample sale', 'merch'],
+    antiKeywords: ['pop-up shop', 'sample sale', 'merch', 'jazz', 'dj', 'bingo', 'disco', 'matinee disco'],
     venuePatterns: [
-      'broadway', 'st. james', 'public theater', 'bam',
+      'st. james', 'public theater', 'bam',
       'lincoln center', 'barrow street', 'signature theatre',
       'new york city center', 'city center', 'roundabout',
       'manhattan theatre club', 'second stage', 'playwrights horizons',
@@ -77,30 +76,85 @@ const RULES: Rule[] = [
       'richard rodgers', 'imperial', 'eugene o\'neill',
     ],
   },
-  // ── Art (broad set of keywords for exhibitions, collections, museums) ──
+  // ── Comedy (before art so "stand-up comedy" doesn't get caught by art) ──
+  {
+    target: 'comedy',
+    keywords: [
+      'comedy', 'comedian', 'improv', 'stand-up', 'standup',
+      'roast', 'open mic comedy', 'sketch comedy', 'comedy show',
+      'comedy night', 'laugh', 'comic', 'comedy special',
+      'comedic', 'funny', 'humor', 'satire',
+    ],
+    venuePatterns: [
+      'comedy cellar', 'gotham comedy', 'eastville', 'comic strip',
+      'stand up ny', 'caveat', 'creek and the cave',
+    ],
+  },
+  // ── Live Music (before art so "jazz artist" doesn't get caught by art) ──
+  {
+    target: 'live_music',
+    keywords: [
+      'concert', 'live music', 'live band', 'dj set', 'dj night',
+      'album release', 'tour stop', 'music festival', 'headliner',
+      'opening act', 'setlist', 'songwriter', 'rapper',
+      'hip hop show', 'jazz night', 'rock show', 'edm',
+      'live performance', 'acoustic set', 'jam session',
+      'jazz club', 'big band', 'jazz ensemble', 'jazz quartet', 'jazz trio',
+      'jazz', 'band', 'musician', 'vocalist', 'singer',
+    ],
+    antiKeywords: ['merch', 'merchandise', 'pop-up shop'],
+    venuePatterns: [
+      'brooklyn steel', 'terminal 5', 'bowery ballroom', 'music hall',
+      'irving plaza', 'webster hall', 'mercury lounge', 'rough trade',
+      'baby\'s all right', 'elsewhere', 'le poisson rouge',
+      'blue note', 'village vanguard', 'jazz standard',
+      'beacon theatre', 'radio city', 'kings theatre',
+      'birdland', 'smalls', 'dizzy\'s', 'smoke jazz', 'cellar dog', 'mezzrow',
+      'madison square garden', 'msg', 'barclays center',
+    ],
+  },
+  // ── Workshops (before art so "DIY Workshop" doesn't get caught by art) ──
+  {
+    target: 'workshops',
+    keywords: [
+      'workshop', 'masterclass', 'seminar', 'lecture', 'panel',
+      'networking', 'conference', 'learn to', 'how to', 'tutorial',
+      'certification', 'bootcamp', 'crash course', 'info session',
+      'diy', 'hands-on', 'make your own',
+    ],
+    venuePatterns: [
+      'general assembly', 'wework', 'the wing', 'neuehouse',
+    ],
+  },
+  // ── Art (after comedy/music/workshops to avoid false positives) ──
   {
     target: 'art',
     keywords: [
-      'gallery', 'exhibition', 'artist', 'painting', 'sculpture',
-      'sculptures', 'sculptural', 'museum', 'biennial', 'art show',
+      'gallery', 'exhibition', 'painting', 'sculpture',
+      'sculptures', 'sculptural', 'biennial', 'art show',
       'art fair', 'art walk', 'curator', 'curated',
       'installation art', 'contemporary art', 'fine art', 'modern art',
-      'portrait', 'photography exhibit', 'mural',
-      'collection', 'collections', 'retrospective', 'archive',
+      'photography exhibit', 'mural',
+      'retrospective', 'archive',
       'masterpiece', 'masterpieces', 'masterwork',
       'group show', 'solo show', 'solo exhibition', 'group exhibition',
-      'on view', 'on display', 'showcasing',
+      'on view', 'on display',
       'permanent collection', 'from its collection',
-      'posters', 'prints', 'lithograph', 'woodcut', 'etching',
+      'lithograph', 'woodcut', 'etching',
       'mixed media', 'watercolor', 'oil on canvas', 'acrylic',
       'ceramics', 'textile art', 'fiber art', 'video art',
       'new works', 'recent works', 'selected works',
       'art opening', 'opening reception', 'artist talk',
       'immersive art', 'interactive art', 'digital art',
+      'visual artist',
     ],
-    antiKeywords: ['pop-up shop', 'sample sale', 'merch drop'],
+    antiKeywords: [
+      'pop-up shop', 'sample sale', 'merch drop',
+      'jazz', 'band', 'concert', 'dj', 'musician', 'bingo',
+      'comedy', 'stand-up', 'standup', 'comedian',
+      'workshop', 'diy', 'class', 'hands-on',
+    ],
     venuePatterns: [
-      // Major NYC museums
       'museum', 'gallery', 'galleries',
       'moma', 'the met', 'metropolitan museum', 'met breuer', 'met cloisters',
       'whitney', 'guggenheim', 'new museum', 'brooklyn museum',
@@ -112,50 +166,15 @@ const RULES: Rule[] = [
       'international center of photography', 'icp',
       'museum of the moving image', 'noguchi museum',
       'dia beacon', 'dia chelsea', 'dia:',
-      // Major galleries
       'gagosian', 'pace gallery', 'david zwirner', 'hauser & wirth',
       'lehmann maupin', 'sean kelly', 'gladstone',
       'james cohan', 'lisson', 'white cube', 'petzel',
       'perrotin', 'kasmin', 'jack shainman',
-      // Non-profit / alternative spaces
       'pioneer works', 'the kitchen', 'artists space',
       'sculpture center', 'swiss institute', 'drawing center',
       'new york historical', 'cooper hewitt',
-      // Brooklyn / Queens spaces
       'moma ps1', 'ps1', 'bric', 'smack mellon',
       'invisible dog', 'brooklyn art haus',
-    ],
-  },
-  // ── Live Music ──
-  {
-    target: 'live_music',
-    keywords: [
-      'concert', 'live music', 'live band', 'dj set', 'dj night',
-      'album release', 'tour stop', 'music festival', 'headliner',
-      'opening act', 'setlist', 'songwriter', 'rapper',
-      'hip hop show', 'jazz night', 'rock show', 'edm',
-      'live performance', 'acoustic set', 'jam session',
-    ],
-    antiKeywords: ['merch', 'merchandise', 'pop-up shop'],
-    venuePatterns: [
-      'brooklyn steel', 'terminal 5', 'bowery ballroom', 'music hall',
-      'irving plaza', 'webster hall', 'mercury lounge', 'rough trade',
-      'baby\'s all right', 'elsewhere', 'le poisson rouge',
-      'blue note', 'village vanguard', 'jazz standard',
-      'beacon theatre', 'radio city', 'kings theatre',
-    ],
-  },
-  // ── Comedy ──
-  {
-    target: 'comedy',
-    keywords: [
-      'comedy', 'comedian', 'improv', 'stand-up', 'standup',
-      'roast', 'open mic comedy', 'sketch comedy', 'comedy show',
-      'comedy night', 'laugh', 'comic',
-    ],
-    venuePatterns: [
-      'comedy cellar', 'gotham comedy', 'eastville', 'comic strip',
-      'stand up ny', 'caveat', 'creek and the cave',
     ],
   },
   // ── Outdoors ──
@@ -169,8 +188,7 @@ const RULES: Rule[] = [
       'rock climbing', 'sailing', 'rowing',
     ],
     venuePatterns: [
-      'prospect park', 'central park', 'stadium', 'arena',
-      'field', 'barclays', 'madison square garden',
+      'prospect park', 'central park', 'stadium',
     ],
   },
   // ── Fitness ──
@@ -192,8 +210,8 @@ const RULES: Rule[] = [
     keywords: [
       'tasting', 'food festival', 'brunch', 'dinner party',
       'chef', 'culinary', 'cocktail class', 'wine tasting',
-      'beer tasting', 'supper club', 'cooking class', 'bake',
-      'food truck', 'restaurant week', 'prix fixe',
+      'beer tasting', 'supper club', 'cooking class',
+      'food truck', 'restaurant week',
       'bakery', 'pastry', 'patisserie', 'chocolate',
       'cheese tasting', 'spirit tasting', 'mixology',
     ],
@@ -201,23 +219,11 @@ const RULES: Rule[] = [
       'smorgasburg', 'eataly', 'time out market', 'chelsea market',
     ],
   },
-  // ── Workshops ──
-  {
-    target: 'workshops',
-    keywords: [
-      'workshop', 'masterclass', 'seminar', 'lecture', 'panel',
-      'networking', 'conference', 'learn to', 'how to', 'tutorial',
-      'certification', 'bootcamp', 'crash course', 'info session',
-    ],
-    venuePatterns: [
-      'general assembly', 'wework', 'the wing', 'neuehouse',
-    ],
-  },
   // ── Nightlife ──
   {
     target: 'nightlife',
     keywords: [
-      'bar crawl', 'club night', 'lounge', 'after dark',
+      'bar crawl', 'club night', 'after dark',
       'late night party', 'bottle service', 'vip night',
       'dance party', 'rave', 'techno night', 'house music night',
     ],
