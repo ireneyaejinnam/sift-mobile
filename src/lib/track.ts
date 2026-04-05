@@ -1,11 +1,13 @@
 /**
  * Analytics tracking — fire-and-forget.
  *
- * Fans out to two destinations:
+ * Fans out to three destinations:
  *   1. AsyncStorage — local rolling buffer (max 5,000 events)
  *   2. Amplitude    — via @amplitude/analytics-react-native SDK
+ *   3. Supabase     — analytics table (for active_users metric)
  *
  * Setup: set EXPO_PUBLIC_AMPLITUDE_API_KEY in .env
+ *        set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -70,6 +72,7 @@ export function track(
 
   persistEvent(entry).catch(() => {});
   amplitudeTrack(eventType, metadata ?? {});
+  persistToSupabase(entry).catch(() => {});
 }
 
 // ── Local AsyncStorage buffer ───────────────────────────────────────────────
@@ -80,6 +83,36 @@ async function persistEvent(entry: AnalyticsEvent) {
     const existing: AnalyticsEvent[] = raw ? JSON.parse(raw) : [];
     const updated = [...existing, entry].slice(-MAX_LOCAL_EVENTS);
     await AsyncStorage.setItem(ANALYTICS_KEY, JSON.stringify(updated));
+  } catch {
+    // Silently ignore — analytics should never break the app
+  }
+}
+
+// ── Supabase analytics table ────────────────────────────────────────────────
+
+async function persistToSupabase(entry: AnalyticsEvent) {
+  try {
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) return;
+
+    await fetch(`${supabaseUrl}/rest/v1/analytics`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        event_type: entry.event_type,
+        user_id: entry.user_id,
+        event_id: entry.event_id ?? null,
+        metadata: entry.metadata ?? {},
+        created_at: entry.created_at,
+      }),
+    });
   } catch {
     // Silently ignore — analytics should never break the app
   }
