@@ -9,6 +9,8 @@
  * Cached for 5 minutes via Cache-Control so repeated hits
  * don't hammer the Supabase admin API.
  */
+export const config = { runtime: 'edge' };
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
     return new Response('Method Not Allowed', { status: 405 });
