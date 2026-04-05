@@ -1,5 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
-
 /**
  * GET /api/user-count
  *
@@ -26,32 +24,36 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
 
-  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-
-  // Paginate through all users to get an accurate count.
-  // listUsers maxes at 1000 per page — loop until exhausted.
+  // Hit Supabase Auth Admin REST API directly to support both
+  // legacy JWT keys and the new sb_secret_ key format.
   let userCount = 0;
   let page = 1;
   const perPage = 1000;
 
   while (true) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage,
-    });
+    const res = await fetch(
+      `${supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=${perPage}`,
+      {
+        headers: {
+          apikey: supabaseServiceKey,
+          Authorization: `Bearer ${supabaseServiceKey}`,
+        },
+      }
+    );
 
-    if (error) {
+    if (!res.ok) {
+      const text = await res.text();
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch user count' }),
+        JSON.stringify({ error: 'Failed to fetch user count', detail: text }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    userCount += data.users.length;
+    const json = await res.json();
+    const users = json.users ?? [];
+    userCount += users.length;
 
-    if (data.users.length < perPage) break; // last page
+    if (users.length < perPage) break;
     page++;
   }
 
