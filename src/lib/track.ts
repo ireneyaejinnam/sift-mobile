@@ -1,20 +1,30 @@
 /**
  * Analytics tracking — fire-and-forget.
  *
- * Fans out to three destinations:
+ * Fans out to four destinations:
  *   1. AsyncStorage — local rolling buffer (max 5,000 events)
  *   2. Amplitude    — via @amplitude/analytics-react-native SDK
  *   3. Supabase     — analytics table (for active_users metric)
+ *   4. Firebase Analytics — via Measurement Protocol REST API (no native SDK)
  *
- * Setup: set EXPO_PUBLIC_AMPLITUDE_API_KEY in .env
- *        set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env
+ * Setup:
+ *   EXPO_PUBLIC_AMPLITUDE_API_KEY        — from Amplitude > Settings > Projects
+ *   EXPO_PUBLIC_SUPABASE_URL             — from Supabase > Project Settings
+ *   EXPO_PUBLIC_SUPABASE_ANON_KEY        — from Supabase > Project Settings
+ *   EXPO_PUBLIC_FIREBASE_IOS_APP_ID      — from Firebase > Project Settings > iOS app
+ *   EXPO_PUBLIC_FIREBASE_ANDROID_APP_ID  — from Firebase > Project Settings > Android app
+ *   EXPO_PUBLIC_FIREBASE_API_SECRET      — from GA4 > Data Streams > Measurement Protocol API secrets
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track as amplitudeTrack, setUserId } from "@amplitude/analytics-react-native";
+import { Platform } from "react-native";
 
 const ANALYTICS_KEY = "sift_analytics";
 const MAX_LOCAL_EVENTS = 5000;
+
+// Firebase Measurement Protocol endpoint
+const FIREBASE_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 
 export type AnalyticsEventType =
   | "app_open"
@@ -73,6 +83,7 @@ export function track(
   persistEvent(entry).catch(() => {});
   amplitudeTrack(eventType, metadata ?? {});
   persistToSupabase(entry).catch(() => {});
+  persistToFirebase(entry).catch(() => {});
 }
 
 // ── Local AsyncStorage buffer ───────────────────────────────────────────────
@@ -111,6 +122,42 @@ async function persistToSupabase(entry: AnalyticsEvent) {
         event_id: entry.event_id ?? null,
         metadata: entry.metadata ?? {},
         created_at: entry.created_at,
+      }),
+    });
+  } catch {
+    // Silently ignore — analytics should never break the app
+  }
+}
+
+// ── Firebase Analytics via Measurement Protocol ─────────────────────────────
+
+async function persistToFirebase(entry: AnalyticsEvent) {
+  try {
+    const isIOS = Platform.OS === "ios";
+    const appId = isIOS
+      ? process.env.EXPO_PUBLIC_FIREBASE_IOS_APP_ID
+      : process.env.EXPO_PUBLIC_FIREBASE_ANDROID_APP_ID;
+    const apiSecret = isIOS
+      ? process.env.EXPO_PUBLIC_FIREBASE_IOS_API_SECRET
+      : process.env.EXPO_PUBLIC_FIREBASE_ANDROID_API_SECRET;
+
+    if (!appId || !apiSecret) return;
+
+    await fetch(`${FIREBASE_ENDPOINT}?firebase_app_id=${appId}&api_secret=${apiSecret}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        app_instance_id: entry.user_id === "guest" ? "guest_instance" : entry.user_id.replace(/-/g, "").substring(0, 32),
+        user_id: entry.user_id === "guest" ? undefined : entry.user_id,
+        events: [
+          {
+            name: entry.event_type,
+            params: {
+              ...(entry.metadata ?? {}),
+              ...(entry.event_id ? { event_id: entry.event_id } : {}),
+            },
+          },
+        ],
       }),
     });
   } catch {
