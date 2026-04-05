@@ -1,18 +1,29 @@
 /**
- * Simple analytics tracking — fire-and-forget.
+ * Analytics tracking — fire-and-forget.
  *
- * Currently logs to AsyncStorage for local analysis.
- * To migrate to Supabase: replace the storage call with a supabase.from('analytics').insert().
+ * Fans out to two destinations:
+ *   1. AsyncStorage — local rolling buffer (max 5,000 events)
+ *   2. Amplitude    — via @amplitude/analytics-react-native SDK
+ *
+ * Setup: set EXPO_PUBLIC_AMPLITUDE_API_KEY in .env
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { track as amplitudeTrack, setUserId } from "@amplitude/analytics-react-native";
 
 const ANALYTICS_KEY = "sift_analytics";
 const MAX_LOCAL_EVENTS = 5000;
 
 export type AnalyticsEventType =
   | "app_open"
+  | "onboarding_started"
+  | "onboarding_step_1_complete"
+  | "onboarding_step_2_complete"
+  | "onboarding_step_3_complete"
   | "onboarding_complete"
+  | "sign_up_started"
+  | "sign_up_completed"
+  | "first_event_viewed"
   | "recommendations_viewed"
   | "card_tap"
   | "event_saved"
@@ -34,12 +45,12 @@ interface AnalyticsEvent {
 let cachedUserId: string | null = null;
 
 function getUserId(): string {
-  if (cachedUserId) return cachedUserId;
-  return "guest";
+  return cachedUserId ?? "guest";
 }
 
 export function setTrackingUserId(userId: string) {
   cachedUserId = userId;
+  setUserId(userId).catch(() => {});
 }
 
 /**
@@ -57,16 +68,16 @@ export function track(
     created_at: new Date().toISOString(),
   };
 
-  // Fire-and-forget — don't await
   persistEvent(entry).catch(() => {});
+  amplitudeTrack(eventType, metadata ?? {});
 }
+
+// ── Local AsyncStorage buffer ───────────────────────────────────────────────
 
 async function persistEvent(entry: AnalyticsEvent) {
   try {
     const raw = await AsyncStorage.getItem(ANALYTICS_KEY);
     const existing: AnalyticsEvent[] = raw ? JSON.parse(raw) : [];
-
-    // Keep a rolling buffer
     const updated = [...existing, entry].slice(-MAX_LOCAL_EVENTS);
     await AsyncStorage.setItem(ANALYTICS_KEY, JSON.stringify(updated));
   } catch {

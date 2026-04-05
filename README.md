@@ -22,6 +22,7 @@ A curated event discovery app for NYC. Instead of overwhelming users with search
 | State | React Context API |
 | Auth & Database | Supabase (Auth + PostgreSQL) |
 | Local Persistence | AsyncStorage + Expo Secure Store |
+| Analytics | Amplitude |
 | Animations | React Native Reanimated |
 | Icons | lucide-react-native |
 | API / Cron | Vercel Serverless Functions |
@@ -31,7 +32,8 @@ A curated event discovery app for NYC. Instead of overwhelming users with search
 ```
 sift-mobile/
 ├── api/                        # Vercel serverless functions
-│   └── cron/ingest.ts          # Daily event ingestion cron job
+│   ├── cron/ingest.ts          # Daily event ingestion cron job
+│   └── user-count.ts           # GET /api/user-count → { user_count: N }
 ├── app/                        # Expo Router pages
 │   ├── index.tsx               # Root / auth gate
 │   ├── (auth)/                 # Sign-in screens
@@ -67,6 +69,7 @@ After fetching, events go through: normalize → geocode → reclassify → dedu
 - A [Vercel](https://vercel.com) account (for the cron job)
 - For iOS: Xcode + iOS Simulator
 - For Android: Android Studio + emulator, or a physical device with Expo Go
+- An [Amplitude](https://amplitude.com) project (free tier)
 
 ### Environment Variables
 
@@ -86,6 +89,7 @@ Required variables:
 | `SUPABASE_SERVICE_KEY` | Supabase service role key (server-side) |
 | `TICKETMASTER_API_KEY` | Ticketmaster API key |
 | `EVENTBRITE_OAUTH_TOKEN` | Eventbrite OAuth token |
+| `EXPO_PUBLIC_AMPLITUDE_API_KEY` | Amplitude project API key |
 
 ### Install & Run
 
@@ -125,4 +129,8 @@ import { theme } from '@/lib/theme';
 
 - If Supabase is unreachable, the app falls back to hardcoded event data in `src/data/events.ts`
 - Auth is handled by Supabase; guest mode works fully without sign-in
-- Analytics events are tracked locally via AsyncStorage (fire-and-forget)
+- Analytics events fan out to Amplitude and a local AsyncStorage buffer — all fire-and-forget, never blocking the UI
+- Onboarding funnel events: `onboarding_started` → `onboarding_step_1_complete` → `onboarding_step_2_complete` → `onboarding_step_3_complete` → `onboarding_complete`
+- Sign-up funnel events: `sign_up_started` → `sign_up_completed`
+- Activation event: `first_event_viewed` (fires once per install)
+- `GET /api/user-count` is a public endpoint returning total registered users as `{ user_count: N }`, cached for 5 minutes

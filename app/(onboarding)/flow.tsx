@@ -135,6 +135,11 @@ export default function OnboardingFlow() {
   });
   const [showConfirmation, setShowConfirmation] = useState(false);
 
+  // Fire onboarding_started once on mount
+  useEffect(() => {
+    track("onboarding_started");
+  }, []);
+
   // Initialize from stored profile if editing
   useEffect(() => {
     if (initialized || !userProfile) return;
@@ -264,7 +269,13 @@ export default function OnboardingFlow() {
               ))}
             </View>
             <Pressable
-              onPress={() => setStep(2)}
+              onPress={() => {
+                track("onboarding_step_1_complete", {
+                  interests_count: (profile.interests ?? []).length,
+                  interests: profile.interests ?? [],
+                });
+                setStep(2);
+              }}
               disabled={(profile.interests ?? []).length < 2}
               style={[
                 styles.primaryButton,
@@ -338,7 +349,14 @@ export default function OnboardingFlow() {
             </View>
 
             <Pressable
-              onPress={() => setStep(3)}
+              onPress={() => {
+                track("onboarding_step_2_complete", {
+                  borough: profile.borough,
+                  neighborhood: profile.neighborhood,
+                  travel_range: profile.travelRange,
+                });
+                setStep(3);
+              }}
               style={[styles.primaryButton, styles.fullWidth, { marginTop: 32 }]}
             >
               <Text style={styles.primaryButtonText}>Next</Text>
@@ -381,7 +399,13 @@ export default function OnboardingFlow() {
             </View>
 
             <Pressable
-              onPress={() => setStep(4)}
+              onPress={() => {
+                track("onboarding_step_3_complete", {
+                  vibe: profile.vibe,
+                  budget: profile.budget,
+                });
+                setStep(4);
+              }}
               style={[styles.primaryButton, styles.fullWidth, { marginTop: 32 }]}
             >
               <Text style={styles.primaryButtonText}>Next</Text>
