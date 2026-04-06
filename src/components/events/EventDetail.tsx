@@ -5,10 +5,10 @@ import {
   Image,
   Pressable,
   ScrollView,
-  Linking,
   StyleSheet,
   Platform,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import {
   ArrowLeft,
   Bookmark,
@@ -223,7 +223,7 @@ export default function EventDetail({
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => Linking.openURL(event.ticketUrl!)}
+                onPress={() => WebBrowser.openBrowserAsync(event.ticketUrl!)}
                 style={styles.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -240,7 +240,7 @@ export default function EventDetail({
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => Linking.openURL(event.eventUrl || event.link)}
+                onPress={() => WebBrowser.openBrowserAsync(event.eventUrl || event.link)}
                 style={styles.primaryButton}
               >
                 <Text style={styles.primaryButtonText}>

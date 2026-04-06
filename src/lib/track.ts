@@ -62,7 +62,7 @@ function getUserId(): string {
 
 export function setTrackingUserId(userId: string) {
   cachedUserId = userId;
-  setUserId(userId).catch(() => {});
+  setUserId(userId)?.catch(() => {});
 }
 
 /**
