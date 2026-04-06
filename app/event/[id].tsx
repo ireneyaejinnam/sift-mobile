@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import {
+  ActivityIndicator,
   Alert,
   View,
   Text,
@@ -59,6 +60,7 @@ export default function SharedEventPage() {
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
   const [dbEvent, setDbEvent] = useState<SiftEvent | null>(null);
+  const [dbLoading, setDbLoading] = useState(false);
 
   // Try hardcoded first, then fetch from Supabase
   const localEvent = useMemo(() => events.find((e) => e.id === id), [id]);
@@ -66,7 +68,10 @@ export default function SharedEventPage() {
 
   useEffect(() => {
     if (!localEvent && id) {
-      fetchEventById(id).then((e) => setDbEvent(e));
+      setDbLoading(true);
+      fetchEventById(id)
+        .then((e) => setDbEvent(e))
+        .finally(() => setDbLoading(false));
     }
   }, [id, localEvent]);
 
@@ -119,6 +124,14 @@ export default function SharedEventPage() {
       showToast("Saved to Want to go");
     }
   };
+
+  if (dbLoading) {
+    return (
+      <View style={s.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   if (!event) {
     return (
@@ -230,7 +243,7 @@ export default function SharedEventPage() {
             {/* Ticket button */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => Linking.openURL(event.ticketUrl!)}
+                onPress={() => { if (event.ticketUrl) Linking.openURL(event.ticketUrl); }}
                 style={s.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -307,7 +320,7 @@ export default function SharedEventPage() {
 
             {/* View event link */}
             <Pressable
-              onPress={() => Linking.openURL(event.eventUrl || event.link)}
+              onPress={() => { const url = event.eventUrl || event.link; if (url) Linking.openURL(url); }}
               style={s.viewEventButton}
             >
               <Text style={s.viewEventText}>View on source</Text>

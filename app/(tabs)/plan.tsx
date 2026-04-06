@@ -276,7 +276,7 @@ export default function PlanScreen() {
                     <Pressable
                       onPress={() => {
                         track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                        Linking.openURL(event.ticketUrl!);
+                        if (event.ticketUrl) Linking.openURL(event.ticketUrl);
                       }}
                       style={s.calendarLink}
                     >
@@ -371,7 +371,7 @@ export default function PlanScreen() {
                 </View>
                 {event.ticketUrl && (
                   <Pressable
-                    onPress={() => Linking.openURL(event.ticketUrl!)}
+                    onPress={() => { if (event.ticketUrl) Linking.openURL(event.ticketUrl); }}
                     style={[s.calendarLink, { marginTop: 8 }]}
                   >
                     <Ticket

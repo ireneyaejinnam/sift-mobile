@@ -187,6 +187,10 @@ export default function OnboardingFlow() {
     };
     setUserProfile(full);
     setOnboardingDoneFlag();
+    track("onboarding_step_4_complete", {
+      free_days: full.freeDays,
+      free_times: full.freeTime,
+    });
     track("onboarding_complete", {
       interests: full.interests,
       borough: full.borough,

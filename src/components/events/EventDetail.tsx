@@ -223,7 +223,7 @@ export default function EventDetail({
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => Linking.openURL(event.ticketUrl!)}
+                onPress={() => { if (event.ticketUrl) Linking.openURL(event.ticketUrl); }}
                 style={styles.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -240,7 +240,7 @@ export default function EventDetail({
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => Linking.openURL(event.eventUrl || event.link)}
+                onPress={() => { const url = event.eventUrl || event.link; if (url) Linking.openURL(url); }}
                 style={styles.primaryButton}
               >
                 <Text style={styles.primaryButtonText}>

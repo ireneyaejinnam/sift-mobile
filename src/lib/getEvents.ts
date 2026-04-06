@@ -66,7 +66,27 @@ function formatPriceLabel(row: {
   return "See tickets";
 }
 
-function mapRow(row: any): SiftEvent {
+interface EventRow {
+  id: string;
+  title: string;
+  category: string;
+  image_url?: string | null;
+  description?: string | null;
+  venue_name?: string | null;
+  address?: string | null;
+  borough?: string | null;
+  start_date: string;
+  end_date?: string | null;
+  price_min?: number | null;
+  price_max?: number | null;
+  is_free: boolean;
+  ticket_url?: string | null;
+  event_url?: string | null;
+  on_sale_date?: string | null;
+  tags?: string[] | null;
+}
+
+function mapRow(row: EventRow): SiftEvent {
   const startDate = (row.start_date as string).split("T")[0];
   const endDate = row.end_date
     ? (row.end_date as string).split("T")[0]
@@ -145,7 +165,6 @@ export async function fetchEvents(
 
   const { data, error } = await query;
   if (error) {
-    console.error("[getEvents] Supabase error:", error.message);
     return [];
   }
 
@@ -164,14 +183,13 @@ export async function fetchEventById(
     .from("events")
     .select("*")
     .eq("id", id)
-    .single();
+    .limit(1);
 
-  if (error || !data) {
-    console.error("[getEvents] fetchEventById error:", error?.message);
+  if (error || !data || data.length === 0) {
     return null;
   }
 
-  return mapRow(data);
+  return mapRow(data[0]);
 }
 
 /**
@@ -189,7 +207,6 @@ export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
     .limit(limit);
 
   if (error || !data) {
-    console.error("[getEvents] fetchAllUpcoming error:", error?.message);
     return [];
   }
 
