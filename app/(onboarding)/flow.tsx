@@ -120,7 +120,13 @@ function OptionRow({
 
 export default function OnboardingFlow() {
   const router = useRouter();
-  const { setUserProfile, userProfile } = useUser();
+  const { setUserProfile, userProfile, isLoggedIn } = useUser();
+
+  // Onboarding is for logged-in users only
+  if (!isLoggedIn) {
+    router.replace("/(auth)/signin");
+    return null;
+  }
   const [step, setStep] = useState(1);
   const [initialized, setInitialized] = useState(false);
   const [profile, setProfile] = useState<Partial<UserProfile>>({

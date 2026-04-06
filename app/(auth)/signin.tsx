@@ -70,7 +70,7 @@ export default function SignInScreen() {
       return;
     }
 
-    setAuth(true, email.trim(), displayName.trim() || undefined);
+    await setAuth(true, email.trim(), displayName.trim() || undefined);
     setLoading(false);
 
     if (hasOnboardingDoneFlag()) {

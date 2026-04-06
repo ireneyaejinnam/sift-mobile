@@ -115,14 +115,15 @@ export default function SharedEventPage() {
 
   const handleBookmark = () => {
     if (!event) return;
+    if (!isLoggedIn) {
+      router.push("/(auth)/signin");
+      return;
+    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");
-    } else if (isLoggedIn) {
-      setSaveSheetOpen(true);
     } else {
-      addSavedEvent(event.id, "Want to go", { title: event.title, startDate: event.startDate, endDate: event.endDate });
-      showToast("Saved to Want to go");
+      setSaveSheetOpen(true);
     }
   };
 
