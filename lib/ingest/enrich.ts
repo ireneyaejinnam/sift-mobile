@@ -1,11 +1,14 @@
 /**
  * LLM enrichment step — uses Claude (Haiku) to improve data accuracy.
  *
- * For each event, fetches the actual official page(s) (event_url + ticket_url)
- * and passes the real content to Claude for verification. Claude only corrects
- * fields it can confirm from the source — unknown fields are left null.
+ * Pipeline per event:
+ *   1. Fetch the aggregator page (event_url) and extract all external links
+ *   2. LLM picks which links are the official website(s) — not aggregators
+ *   3. Fetch each official page (+ ticket_url if different)
+ *   4. LLM extracts verified data from the official content
+ *   5. Programmatic borough fix from address string
  *
- * Also fixes borough/address mismatches programmatically before LLM step.
+ * Unknown/unconfirmed fields are left null — no guessing.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -26,15 +29,21 @@ const VALID_CATEGORIES = [
 
 const VALID_BOROUGHS = ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island'];
 
-// Zip code prefix → borough
+// Known aggregator/social domains — never treat these as "official"
+const AGGREGATOR_DOMAINS = new Set([
+  'eventbrite.com', 'ticketmaster.com', 'facebook.com', 'instagram.com',
+  'twitter.com', 'x.com', 'youtube.com', 'meetup.com', 'dice.fm',
+  'residentadvisor.net', 'ra.co', 'nyctourism.com', 'nycgo.com',
+  'timeout.com', 'theskint.com', 'nycforfree.com', 'cozycreatives.com',
+  'yelp.com', 'tripadvisor.com', 'google.com', 'apple.com',
+  'spotify.com', 'bandcamp.com', 'soundcloud.com',
+]);
+
+// ZIP → borough
 const ZIP_BOROUGH: [RegExp, string][] = [
-  [/\b100\d{2}\b/, 'Manhattan'],
-  [/\b101\d{2}\b/, 'Manhattan'],
-  [/\b102\d{2}\b/, 'Manhattan'],
+  [/\b100\d{2}\b/, 'Manhattan'], [/\b101\d{2}\b/, 'Manhattan'], [/\b102\d{2}\b/, 'Manhattan'],
   [/\b112\d{2}\b/, 'Brooklyn'],
-  [/\b113\d{2}\b/, 'Queens'],
-  [/\b114\d{2}\b/, 'Queens'],
-  [/\b116\d{2}\b/, 'Queens'],
+  [/\b113\d{2}\b/, 'Queens'], [/\b114\d{2}\b/, 'Queens'], [/\b116\d{2}\b/, 'Queens'],
   [/\b104\d{2}\b/, 'Bronx'],
   [/\b103\d{2}\b/, 'Staten Island'],
 ];
@@ -45,7 +54,6 @@ interface EventRow {
   description?: string | null;
   venue_name?: string | null;
   address?: string | null;
-  neighborhood?: string | null;
   category: string;
   is_free: boolean;
   borough?: string | null;
@@ -63,115 +71,203 @@ interface EnrichResult {
   venue_name?: string | null;
 }
 
-// ── Borough auto-fix from address ────────────────────────────
+// ── Borough fix from address ──────────────────────────────────
 
 function boroughFromAddress(address: string): string | null {
   const text = address.toLowerCase();
   if (text.includes('brooklyn')) return 'Brooklyn';
   if (text.includes('queens')) return 'Queens';
-  if (text.includes('bronx') || text.includes(', bx')) return 'Bronx';
+  if (text.includes('bronx')) return 'Bronx';
   if (text.includes('staten island')) return 'Staten Island';
   for (const [re, borough] of ZIP_BOROUGH) {
     if (re.test(address)) return borough;
   }
-  // Manhattan ZIP codes or explicit mention
-  if (text.includes('manhattan') || text.includes(', ny 10') || text.match(/new york,? ny 10/)) {
-    return 'Manhattan';
-  }
+  if (text.includes('manhattan') || /new york,?\s*ny\s*10\d{3}/.test(text)) return 'Manhattan';
   return null;
 }
 
-// ── Web page fetcher ─────────────────────────────────────────
+// ── Web fetch helpers ─────────────────────────────────────────
 
-const FETCH_TIMEOUT = 10_000;
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml',
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-async function fetchPageText(url: string): Promise<string> {
+async function fetchPage(url: string, timeoutMs = 10_000): Promise<{ text: string; links: string[] }> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, { signal: controller.signal, headers: FETCH_HEADERS });
     clearTimeout(timer);
+    if (!res.ok) return { text: '', links: [] };
 
-    if (!res.ok) return '';
     const html = await res.text();
-
-    // Parse and extract meaningful text content
     const root = parse(html);
 
-    // Remove noise nodes
-    root.querySelectorAll('script, style, nav, footer, header, iframe, noscript').forEach((n) => n.remove());
+    // Extract all external links with their anchor text
+    const links: string[] = [];
+    const baseHost = new URL(url).hostname.replace('www.', '');
+    root.querySelectorAll('a[href]').forEach((a) => {
+      const href = a.getAttribute('href') ?? '';
+      if (!href.startsWith('http')) return;
+      try {
+        const linkHost = new URL(href).hostname.replace('www.', '');
+        if (linkHost !== baseHost) links.push(href);
+      } catch { /* skip malformed */ }
+    });
 
-    // Prefer article/main/event content blocks
+    // Strip noise and extract readable text
+    root.querySelectorAll('script, style, nav, footer, header, iframe, noscript').forEach((n) => n.remove());
     const focusSelectors = ['article', 'main', '[class*="event"]', '[class*="content"]', '[id*="event"]', '[id*="content"]'];
     for (const sel of focusSelectors) {
       const node = root.querySelector(sel);
       if (node) {
         const text = node.text.replace(/\s+/g, ' ').trim();
-        if (text.length > 200) return text.slice(0, 4000);
+        if (text.length > 200) return { text: text.slice(0, 4000), links };
       }
     }
-
-    // Fallback: full body text
-    return (root.querySelector('body')?.text ?? root.text).replace(/\s+/g, ' ').trim().slice(0, 4000);
+    const text = (root.querySelector('body')?.text ?? root.text).replace(/\s+/g, ' ').trim().slice(0, 4000);
+    return { text, links };
   } catch {
-    return '';
+    return { text: '', links: [] };
   }
 }
 
-// ── LLM enrichment for a single event ───────────────────────
+// ── Step 1: Find official URLs from aggregator page ───────────
 
-async function enrichOne(event: EventRow, pageTexts: string[]): Promise<EnrichResult> {
-  const pagesSection = pageTexts
-    .map((t, i) => `--- Page ${i + 1} ---\n${t}`)
-    .join('\n\n');
+async function findOfficialUrls(eventTitle: string, aggregatorUrl: string, links: string[]): Promise<string[]> {
+  // Pre-filter: remove aggregator/social domains, deduplicate
+  const candidates = [...new Set(
+    links.filter((href) => {
+      try {
+        const host = new URL(href).hostname.replace('www.', '');
+        return !AGGREGATOR_DOMAINS.has(host) && !AGGREGATOR_DOMAINS.has(host.split('.').slice(-2).join('.'));
+      } catch { return false; }
+    })
+  )].slice(0, 20); // cap at 20 candidates
 
-  const prompt = `You are verifying and correcting NYC event data. Use ONLY the official page content below to answer. Do NOT guess or invent information.
+  if (candidates.length === 0) return [];
 
-Current event data:
-- Title: ${event.title}
-- Venue: ${event.venue_name ?? 'unknown'}
-- Address: ${event.address ?? 'unknown'}
-- Borough: ${event.borough ?? 'unknown'}
-- Category: ${event.category}
-- Is free: ${event.is_free}
-- Description: ${event.description?.slice(0, 300) ?? 'none'}
+  // Few-shot prompt to teach Claude what "official website" means
+  const prompt = `You are finding the official website(s) for a NYC event. Given an event title and a list of URLs found on an aggregator page, return only the URLs that are the event's own official website — the organizer's site, venue's event page, or ticketing page for this specific event.
 
-Official page content:
-${pagesSection || '(no pages could be fetched)'}
+RULES:
+- Include: organizer website, venue event page, official ticketing page for this specific event
+- Exclude: social media (Instagram, Facebook, Twitter), music platforms (Spotify, Bandcamp), review sites (Yelp, TripAdvisor), other aggregators
+- If a URL is for a specific tour/event page on the organizer's site, prefer that over their homepage
+- Return a JSON array of URLs. Return [] if none are clearly official.
 
-Return a JSON object with ONLY the fields you can confirm from the page content above. Rules:
-- "category": one of: ${VALID_CATEGORIES.join(', ')} — only if you can determine it confidently
-- "is_free": true or false — only if pricing is explicitly stated
-- "borough": one of: ${VALID_BOROUGHS.join(', ')} — derive from the actual address on the page, not assumptions
-- "address": the full correct address as it appears on the official page
-- "venue_name": correct venue name as it appears on the official page
-- "description": 1–2 punchy sentences (max 250 chars) describing what this event actually is. No "Join us", no ticket info, no HTML. If multiple locations, briefly note that.
-- If a field cannot be confirmed from the page, set it to null — do NOT include uncertain values
-- Return ONLY a JSON object, no other text. Example: {"borough":"Brooklyn","description":"..."}`;
+EXAMPLES:
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
-    messages: [{ role: 'user', content: prompt }],
-  });
+Example 1:
+Event: "Lower Manhattan Irish History Tour"
+Aggregator: nyctourism.com
+Candidates: ["https://fortythievestours.com/tour/lower-manhattan-walking-tour-exploring-irish-history/", "https://www.instagram.com/fortythievestours/", "https://www.tripadvisor.com/Attraction_Review-g60763"]
+Answer: ["https://fortythievestours.com/tour/lower-manhattan-walking-tour-exploring-irish-history/"]
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : '';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return {};
+Example 2:
+Event: "Jazz Night at Blue Note"
+Aggregator: nycgo.com
+Candidates: ["https://www.bluenote.net/event/jazz-night/", "https://www.ticketmaster.com/event/abc123", "https://www.facebook.com/bluenotenyc", "https://www.yelp.com/biz/blue-note"]
+Answer: ["https://www.bluenote.net/event/jazz-night/", "https://www.ticketmaster.com/event/abc123"]
+
+Example 3:
+Event: "Brooklyn Flea Market"
+Aggregator: theskint.com
+Candidates: ["https://www.brooklynflea.com/markets/fort-greene/", "https://www.instagram.com/brooklynflea/", "https://maps.google.com/?q=brooklyn+flea"]
+Answer: ["https://www.brooklynflea.com/markets/fort-greene/"]
+
+Example 4:
+Event: "MoMA Free Friday Nights"
+Aggregator: nycforfree.com
+Candidates: ["https://www.facebook.com/MuseumModernArt", "https://www.youtube.com/moma"]
+Answer: []
+
+Now answer for:
+Event: "${eventTitle}"
+Aggregator: ${aggregatorUrl}
+Candidates: ${JSON.stringify(candidates)}
+Answer:`;
 
   try {
-    return JSON.parse(jsonMatch[0]) as EnrichResult;
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = message.content[0].type === 'text' ? message.content[0].text : '[]';
+    const match = text.match(/\[[\s\S]*?\]/);
+    if (!match) return [];
+    const urls = JSON.parse(match[0]) as string[];
+    return urls.filter((u) => typeof u === 'string' && u.startsWith('http'));
+  } catch {
+    return [];
+  }
+}
+
+// ── Step 2: Extract data from official page content ───────────
+
+async function extractFromOfficialPages(event: EventRow, pageContents: { url: string; text: string }[]): Promise<EnrichResult> {
+  if (pageContents.length === 0) return {};
+
+  const pagesSection = pageContents
+    .map(({ url, text }) => `--- Official page: ${url} ---\n${text}`)
+    .join('\n\n');
+
+  // Few-shot prompt for data extraction from official content
+  const prompt = `You are extracting accurate event data from official website content. Use ONLY the information explicitly stated on the official pages below. Do NOT guess or infer from the event title alone.
+
+RULES:
+- "borough": derive strictly from the address shown on the page (Brooklyn address = Brooklyn, not Manhattan)
+- "address": use the exact address as written on the official page
+- "is_free": only set if price is explicitly stated. true = free, false = paid
+- "description": 1-2 punchy sentences (max 250 chars) describing what this event IS. No "Join us", no ticket info, no HTML artifacts. If event happens at multiple locations, briefly note that.
+- "category": only re-classify if clearly wrong
+- Set any field to null if not confirmed on the page
+- Return ONLY a JSON object, no other text
+
+EXAMPLES:
+
+Example 1:
+Official page content: "...Forty Thieves Tours presents a 2-hour walking tour through Lower Manhattan's Irish immigrant history. Departures from Bowling Green, Manhattan, NY 10004. $35 per person..."
+Current data: title="Lower Manhattan Irish History Tour", borough="Manhattan", is_free=true
+Answer: {"borough":"Manhattan","address":"Bowling Green, Manhattan, NY 10004","is_free":false,"description":"2-hour walking tour through Lower Manhattan's Irish immigrant history with Forty Thieves Tours. Departs from Bowling Green.","category":"outdoors"}
+
+Example 2:
+Official page content: "...Brooklyn Flea is open every Saturday at 80 Ferry St, Brooklyn, NY 11201. Free admission. Over 100 vendors selling vintage furniture, clothing, jewelry and food..."
+Current data: borough="Manhattan", is_free=false
+Answer: {"borough":"Brooklyn","address":"80 Ferry St, Brooklyn, NY 11201","is_free":true,"description":"100+ vendors selling vintage furniture, clothing, jewelry, and street food every Saturday in Brooklyn.","category":"popups"}
+
+Example 3:
+Official page content: "...An immersive theater experience set in a 1920s hotel. Tickets from $120. Located at 530 W 27th St, New York, NY 10001..."
+Current data: borough=null, category="nightlife"
+Answer: {"borough":"Manhattan","address":"530 W 27th St, New York, NY 10001","is_free":false,"description":"Immersive theater experience set in a 1920s hotel environment. Tickets from $120.","category":"theater"}
+
+Now extract for:
+Current data: title="${event.title}", venue="${event.venue_name ?? 'unknown'}", current address="${event.address ?? 'unknown'}", borough="${event.borough ?? 'unknown'}", category="${event.category}", is_free=${event.is_free}
+
+${pagesSection}
+Answer:`;
+
+  try {
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = message.content[0].type === 'text' ? message.content[0].text : '';
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) return {};
+    return JSON.parse(match[0]) as EnrichResult;
   } catch {
     return {};
   }
 }
 
-// ── Main ─────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────
 
 export async function enrichEvents(): Promise<void> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -183,7 +279,7 @@ export async function enrichEvents(): Promise<void> {
 
   const { data: events, error } = await supabase
     .from('events')
-    .select('id, title, description, venue_name, address, neighborhood, category, is_free, borough, tags, event_url, ticket_url')
+    .select('id, title, description, venue_name, address, category, is_free, borough, tags, event_url, ticket_url')
     .gte('start_date', new Date().toISOString().split('T')[0])
     .limit(300);
 
@@ -200,73 +296,89 @@ export async function enrichEvents(): Promise<void> {
   for (const ev of events as EventRow[]) {
     const patch: Record<string, unknown> = {};
 
-    // ── Step 1: Fix borough/address mismatch programmatically ──
+    // ── Step 0: Fix borough/address mismatch programmatically ──
     if (ev.address) {
-      const inferredBorough = boroughFromAddress(ev.address);
-      if (inferredBorough && inferredBorough !== ev.borough) {
-        patch.borough = inferredBorough;
+      const inferred = boroughFromAddress(ev.address);
+      if (inferred && inferred !== ev.borough) {
+        patch.borough = inferred;
         addressFixed++;
       }
     }
 
+    // ── Step 1: Find official URLs ────────────────────────────
+    const officialUrls: string[] = [];
+
+    if (ev.event_url) {
+      const { links } = await fetchPage(ev.event_url);
+      const found = await findOfficialUrls(ev.title, ev.event_url, links);
+      officialUrls.push(...found);
+    }
+
+    // Always include ticket_url if it's from a non-aggregator domain
+    if (ev.ticket_url) {
+      try {
+        const host = new URL(ev.ticket_url).hostname.replace('www.', '');
+        if (!AGGREGATOR_DOMAINS.has(host)) officialUrls.push(ev.ticket_url);
+      } catch { /* skip */ }
+    }
+
+    // Deduplicate
+    const uniqueUrls = [...new Set(officialUrls)].slice(0, 3);
+
     // ── Step 2: Fetch official pages ──────────────────────────
-    const urls = [...new Set([ev.event_url, ev.ticket_url].filter(Boolean) as string[])];
-    const pageTexts: string[] = [];
-
-    for (const url of urls) {
-      const text = await fetchPageText(url);
-      if (text) pageTexts.push(text);
+    const pageContents: { url: string; text: string }[] = [];
+    for (const url of uniqueUrls) {
+      const { text } = await fetchPage(url);
+      if (text) pageContents.push({ url, text });
     }
 
-    // ── Step 3: LLM verification ──────────────────────────────
+    // ── Step 3: Extract data from official content ────────────
     let result: EnrichResult = {};
-    try {
-      result = await enrichOne(ev, pageTexts);
-    } catch (err) {
-      console.warn(`[Enrich] LLM failed for ${ev.id}:`, (err as Error).message);
+    if (pageContents.length > 0) {
+      try {
+        result = await extractFromOfficialPages(ev as EventRow, pageContents);
+      } catch (err) {
+        console.warn(`[Enrich] LLM failed for ${ev.id}:`, (err as Error).message);
+      }
     }
 
-    if (result.category && VALID_CATEGORIES.includes(result.category)) {
-      patch.category = result.category;
-    }
+    // Apply results
+    if (result.category && VALID_CATEGORIES.includes(result.category)) patch.category = result.category;
     if (typeof result.is_free === 'boolean') {
       patch.is_free = result.is_free;
       if (result.is_free) patch.price_min = 0;
     }
-    // LLM borough only applies if address-based fix didn't already set it
+    // Borough: address-based fix takes priority; only use LLM if no fix yet
     if (!patch.borough && result.borough && VALID_BOROUGHS.includes(result.borough)) {
       patch.borough = result.borough;
-    }
-    if (result.borough === null && !patch.borough) {
-      // LLM explicitly said unknown — leave existing value, don't overwrite with null
     }
     if (result.description && result.description.length > 20) {
       patch.description = result.description.slice(0, 300).trim();
     }
-    if (result.address && result.address.length > 5) {
-      // Only overwrite if LLM found a more complete address
-      if (!ev.address || result.address.length > ev.address.length) {
-        patch.address = result.address;
-        // Re-check borough from the corrected address
-        const newBorough = boroughFromAddress(result.address);
-        if (newBorough) patch.borough = newBorough;
-      }
+    if (result.address && result.address.length > 5 && (!ev.address || result.address.length > ev.address.length)) {
+      patch.address = result.address;
+      // Re-check borough from corrected address
+      const newBorough = boroughFromAddress(result.address);
+      if (newBorough) patch.borough = newBorough;
     }
-    if (result.venue_name && result.venue_name.length > 2) {
-      patch.venue_name = result.venue_name;
-    }
+    if (result.venue_name && result.venue_name.length > 2) patch.venue_name = result.venue_name;
 
     if (Object.keys(patch).length > 0) {
       const { error: updateErr } = await supabase.from('events').update(patch).eq('id', ev.id);
-      if (!updateErr) updated++;
-      else console.warn(`[Enrich] Update failed for ${ev.id}:`, updateErr.message);
+      if (!updateErr) {
+        updated++;
+      } else {
+        console.warn(`[Enrich] Update failed for ${ev.id}:`, updateErr.message);
+      }
     }
 
-    // Small delay to be polite to external sites and Anthropic rate limits
-    await new Promise((r) => setTimeout(r, 300));
+    const officialNote = pageContents.length > 0 ? `(${pageContents.length} official page(s))` : '(no official pages found)';
+    console.log(`[Enrich] ${ev.title.slice(0, 50)} ${officialNote}`);
+
+    await new Promise((r) => setTimeout(r, 400));
   }
 
-  console.log(`[Enrich] Done. Updated: ${updated} events (${addressFixed} borough fixes from address)`);
+  console.log(`\n[Enrich] Done. Updated: ${updated} events (${addressFixed} borough auto-fixed from address)`);
 }
 
 // Run directly: npx tsx --env-file=.env lib/ingest/enrich.ts
