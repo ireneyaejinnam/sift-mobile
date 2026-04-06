@@ -59,11 +59,11 @@ interface Slot {
 export default function DiscoverScreen() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { userProfile, userEmail, savedEvents, goingEvents } = useUser();
-  const planCount = new Set([
+  const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents } = useUser();
+  const planCount = isLoggedIn ? new Set([
     ...savedEvents.map((e) => e.eventId),
     ...goingEvents.map((e) => e.eventId),
-  ]).size;
+  ]).size : 0;
 
   useEffect(() => {
     if (userEmail) {
