@@ -38,6 +38,7 @@ interface UserContextValue extends SiftStorage {
   }) => boolean;
   isGoing: (eventId: string) => boolean;
   addCustomList: (listName: string) => void;
+  saveEventToNewList: (listName: string, eventId: string, meta?: { title?: string; startDate?: string; endDate?: string }) => void;
   getAllListNames: () => string[];
   addSharedWithYou: (eventId: string) => void;
   updateDisplayName: (name: string) => void;
@@ -276,6 +277,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [storage, persist]
   );
 
+  const saveEventToNewList = useCallback(
+    (listName: string, eventId: string, meta?: { title?: string; startDate?: string; endDate?: string }) => {
+      const trimmed = listName.trim();
+      if (!trimmed) return;
+      const savedAt = new Date().toISOString();
+      const savedEvents = [
+        ...storage.savedEvents.filter((s) => s.eventId !== eventId),
+        { eventId, listName: trimmed, savedAt, eventTitle: meta?.title, eventStartDate: meta?.startDate, eventEndDate: meta?.endDate },
+      ];
+      const customLists = storage.customLists.includes(trimmed)
+        ? storage.customLists
+        : [...storage.customLists, trimmed];
+      persist({ ...storage, savedEvents, customLists });
+    },
+    [storage, persist]
+  );
+
   const getAllListNames = useCallback(() => {
     return [...DEFAULT_LISTS, ...storage.customLists];
   }, [storage.customLists]);
@@ -324,6 +342,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       toggleGoing,
       isGoing,
       addCustomList,
+      saveEventToNewList,
       getAllListNames,
       addSharedWithYou,
       updateDisplayName,
@@ -340,6 +359,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       toggleGoing,
       isGoing,
       addCustomList,
+      saveEventToNewList,
       getAllListNames,
       addSharedWithYou,
       updateDisplayName,
