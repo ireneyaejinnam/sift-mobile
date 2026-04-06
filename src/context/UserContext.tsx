@@ -14,7 +14,7 @@ import type {
   UserProfile,
 } from "@/types/user";
 import { DEFAULT_LISTS, initialStorage } from "@/types/user";
-import { loadStorage, saveStorage, loadUserStorage, saveUserStorage, setOnboardingDoneFlag } from "@/lib/storage";
+import { loadStorage, saveStorage, loadUserStorage, saveUserStorage, setOnboardingDoneFlag, clearOnboardingDoneFlag } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { fetchEventById } from "@/lib/getEvents";
 import { events as localEvents } from "@/data/events";
@@ -166,6 +166,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         // Load this account's own persisted data so switching accounts
         // or logging back in restores saved events, lists, profile, etc.
         const userData = await loadUserStorage(userEmail);
+        if (userData.userProfile) {
+          setOnboardingDoneFlag();
+        } else {
+          clearOnboardingDoneFlag();
+        }
         persist({
           ...userData,
           isLoggedIn,
@@ -177,6 +182,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           createdAt: userData.createdAt ?? new Date().toISOString(),
         });
       } else {
+        clearOnboardingDoneFlag();
         persist({
           ...initialStorage,
           isLoggedIn: false,
