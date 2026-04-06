@@ -58,74 +58,75 @@ export default function ProfileTab() {
 
   return (
     <ScrollView
-      contentContainerStyle={st.scroll}
+      contentContainerStyle={[st.scroll, !isLoggedIn && st.scrollGuest]}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
-      <View style={st.header}>
-        <View style={st.headerRow}>
-          <View
-            style={[
-              st.avatar,
-              isLoggedIn ? st.avatarLoggedIn : st.avatarGuest,
-            ]}
-          >
-            {avatarLetter ? (
-              <Text style={st.avatarText}>{avatarLetter}</Text>
-            ) : (
-              <User size={24} strokeWidth={1.5} color={colors.textSecondary} />
-            )}
-          </View>
-          <View>
-            {editingName ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <TextInput
-                  style={[st.displayName, { borderBottomWidth: 1, borderBottomColor: colors.primary, minWidth: 120, padding: 0 }]}
-                  value={nameInput}
-                  onChangeText={setNameInput}
-                  autoFocus
-                  autoCapitalize="none"
-                />
-                <Pressable onPress={() => {
-                  if (nameInput.trim()) updateDisplayName(nameInput.trim());
-                  setEditingName(false);
-                }}>
-                  <Check size={16} color={colors.primary} />
-                </Pressable>
-              </View>
-            ) : (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={st.displayName}>{displayLabel}</Text>
-                {isLoggedIn && (
+      {isLoggedIn ? (
+        <View style={st.header}>
+          <View style={st.headerRow}>
+            <View style={[st.avatar, st.avatarLoggedIn]}>
+              {avatarLetter ? (
+                <Text style={st.avatarText}>{avatarLetter}</Text>
+              ) : (
+                <User size={24} strokeWidth={1.5} color={colors.textSecondary} />
+              )}
+            </View>
+            <View>
+              {editingName ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <TextInput
+                    style={[st.displayName, { borderBottomWidth: 1, borderBottomColor: colors.primary, minWidth: 120, padding: 0 }]}
+                    value={nameInput}
+                    onChangeText={setNameInput}
+                    autoFocus
+                    autoCapitalize="none"
+                  />
+                  <Pressable onPress={() => {
+                    if (nameInput.trim()) updateDisplayName(nameInput.trim());
+                    setEditingName(false);
+                  }}>
+                    <Check size={16} color={colors.primary} />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={st.displayName}>{displayLabel}</Text>
                   <Pressable onPress={() => { setNameInput(userDisplayName || ""); setEditingName(true); }} hitSlop={8}>
                     <Pencil size={13} color={colors.textSecondary} />
                   </Pressable>
-                )}
-              </View>
-            )}
-            {isLoggedIn && userEmail ? (
-              <Text style={st.emailLabel}>{userEmail}</Text>
-            ) : null}
-            <Pressable onPress={() => router.push("/(onboarding)/flow")}>
-              <Text style={st.editLink}>Edit preferences</Text>
-            </Pressable>
+                </View>
+              )}
+              {userEmail ? <Text style={st.emailLabel}>{userEmail}</Text> : null}
+              <Pressable onPress={() => router.push("/(onboarding)/flow")}>
+                <Text style={st.editLink}>Edit preferences</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
-        {!isLoggedIn && (
+      ) : (
+        <View style={st.guestHeader}>
+          <View style={[st.avatar, st.avatarGuest]}>
+            <User size={28} strokeWidth={1.5} color={colors.textSecondary} />
+          </View>
+          <Text style={st.guestTitle}>You're browsing as a guest</Text>
+          <Text style={st.guestSub}>Sign in to save events, build lists, and plan your weekend.</Text>
           <Pressable
             onPress={() => router.push("/(auth)/signin")}
             style={st.signInButton}
           >
             <Text style={st.signInText}>Sign in to save your taste</Text>
           </Pressable>
-        )}
-      </View>
+        </View>
+      )}
 
-      {/* Calendar */}
-      <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
+      {/* Calendar — logged-in only */}
+      {isLoggedIn && (
+        <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
+      )}
 
-      {/* Shared with you */}
-      {sharedWithYou.length > 0 && (
+      {/* Shared with you — logged-in only */}
+      {isLoggedIn && sharedWithYou.length > 0 && (
         <View style={st.section}>
           <Text style={st.h3}>Shared with you</Text>
           <View style={{ gap: 8 }}>
@@ -151,8 +152,8 @@ export default function ProfileTab() {
         </View>
       )}
 
-      {/* Saved Lists */}
-      <SavedListsSection />
+      {/* Saved Lists — logged-in only */}
+      {isLoggedIn && <SavedListsSection />}
 
       {/* Preferences */}
       {userProfile && (
@@ -215,25 +216,27 @@ export default function ProfileTab() {
         </View>
       )}
 
-      {/* Quick Stats */}
-      <View style={st.section}>
-        <Text style={st.h3}>Quick Stats</Text>
-        <View style={st.statsRow}>
-          <View style={st.statCard}>
-            <Text style={st.statNumber}>{savedEvents.length}</Text>
-            <Text style={st.statLabel}>Events Saved</Text>
+      {/* Quick Stats — logged-in only */}
+      {isLoggedIn && (
+        <View style={st.section}>
+          <Text style={st.h3}>Quick Stats</Text>
+          <View style={st.statsRow}>
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{savedEvents.length}</Text>
+              <Text style={st.statLabel}>Events Saved</Text>
+            </View>
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{goingEvents.length}</Text>
+              <Text style={st.statLabel}>Events Going</Text>
+            </View>
           </View>
-          <View style={st.statCard}>
-            <Text style={st.statNumber}>{goingEvents.length}</Text>
-            <Text style={st.statLabel}>Events Going</Text>
-          </View>
+          {createdAt && (
+            <Text style={st.memberSince}>
+              Member since {new Date(createdAt).toLocaleDateString("en-US")}
+            </Text>
+          )}
         </View>
-        {createdAt && (
-          <Text style={st.memberSince}>
-            Member since {new Date(createdAt).toLocaleDateString("en-US")}
-          </Text>
-        )}
-      </View>
+      )}
 
       {/* Sign out */}
       {isLoggedIn && (
@@ -257,8 +260,20 @@ const st = StyleSheet.create({
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
   },
+  scrollGuest: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   header: { marginBottom: 24 },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+  guestHeader: {
+    alignItems: "center",
+    paddingVertical: 32,
+    marginBottom: 24,
+    gap: 8,
+  },
+  guestTitle: { ...typography.h3, textAlign: "center", marginTop: 12 },
+  guestSub: { ...typography.sm, color: colors.textSecondary, textAlign: "center", lineHeight: 20, paddingHorizontal: 16 },
   avatar: {
     width: 48,
     height: 48,
@@ -275,8 +290,10 @@ const st = StyleSheet.create({
   signInButton: {
     backgroundColor: colors.primary,
     paddingVertical: 14,
+    paddingHorizontal: 32,
     borderRadius: radius.md,
     alignItems: "center",
+    alignSelf: "center",
   },
   signInText: { ...typography.body, fontWeight: "600", color: colors.white },
   section: { marginBottom: 32 },

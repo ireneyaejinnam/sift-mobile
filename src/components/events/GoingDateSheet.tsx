@@ -67,7 +67,7 @@ export default function GoingDateSheet({
       >
         {options.map((opt) => (
           <Pressable
-            key={opt.date}
+            key={opt.time ? `${opt.date}-${opt.time}` : opt.date}
             onPress={() => setSelected(opt.date)}
             style={[st.option, selected === opt.date && st.optionSelected]}
           >

@@ -18,7 +18,7 @@ export default function SaveToListSheet({
   onClose,
   onSaved,
 }: SaveToListSheetProps) {
-  const { getAllListNames, addSavedEvent, addCustomList } = useUser();
+  const { getAllListNames, addSavedEvent, saveEventToNewList } = useUser();
   const [newListName, setNewListName] = useState("");
   const [showNewInput, setShowNewInput] = useState(false);
 
@@ -33,8 +33,7 @@ export default function SaveToListSheet({
   const handleCreateList = () => {
     const trimmed = newListName.trim();
     if (!trimmed) return;
-    addCustomList(trimmed);
-    addSavedEvent(eventId, trimmed, eventMeta);
+    saveEventToNewList(trimmed, eventId, eventMeta);
     onSaved(trimmed);
     onClose();
   };

@@ -177,6 +177,10 @@ export default function EventCard({
   };
 
   const handleBookmarkPress = () => {
+    if (!isLoggedIn) {
+      if (onRequestSignIn) onRequestSignIn();
+      return;
+    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");

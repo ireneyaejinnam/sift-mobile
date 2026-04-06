@@ -2,8 +2,11 @@ import { Tabs } from "expo-router";
 import { CalendarCheck, Compass, User } from "lucide-react-native";
 import { colors, typography } from "@/lib/theme";
 import { Platform } from "react-native";
+import { useUser } from "@/context/UserContext";
 
 export default function TabLayout() {
+  const { isLoggedIn } = useUser();
+
   return (
     <Tabs
       screenOptions={{
@@ -37,6 +40,7 @@ export default function TabLayout() {
         name="plan"
         options={{
           title: "Plan",
+          href: isLoggedIn ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <CalendarCheck size={size} color={color} strokeWidth={1.5} />
           ),
