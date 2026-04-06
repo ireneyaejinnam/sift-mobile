@@ -14,7 +14,9 @@ import { ingestNYCGov } from './nycgov';
 import { ingestTheSkint } from './theskint';
 import { geocodeAllEvents } from './geocode';
 import { reclassifyEvents } from './reclassify';
+import { enrichEvents } from './enrich';
 import { deduplicateEvents } from './dedup';
+import { fetchMissingImages } from './fetchImages';
 import { cleanupExpired } from './cleanup';
 
 async function run(name: string, fn: () => Promise<void>) {
@@ -50,7 +52,9 @@ async function main() {
   // Post-processing
   await run('Geocode',            geocodeAllEvents);
   await run('Reclassify',         reclassifyEvents);
+  await run('Enrich (LLM)',       enrichEvents);
   await run('Dedup',              deduplicateEvents);
+  await run('Fetch Images',       fetchMissingImages);
   await run('Cleanup',            cleanupExpired);
 
   const elapsed = ((Date.now() - start) / 1000 / 60).toFixed(1);
