@@ -40,6 +40,37 @@ export async function saveStorage(data: SiftStorage): Promise<void> {
   }
 }
 
+// ── Per-user storage (keyed by email) ───────────────────────
+// Lets each account keep its own data independent of other accounts / guest.
+
+const userKey = (email: string) => `${STORAGE_KEY}_user_${email}`;
+
+export async function loadUserStorage(email: string): Promise<SiftStorage> {
+  try {
+    const raw = await AsyncStorage.getItem(userKey(email));
+    if (!raw) return initialStorage;
+    const parsed = JSON.parse(raw) as Partial<SiftStorage>;
+    return {
+      ...initialStorage,
+      ...parsed,
+      savedEvents: parsed.savedEvents ?? initialStorage.savedEvents,
+      goingEvents: parsed.goingEvents ?? initialStorage.goingEvents,
+      sharedWithYou: parsed.sharedWithYou ?? initialStorage.sharedWithYou,
+      customLists: parsed.customLists ?? initialStorage.customLists,
+    };
+  } catch {
+    return initialStorage;
+  }
+}
+
+export async function saveUserStorage(data: SiftStorage, email: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(userKey(email), JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
 // ── Session flags ────────────────────────────────────────────
 // These are ephemeral (session-only on web). On mobile we use
 // in-memory state since there's no sessionStorage equivalent.

@@ -14,7 +14,7 @@ import type {
   UserProfile,
 } from "@/types/user";
 import { DEFAULT_LISTS, initialStorage } from "@/types/user";
-import { loadStorage, saveStorage, setOnboardingDoneFlag } from "@/lib/storage";
+import { loadStorage, saveStorage, loadUserStorage, saveUserStorage, setOnboardingDoneFlag } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { fetchEventById } from "@/lib/getEvents";
 import { events as localEvents } from "@/data/events";
@@ -25,7 +25,7 @@ interface UserContextValue extends SiftStorage {
     isLoggedIn: boolean,
     userEmail: string,
     userDisplayName?: string
-  ) => void;
+  ) => Promise<void>;
   setUserProfile: (profile: UserProfile) => void;
   addSavedEvent: (eventId: string, listName: string, meta?: { title?: string; startDate?: string; endDate?: string }) => void;
   removeSavedEvent: (eventId: string) => void;
@@ -59,25 +59,26 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const { data: sessionData } = await supabase.auth.getSession();
           if (sessionData.session?.user) {
             const user = sessionData.session.user;
+            const email = user.email ?? "";
+            // Load this account's own persisted data
+            const userData = email ? await loadUserStorage(email) : data;
             data = {
-              ...data,
+              ...userData,
               isLoggedIn: true,
-              userEmail: user.email ?? data.userEmail,
+              userEmail: email || userData.userEmail,
               userDisplayName:
-                (user.user_metadata?.display_name as string) ?? data.userDisplayName,
+                (user.user_metadata?.display_name as string) ?? userData.userDisplayName,
             };
             // Returning user with saved profile — skip onboarding
             if (data.userProfile) {
               setOnboardingDoneFlag();
             }
           } else {
-            // No active Supabase session — clear stale auth data (fixes guest mode showing old user info)
+            // No active Supabase session — guest always starts clean.
             data = {
-              ...data,
-              isLoggedIn: false,
-              userEmail: "",
-              userDisplayName: undefined,
+              ...initialStorage,
             };
+            saveStorage(data);
           }
         }
       } catch {
@@ -147,31 +148,43 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     (next: SiftStorage) => {
       setStorage(next);
       saveStorage(next);
+      if (next.isLoggedIn && next.userEmail) {
+        saveUserStorage(next, next.userEmail);
+      }
     },
     []
   );
 
   const setAuth = useCallback(
-    (
+    async (
       isLoggedIn: boolean,
       userEmail: string,
       userDisplayName?: string
     ) => {
-      persist({
-        ...storage,
-        isLoggedIn,
-        userEmail,
-        userDisplayName:
-          userDisplayName !== undefined
-            ? userDisplayName
-            : storage.userDisplayName,
-        createdAt:
-          isLoggedIn && !storage.createdAt
-            ? new Date().toISOString()
-            : storage.createdAt,
-      });
+      if (isLoggedIn && userEmail) {
+        // Load this account's own persisted data so switching accounts
+        // or logging back in restores saved events, lists, profile, etc.
+        const userData = await loadUserStorage(userEmail);
+        persist({
+          ...userData,
+          isLoggedIn,
+          userEmail,
+          userDisplayName:
+            userDisplayName !== undefined
+              ? userDisplayName
+              : userData.userDisplayName,
+          createdAt: userData.createdAt ?? new Date().toISOString(),
+        });
+      } else {
+        persist({
+          ...initialStorage,
+          isLoggedIn: false,
+          userEmail: "",
+          userDisplayName: undefined,
+        });
+      }
     },
-    [storage, persist]
+    [persist]
   );
 
   const setUserProfile = useCallback(
