@@ -584,6 +584,7 @@ export default function DiscoverScreen() {
           <ShareSheet
             eventId={shareSheetEvent.id}
             eventTitle={shareSheetEvent.title}
+            eventUrl={shareSheetEvent.eventUrl || shareSheetEvent.link}
             onClose={() => setShareSheetEvent(null)}
           />
         )}

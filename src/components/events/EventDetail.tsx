@@ -296,6 +296,7 @@ export default function EventDetail({
         <ShareSheet
           eventId={event.id}
           eventTitle={event.title}
+          eventUrl={event.eventUrl || event.link}
           onClose={() => setShareSheetOpen(false)}
         />
       </BottomSheet>
