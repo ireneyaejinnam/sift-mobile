@@ -3,22 +3,24 @@ import * as Clipboard from "expo-clipboard";
 import { useToast } from "@/components/ui/Toast";
 import { colors, radius, typography } from "@/lib/theme";
 
-const BASE_URL = "https://sift-app-mvp.vercel.app/event";
-
 interface ShareSheetProps {
   eventId: string;
   eventTitle: string;
+  eventUrl?: string;
   onClose: () => void;
 }
 
 export default function ShareSheet({
   eventId,
   eventTitle,
+  eventUrl,
   onClose,
 }: ShareSheetProps) {
   const { showToast } = useToast();
-  const url = `${BASE_URL}/${eventId}`;
-  const text = `Check out this event on Sift: ${eventTitle} ${url}`;
+  const url = eventUrl ?? "";
+  const text = url
+    ? `Check out this event: ${eventTitle} ${url}`
+    : `Check out this event: ${eventTitle}`;
 
   const copyLink = async () => {
     await Clipboard.setStringAsync(url);
