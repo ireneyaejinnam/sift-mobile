@@ -15,7 +15,7 @@ import { ingestTheSkint } from './theskint';
 import { geocodeAllEvents } from './geocode';
 import { reclassifyEvents } from './reclassify';
 import { enrichEvents } from './enrich';
-import { deduplicateEvents } from './dedup';
+import { deduplicateEvents, mergeRecurringEvents } from './dedup';
 import { fetchMissingImages } from './fetchImages';
 import { cleanupExpired } from './cleanup';
 
@@ -54,6 +54,7 @@ async function main() {
   await run('Reclassify',         reclassifyEvents);
   await run('Enrich (LLM)',       enrichEvents);
   await run('Dedup',              deduplicateEvents);
+  await run('Merge Recurring',    mergeRecurringEvents);
   await run('Fetch Images',       fetchMissingImages);
   await run('Cleanup',            cleanupExpired);
 
