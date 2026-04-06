@@ -22,6 +22,7 @@ import {
   DollarSign,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
+import * as WebBrowser from "expo-web-browser";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
@@ -276,7 +277,7 @@ export default function PlanScreen() {
                     <Pressable
                       onPress={() => {
                         track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                        if (event.ticketUrl) Linking.openURL(event.ticketUrl);
+                        if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
                       }}
                       style={s.calendarLink}
                     >
@@ -371,7 +372,7 @@ export default function PlanScreen() {
                 </View>
                 {event.ticketUrl && (
                   <Pressable
-                    onPress={() => { if (event.ticketUrl) Linking.openURL(event.ticketUrl); }}
+                    onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
                     style={[s.calendarLink, { marginTop: 8 }]}
                   >
                     <Ticket

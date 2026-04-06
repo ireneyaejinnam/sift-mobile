@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Platform,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
@@ -243,7 +244,7 @@ export default function SharedEventPage() {
             {/* Ticket button */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => { if (event.ticketUrl) Linking.openURL(event.ticketUrl); }}
+                onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
                 style={s.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -320,7 +321,7 @@ export default function SharedEventPage() {
 
             {/* View event link */}
             <Pressable
-              onPress={() => { const url = event.eventUrl || event.link; if (url) Linking.openURL(url); }}
+              onPress={() => { const url = event.eventUrl || event.link; if (url) WebBrowser.openBrowserAsync(url); }}
               style={s.viewEventButton}
             >
               <Text style={s.viewEventText}>View on source</Text>
