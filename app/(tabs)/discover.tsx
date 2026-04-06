@@ -329,12 +329,18 @@ export default function DiscoverScreen() {
               />
               <View style={{ marginTop: 20, alignItems: "center" }}>
                 <Pressable
-                  onPress={() => setStep("distance")}
-                  disabled={!filters.dateFrom || !filters.dateTo}
+                  onPress={() => {
+                    // If only a start date is picked, treat it as a single-day range
+                    if (filters.dateFrom && !filters.dateTo) {
+                      setFilters((f) => ({ ...f, dateTo: f.dateFrom }));
+                    }
+                    setStep("distance");
+                  }}
+                  disabled={!filters.dateFrom}
                   style={[
                     s.primaryButton,
                     { minWidth: 160 },
-                    (!filters.dateFrom || !filters.dateTo) && { opacity: 0.5 },
+                    !filters.dateFrom && { opacity: 0.5 },
                   ]}
                 >
                   <Text style={s.primaryButtonText}>Continue</Text>

@@ -156,12 +156,11 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
       ? CATEGORIES.find((c) => c.value === cats[0])?.label ?? cats[0]
       : `${cats.length} selected`;
 
-  const dateLabel =
-    filters.dateFrom && filters.dateTo
-      ? filters.dateFrom === filters.dateTo
-        ? formatDate(filters.dateFrom)
-        : `${formatDate(filters.dateFrom)} – ${formatDate(filters.dateTo)}`
-      : "Any date";
+  const dateLabel = filters.dateFrom
+    ? filters.dateTo && filters.dateTo !== filters.dateFrom
+      ? `${formatDate(filters.dateFrom)} – ${formatDate(filters.dateTo)}`
+      : formatDate(filters.dateFrom)
+    : "Any date";
 
   const distLabel =
     DISTANCES.find((d) => d.value === filters.distance)?.label ?? "Any distance";
