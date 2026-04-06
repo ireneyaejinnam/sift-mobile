@@ -5,8 +5,8 @@ import { createClient } from '@supabase/supabase-js';
  *
  * Runs as a post-processing step after ingest + geocode, before dedup.
  * Scans title, description, venue_name, and tags for category signals.
- * Only reclassifies events currently tagged as low-confidence categories
- * (popups, or Ticketmaster "Miscellaneous" catch-all).
+ * Re-evaluates ALL events from ALL sources — any source can miscategorize.
+ * Rule priority order determines the winner when multiple rules could match.
  *
  * Future enhancement: replace with or augment via Claude API for higher accuracy.
  */
@@ -15,14 +15,6 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 );
-
-// Categories that are likely catch-all / low-confidence assignments.
-// The reclassifier re-evaluates events in these categories.
-const LOW_CONFIDENCE_CATEGORIES = ['popups'];
-
-// Additionally, re-check ALL events from sources known to have poor categorization.
-// Ticketmaster "Miscellaneous" maps to popups, but other sources may also miscategorize.
-const RECHECK_ALL_SOURCES = ['ticketmaster', 'dice', 'meetup', 'yelp', 'nycgov', 'theskint', 'eventbrite', 'nyctourism'];
 
 // ── Reclassification rules ──────────────────────────────────
 // Priority order: first matching rule wins.
@@ -47,6 +39,7 @@ const RULES: Rule[] = [
       'musical', 'opera', 'ballet', 'dance performance',
       'one-man show', 'one-woman show', 'monologue', 'curtain call',
       'production', 'tony winning', 'tony award', 'tony-winning', 'new play',
+      'stage play', 'one-act', 'two-act', 'a play about', 'the play',
       'little mermaid', 'lion king', 'wicked', 'hamilton',
       'phantom of the opera', 'les miserables', 'les mis',
       'book of mormon', 'dear evan hansen', 'moulin rouge',
@@ -55,12 +48,14 @@ const RULES: Rule[] = [
       'merrily we roll along', 'the outsiders', 'suffs',
       'the notebook', 'water for elephants', 'the great gatsby',
       'staged reading', 'preview performance',
-      'revival', 'repertory', 'playwright', 'dramaturgy',
+      'revival', 'repertory', 'playwright', 'dramaturgy', 'dramatic',
       'encores', 'three shows', 'two shows', 'stage show',
       'performing arts', 'theatrical', 'playhouse',
       'act one', 'act two', 'intermission', 'opening night',
+      'cabaret', 'burlesque', 'drag show', 'drag brunch',
+      'drag queen', 'drag king', 'dragmatic',
     ],
-    antiKeywords: ['pop-up shop', 'sample sale', 'merch', 'jazz', 'dj', 'bingo', 'disco', 'matinee disco'],
+    antiKeywords: ['pop-up shop', 'sample sale', 'merch', 'bingo', 'disco', 'matinee disco'],
     venuePatterns: [
       'st. james', 'public theater', 'bam',
       'lincoln center', 'barrow street', 'signature theatre',
@@ -84,10 +79,13 @@ const RULES: Rule[] = [
       'roast', 'open mic comedy', 'sketch comedy', 'comedy show',
       'comedy night', 'laugh', 'comic', 'comedy special',
       'comedic', 'funny', 'humor', 'satire',
+      'open mic', 'open-mic', 'variety show', 'variety act',
     ],
+    antiKeywords: ['pop-up shop', 'sample sale'],
     venuePatterns: [
       'comedy cellar', 'gotham comedy', 'eastville', 'comic strip',
       'stand up ny', 'caveat', 'creek and the cave',
+      'the bell house', 'union hall', 'littlefield',
     ],
   },
   // ── Live Music (before art so "jazz artist" doesn't get caught by art) ──
@@ -101,8 +99,10 @@ const RULES: Rule[] = [
       'live performance', 'acoustic set', 'jam session',
       'jazz club', 'big band', 'jazz ensemble', 'jazz quartet', 'jazz trio',
       'jazz', 'band', 'musician', 'vocalist', 'singer',
+      'orchestra', 'symphony', 'philharmonic', 'ensemble',
+      'vinyl', 'record release', 'listening party',
     ],
-    antiKeywords: ['merch', 'merchandise', 'pop-up shop'],
+    antiKeywords: ['merch', 'merchandise', 'pop-up shop', 'walking tour', 'guided tour', 'history tour'],
     venuePatterns: [
       'brooklyn steel', 'terminal 5', 'bowery ballroom', 'music hall',
       'irving plaza', 'webster hall', 'mercury lounge', 'rough trade',
@@ -111,6 +111,8 @@ const RULES: Rule[] = [
       'beacon theatre', 'radio city', 'kings theatre',
       'birdland', 'smalls', 'dizzy\'s', 'smoke jazz', 'cellar dog', 'mezzrow',
       'madison square garden', 'msg', 'barclays center',
+      'carnegie hall', 'town hall', 'joe\'s pub', 'rockwood music hall',
+      'nublu', 'sultan room', 'brooklyn bowl', 'warsaw',
     ],
   },
   // ── Workshops (before art so "DIY Workshop" doesn't get caught by art) ──
@@ -121,6 +123,7 @@ const RULES: Rule[] = [
       'networking', 'conference', 'learn to', 'how to', 'tutorial',
       'certification', 'bootcamp', 'crash course', 'info session',
       'diy', 'hands-on', 'make your own',
+      'skill share', 'skillshare', 'meetup group', 'talk and demo',
     ],
     venuePatterns: [
       'general assembly', 'wework', 'the wing', 'neuehouse',
@@ -151,8 +154,12 @@ const RULES: Rule[] = [
     antiKeywords: [
       'pop-up shop', 'sample sale', 'merch drop',
       'jazz', 'band', 'concert', 'dj', 'musician', 'bingo',
-      'comedy', 'stand-up', 'standup', 'comedian',
+      'comedy', 'stand-up', 'standup', 'comedian', 'open mic', 'open-mic',
       'workshop', 'diy', 'class', 'hands-on',
+      'drag show', 'drag queen', 'drag king', 'cabaret', 'burlesque',
+      'nightclub', 'night club', '21 and over', 'ages 21',
+      'walking tour', 'guided tour', 'history tour', 'sightseeing',
+      'planting', 'wildflower', 'native plant',
     ],
     venuePatterns: [
       'museum', 'gallery', 'galleries',
@@ -186,9 +193,23 @@ const RULES: Rule[] = [
       'kayak', 'bike ride', 'cycling tour', 'outdoor adventure',
       'nature walk', 'bird watching', 'foraging', 'fishing',
       'rock climbing', 'sailing', 'rowing',
+      'walking tour', 'guided tour', 'history tour', 'historical tour',
+      'sightseeing tour', 'sightseeing', 'neighborhood tour', 'city tour',
+      'tv tour', 'movie tour', 'film tour', 'food tour', 'architecture tour',
+      'boat tour', 'harbor cruise', 'ferry ride',
+      'planting', 'wildflower', 'native plant', 'botanical',
+      'community garden', 'earth day', 'earth month',
+      'park event', 'outdoor market', 'picnic',
+      'scavenger hunt', 'outdoor yoga',
     ],
+    antiKeywords: ['tour stop', 'album release', 'headliner', 'setlist', 'concert tour'],
     venuePatterns: [
       'prospect park', 'central park', 'stadium',
+      'brooklyn bridge park', 'battery park', 'hudson river park',
+      'governors island', 'randalls island', 'high line',
+      'botanical garden', 'bronx zoo', 'queens botanical',
+      'brooklyn botanic', 'wave hill', 'snug harbor',
+      'fort tryon park', 'flushing meadows', 'riverside park',
     ],
   },
   // ── Fitness ──
@@ -199,6 +220,8 @@ const RULES: Rule[] = [
       'marathon', 'cycling class', 'pilates', 'barre', 'crossfit',
       'boot camp', 'workout', 'spin class', 'strength training',
       '5k', '10k', 'half marathon',
+      'zumba', 'kickboxing', 'boxing class', 'dance fitness',
+      'stretch', 'meditation class', 'tai chi',
     ],
     venuePatterns: [
       'equinox', 'soulcycle', 'barry\'s', 'peloton', 'orangetheory',
@@ -214,6 +237,8 @@ const RULES: Rule[] = [
       'food truck', 'restaurant week',
       'bakery', 'pastry', 'patisserie', 'chocolate',
       'cheese tasting', 'spirit tasting', 'mixology',
+      'prix fixe', 'omakase', 'pop-up dinner', 'food crawl',
+      'wine dinner', 'beer dinner', 'tasting menu',
     ],
     venuePatterns: [
       'smorgasburg', 'eataly', 'time out market', 'chelsea market',
@@ -226,10 +251,16 @@ const RULES: Rule[] = [
       'bar crawl', 'club night', 'after dark',
       'late night party', 'bottle service', 'vip night',
       'dance party', 'rave', 'techno night', 'house music night',
+      'nightclub', 'night club', '21 and over', '21+', 'ages 21',
+      'after hours', 'dance floor', 'clubbing',
+      'bottle pop', 'guestlist', 'guest list',
+      'lounge night', 'rooftop party',
     ],
     venuePatterns: [
       'output', 'house of yes', 'good room', 'mirage',
       'basement', 'marquee', '1oak', 'lavo',
+      'le bain', 'ph-d', 'tao', 'avenue', 'up&down',
+      'nebula', 'brooklyn mirage', 'nowadays',
     ],
   },
 ];
@@ -265,12 +296,10 @@ function tryReclassify(
   const tagsLower = tags.map((t) => t.toLowerCase()).join(' ');
   const allText = `${titleLower} ${descLower} ${venueLower} ${tagsLower}`;
 
-  // If currently popups, check if it's a confirmed popup — if so, don't reclassify
-  if (!currentCategory || currentCategory === 'popups') {
-    for (const kw of POPUP_CONFIRM_KEYWORDS) {
-      if (allText.includes(kw)) {
-        return null; // confirmed popup, leave it
-      }
+  // Check if it's a confirmed popup — if so, keep it as popups (don't reclassify away)
+  for (const kw of POPUP_CONFIRM_KEYWORDS) {
+    if (allText.includes(kw)) {
+      return null; // confirmed popup, leave it
     }
   }
 
@@ -326,38 +355,35 @@ function tryReclassify(
 }
 
 /**
- * Reclassify events in Supabase that are in low-confidence categories
- * OR from sources known to have poor categorization.
- * Runs as part of the ingest pipeline.
+ * Reclassify ALL events in Supabase using keyword heuristics.
+ * Runs as part of the ingest pipeline post-processing step.
  */
 export async function reclassifyEvents(): Promise<void> {
   console.log('[Reclassify] Starting reclassification pass...');
 
-  // Fetch events from low-confidence categories
-  const { data: lowConfEvents, error: err1 } = await supabase
-    .from('events')
-    .select('id, title, description, venue_name, tags, category, source')
-    .in('category', LOW_CONFIDENCE_CATEGORIES)
-    .limit(2000);
+  // Fetch ALL events — any source can miscategorize, so we recheck everything.
+  // Paginate to handle large datasets (Supabase default limit is 1000).
+  const allEvents: any[] = [];
+  let offset = 0;
+  const PAGE_SIZE = 1000;
 
-  // Also fetch events from sources with poor categorization (all categories)
-  const { data: sourceEvents, error: err2 } = await supabase
-    .from('events')
-    .select('id, title, description, venue_name, tags, category, source')
-    .in('source', RECHECK_ALL_SOURCES)
-    .limit(3000);
+  while (true) {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id, title, description, venue_name, tags, category, source')
+      .range(offset, offset + PAGE_SIZE - 1);
 
-  if ((err1 && err2) || (!lowConfEvents && !sourceEvents)) {
-    console.error('[Reclassify] Failed to fetch events:', err1 || err2);
-    return;
+    if (error) {
+      console.error('[Reclassify] Failed to fetch events:', error.message);
+      return;
+    }
+    if (!data || data.length === 0) break;
+    allEvents.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
   }
 
-  // Merge and deduplicate by ID
-  const allMap = new Map<string, any>();
-  for (const e of [...(lowConfEvents ?? []), ...(sourceEvents ?? [])]) {
-    allMap.set(e.id, e);
-  }
-  const events = Array.from(allMap.values());
+  const events = allEvents;
 
   console.log(`[Reclassify] Found ${events.length} events to evaluate`);
 
