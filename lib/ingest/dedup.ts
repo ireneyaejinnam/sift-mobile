@@ -102,6 +102,6 @@ async function main() {
 }
 
 
-if (require.main === module) {
+if (require.main === module || (process.argv[1] && process.argv[1].endsWith('dedup.ts'))) {
   main().catch(console.error);
 }

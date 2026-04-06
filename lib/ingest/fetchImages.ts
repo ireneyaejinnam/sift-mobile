@@ -126,3 +126,8 @@ export async function fetchMissingImages(): Promise<void> {
 
   console.log(`[Images] Done. Updated: ${updated}, Failed: ${failed}`);
 }
+
+// Run directly: npx tsx --env-file=.env lib/ingest/fetchImages.ts
+if (process.argv[1] && process.argv[1].endsWith('fetchImages.ts')) {
+  fetchMissingImages().catch(console.error);
+}

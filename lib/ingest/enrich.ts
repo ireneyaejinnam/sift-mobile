@@ -177,3 +177,8 @@ export async function enrichEvents(): Promise<void> {
 
   console.log(`[Enrich] Done. Updated: ${updated}, No changes: ${skipped}`);
 }
+
+// Run directly: npx tsx --env-file=.env lib/ingest/enrich.ts
+if (process.argv[1] && process.argv[1].endsWith('enrich.ts')) {
+  enrichEvents().catch(console.error);
+}
