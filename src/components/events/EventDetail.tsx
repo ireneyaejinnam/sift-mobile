@@ -63,10 +63,6 @@ export default function EventDetail({
   const going = isGoing(event.id);
 
   const handleBookmarkPress = () => {
-    if (!isLoggedIn) {
-      if (onRequestSignIn) onRequestSignIn();
-      return;
-    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");
@@ -227,7 +223,7 @@ export default function EventDetail({
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => WebBrowser.openBrowserAsync(event.ticketUrl!)}
+                onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
                 style={styles.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -244,7 +240,7 @@ export default function EventDetail({
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => WebBrowser.openBrowserAsync(event.eventUrl || event.link)}
+                onPress={() => { const url = event.eventUrl || event.link; if (url) WebBrowser.openBrowserAsync(url); }}
                 style={styles.primaryButton}
               >
                 <Text style={styles.primaryButtonText}>

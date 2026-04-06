@@ -62,6 +62,7 @@ export default function SignInScreen() {
           setLoading(false);
           return;
         }
+        track("sign_in_completed", { method: "email" });
       }
     } catch {
       showToast("Something went wrong. Try again.");

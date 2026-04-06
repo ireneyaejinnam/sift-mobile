@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -24,9 +24,7 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
-import { getRecommendations, getRecommendationsFromDB } from "@/lib/recommend";
-import type { ScoredEvent } from "@/lib/recommend";
-import { fetchEvents } from "@/lib/getEvents";
+import { fetchAllUpcoming } from "@/lib/getEvents";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
@@ -82,6 +80,7 @@ export default function DiscoverScreen() {
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const loadingRef = useRef(false);
 
   const reset = useCallback(() => {
     setStep("welcome");
@@ -99,62 +98,92 @@ export default function DiscoverScreen() {
   }, [step]);
 
   const goToResults = useCallback(async (f: Filters) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     setStep("results");
 
     let resultEvents: SiftEvent[];
 
-    try {
-      if (userProfile) {
-        // Async: fetch from Supabase, score against profile
-        const scored = await getRecommendationsFromDB(userProfile, 20);
-        const allScored = scored.map((s) => ({
-          ...s.event,
-          matchReason: s.matchReasons.length > 0
-            ? s.matchReasons.slice(0, 3).join(" · ")
-            : "Picked for you",
-        }));
+    // Priority ordering:
+    //   Tier 1: Quiz categories (what user just picked)
+    //   Tier 2: Onboarding interests (logged-in only, skip for guest)
+    //   Tier 3: Everything else in the date range
 
-        // Apply distance filter to all results
-        const distanceFiltered = allScored.filter((e) => {
-          if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-          if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-          return true;
+    const applyDistanceFilter = (list: SiftEvent[]) =>
+      list.filter((e) => {
+        if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+        if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+        return true;
+      });
+
+    const INTEREST_TO_CATEGORY: Record<string, string> = {
+      live_music: "music", art_exhibitions: "arts", theater: "theater",
+      workshops: "workshops", fitness: "fitness", comedy: "comedy",
+      food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
+    };
+
+    const tieredSort = (all: SiftEvent[]) => {
+      let pool = applyDistanceFilter(all);
+
+      // Apply date range filter if user picked dates
+      if (f.dateFrom && f.dateTo) {
+        const from = new Date(f.dateFrom);
+        const to = new Date(f.dateTo);
+        from.setDate(from.getDate() - 1); // ±1 day padding
+        to.setDate(to.getDate() + 1);
+        pool = pool.filter((e) => {
+          const start = new Date(e.startDate);
+          const end = new Date(e.endDate ?? e.startDate);
+          return start <= to && end >= from;
         });
-
-        // Priority: quiz category matches first, then everything else
-        const quizMatches = distanceFiltered.filter(
-          (e) => !f.categories?.length || f.categories.includes(e.category)
-        );
-        const rest = distanceFiltered.filter(
-          (e) => f.categories?.length && !f.categories.includes(e.category)
-        );
-        resultEvents = [...quizMatches, ...rest];
-      } else {
-        // Guest: try Supabase first, fall back to local
-        const dbEvents = await fetchEvents(f);
-        resultEvents = dbEvents.length > 0 ? dbEvents : getAllCandidates(f, [], userProfile);
       }
-    } catch {
-      // Fallback to local hardcoded data
-      if (userProfile) {
-        const scored = getRecommendations(userProfile, 20);
-        const allFallback = scored.map((s) => ({
-          ...s.event,
-          matchReason: s.matchReasons.length > 0
-            ? s.matchReasons.slice(0, 3).join(" · ")
-            : "Picked for you",
-        }));
-        const fbQuiz = allFallback.filter(
-          (e) => !f.categories?.length || f.categories.includes(e.category)
-        );
-        const fbRest = allFallback.filter(
-          (e) => f.categories?.length && !f.categories.includes(e.category)
-        );
-        resultEvents = [...fbQuiz, ...fbRest];
+
+      const quizCats = f.categories ?? [];
+
+      // Tier 1: matches quiz categories
+      const tier1 = quizCats.length > 0
+        ? pool.filter((e) => quizCats.includes(e.category))
+            .map((e) => ({ ...e, matchReason: "Matches your mood" }))
+        : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
+
+      if (quizCats.length === 0) return tier1;
+
+      const tier1Ids = new Set(tier1.map((e) => e.id));
+
+      // Tier 2: matches onboarding interests (logged-in only)
+      let tier2: SiftEvent[] = [];
+      if (userProfile?.interests?.length) {
+        const interestCats = userProfile.interests
+          .map((i) => INTEREST_TO_CATEGORY[i])
+          .filter(Boolean);
+        tier2 = pool
+          .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
+          .map((e) => ({ ...e, matchReason: "Based on your interests" }));
+      }
+
+      const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
+
+      // Tier 3: everything else
+      const tier3 = pool
+        .filter((e) => !usedIds.has(e.id))
+        .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
+
+      return [...tier1, ...tier2, ...tier3];
+    };
+
+    try {
+      // Fetch all upcoming events, then sort into tiers client-side
+      const allEvents = await fetchAllUpcoming(500);
+      if (allEvents.length > 0) {
+        resultEvents = tieredSort(allEvents);
       } else {
+        // Supabase returned nothing — fall back to local data
         resultEvents = getAllCandidates(f, [], userProfile);
       }
+    } catch {
+      showToast("Couldn't connect — showing cached results");
+      resultEvents = getAllCandidates(f, [], userProfile);
     }
 
     setResultPool(resultEvents);
@@ -165,6 +194,7 @@ export default function DiscoverScreen() {
     setSlots(initial);
     setDismissedIds([]);
     setLoading(false);
+    loadingRef.current = false;
     track("recommendations_viewed", {
       count: initial.length,
       categories: f.categories,

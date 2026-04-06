@@ -177,10 +177,6 @@ export default function EventCard({
   };
 
   const handleBookmarkPress = () => {
-    if (!isLoggedIn) {
-      if (onRequestSignIn) onRequestSignIn();
-      return;
-    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");
@@ -336,7 +332,7 @@ export default function EventCard({
                 <Pressable
                   onPress={() => {
                     track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                    WebBrowser.openBrowserAsync(event.ticketUrl!);
+                    if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
                   }}
                   style={styles.ticketButton}
                 >
@@ -351,7 +347,7 @@ export default function EventCard({
                 </View>
               ) : event.eventUrl ? (
                 <Pressable
-                  onPress={() => WebBrowser.openBrowserAsync(event.eventUrl!)}
+                  onPress={() => { if (event.eventUrl) WebBrowser.openBrowserAsync(event.eventUrl); }}
                   style={styles.viewEventButton}
                 >
                   <ExternalLink size={14} strokeWidth={1.5} color={colors.primary} />
