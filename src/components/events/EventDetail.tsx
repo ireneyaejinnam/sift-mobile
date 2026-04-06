@@ -63,6 +63,10 @@ export default function EventDetail({
   const going = isGoing(event.id);
 
   const handleBookmarkPress = () => {
+    if (!isLoggedIn) {
+      if (onRequestSignIn) onRequestSignIn();
+      return;
+    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");
