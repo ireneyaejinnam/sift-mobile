@@ -49,7 +49,7 @@ export async function ingestResidentAdvisor(): Promise<void> {
       variables: {
         filters: {
           areas: { eq: 8 }, // New York area ID
-          listing_date: {
+          listingDate: {
             gte: new Date().toISOString().split('T')[0],
             lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
               .toISOString()
@@ -63,8 +63,10 @@ export async function ingestResidentAdvisor(): Promise<void> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Sift/1.0 (event discovery)',
-        Referer: 'https://ra.co/events/us/newyork',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://ra.co/events/us/newyork',
+        'Origin': 'https://ra.co',
+        'x-ra-platform': 'website',
       },
       body: JSON.stringify(query),
     });
@@ -73,8 +75,8 @@ export async function ingestResidentAdvisor(): Promise<void> {
       console.warn(`[RA] GraphQL returned ${res.status}, trying HTML fallback...`);
       await scrapeRAHtml(allEvents);
     } else {
-      const json = await res.json();
-      const listings = json?.data?.eventListings?.data ?? [];
+      const json = await res.json() as { data?: { eventListings?: { data?: unknown[] } } };
+      const listings = (json?.data?.eventListings?.data ?? []) as Array<{ event?: Record<string, unknown> }>;
 
       for (const listing of listings) {
         const ev = listing.event;
