@@ -1,6 +1,8 @@
 import { SiftEvent } from './schema';
 import { SIFT_CATEGORIES } from './config';
 
+// ── Geographic filter ────────────────────────────────────────────────────────
+
 // NYC ZIP code prefixes
 const NYC_ZIP_RE = /\b1(?:00|01|02|03|04|10|11|12|13|14|16)\d{2}\b/;
 
@@ -33,6 +35,81 @@ export function isNYCAddress(address: string | undefined): boolean {
   return true;
 }
 
+// ── Hard rejection rules ────────────────────────────────────────────────────
+// Events matching these patterns are dropped before hitting Supabase.
+// Bias toward quality: false-negative (missing a real event) is better than
+// false-positive (surfacing corporate spam to users).
+
+const TITLE_BLOCKLIST: RegExp[] = [
+  /wellness promo/i,
+  /vet promo/i,
+  /bond vet/i,
+  /murder mystery pub crawl/i,
+  /corporate team.{0,10}(building|event|outing)/i,
+  /solo characters/i,
+  /networking mixer/i,
+  /job fair/i,
+  /real estate (seminar|webinar|event)/i,
+  /free consultation/i,
+  /promo(tion)? (event|night)/i,
+  /grand opening (sale|event)/i,
+  /timeshare/i,
+  /multi-?level marketing/i,
+  /\bmlm\b/i,
+  /business opportunity/i,
+  /skin ?care (event|demo|promo)/i,
+  /car(e|ing) (fair|expo)/i,
+  /health (fair|expo|screening)/i,
+  /vaccine (clinic|event)/i,
+  /pet (adoption|wellness) event/i,
+  // Wrong-demographic signals
+  /speed (friending|networking|dating)/i,
+  /professional (mixer|networking|development seminar)/i,
+  /\bwebinar\b/i,
+  /virtual event/i,
+  /online (event|workshop|class)/i,
+  /\bopen house\b/i,
+  /\binfo(rmation)? session\b/i,
+  /pitch (competition|night|event)/i,
+  /\bhackathon\b/i,
+  /startup (event|pitch|showcase|summit)/i,
+  /investment (seminar|workshop)/i,
+  /crypto (event|meetup|summit)/i,
+  /comedy (dinner|murder mystery)/i,
+  /boat (cruise|party|tour)/i,
+  /harbor (cruise|tour)/i,
+  /times square/i,
+];
+
+const DESCRIPTION_SPAM_SIGNALS: RegExp[] = [
+  /click here to (register|sign up)/i,
+  /limited time offer/i,
+  /buy one get one/i,
+  /use promo code/i,
+  /earn (extra|passive) income/i,
+  /work from home opportunity/i,
+  /register (now|today|at the link) to/i,
+  /spots (are |going )?fast/i,
+  /\$\d+ (off|discount) (with|using) (code|promo)/i,
+];
+
+function shouldReject(event: Partial<SiftEvent>): string | null {
+  const title = event.title ?? '';
+  const desc  = event.description ?? '';
+
+  for (const re of TITLE_BLOCKLIST) {
+    if (re.test(title)) return `title_blocklist:${re.source.slice(0, 40)}`;
+  }
+  for (const re of DESCRIPTION_SPAM_SIGNALS) {
+    if (re.test(desc)) return `desc_spam:${re.source.slice(0, 40)}`;
+  }
+  // Drop events with no location signal at all (no venue, no address, no coords)
+  if (!event.venue_name && !event.address && !event.latitude) {
+    return 'no_location';
+  }
+  return null;
+}
+
 export function normalizeEvent(raw: Partial<SiftEvent>): SiftEvent | null {
   if (!raw.title || !raw.start_date || !raw.category || !raw.source || !raw.source_id) {
     return null;
@@ -45,6 +122,12 @@ export function normalizeEvent(raw: Partial<SiftEvent>): SiftEvent | null {
 
   if (!isNYCAddress(raw.address)) {
     console.warn(`[Normalize] Non-NYC address, skipping: "${raw.title}" @ "${raw.address}"`);
+    return null;
+  }
+
+  const rejectReason = shouldReject(raw);
+  if (rejectReason) {
+    console.log(`[normalize] Rejected "${raw.title}" (${rejectReason})`);
     return null;
   }
 

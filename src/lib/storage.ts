@@ -49,3 +49,55 @@ export function clearOnboardingDoneFlag(): void   { _onboardingDone = false; }
 export function hasGuestFlag(): boolean  { return _guestFlag; }
 export function setGuestFlag(): void     { _guestFlag = true; }
 export function clearGuestFlag(): void   { _guestFlag = false; }
+
+// ── Dismissed events (learning signal) ──────────────────────
+
+const DISMISSED_KEY = "sift_dismissed_events";
+
+export interface DismissedRecord {
+  eventId: string;
+  category: string;
+  dismissedAt: string; // ISO string
+}
+
+export async function getDismissedEvents(): Promise<DismissedRecord[]> {
+  try {
+    const raw = await AsyncStorage.getItem(DISMISSED_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as DismissedRecord[];
+  } catch {
+    return [];
+  }
+}
+
+export async function addDismissedEvent(record: DismissedRecord): Promise<void> {
+  try {
+    const existing = await getDismissedEvents();
+    // Keep last 200 dismissals to avoid unbounded growth
+    const trimmed = [...existing, record].slice(-200);
+    await AsyncStorage.setItem(DISMISSED_KEY, JSON.stringify(trimmed));
+  } catch {
+    // ignore
+  }
+}
+
+// ── Gesture tutorial ─────────────────────────────────────────
+
+const GESTURE_TIP_KEY = "sift_gesture_tip_seen";
+
+export async function hasGestureTipSeen(): Promise<boolean> {
+  try {
+    const val = await AsyncStorage.getItem(GESTURE_TIP_KEY);
+    return val === "1";
+  } catch {
+    return false;
+  }
+}
+
+export async function setGestureTipSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(GESTURE_TIP_KEY, "1");
+  } catch {
+    // ignore
+  }
+}

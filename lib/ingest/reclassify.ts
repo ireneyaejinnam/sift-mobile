@@ -105,6 +105,9 @@ const RULES: Rule[] = [
       'jazz', 'band', 'musician', 'vocalist', 'singer',
       'orchestra', 'symphony', 'philharmonic', 'ensemble',
       'vinyl', 'record release', 'listening party',
+      // Latin / dance music genres (title match captures "Salsa Thursdays" etc.)
+      'salsa', 'bachata', 'merengue', 'cumbia', 'reggaeton',
+      'latin night', 'salsa night', 'dance night', 'latin dance',
     ],
     antiKeywords: ['merch', 'merchandise', 'pop-up shop', 'walking tour', 'guided tour', 'history tour'],
     venuePatterns: [
@@ -271,6 +274,11 @@ const RULES: Rule[] = [
       'prix fixe', 'omakase', 'pop-up dinner', 'food crawl',
       'wine dinner', 'beer dinner', 'tasting menu',
     ],
+    antiKeywords: [
+      'concert', 'live band', 'live music', 'opening act',
+      'headline', 'tour date', 'performing live', 'live show',
+      'band performs', 'on tour', 'tickets on sale',
+    ],
     venuePatterns: [
       'smorgasburg', 'eataly', 'time out market', 'chelsea market',
     ],
@@ -425,7 +433,15 @@ export async function reclassifyEvents(): Promise<void> {
   const updates = new Map<string, { id: string; title: string; oldCat: string }[]>();
   let skipped = 0;
 
+  // Sources whose category data is reliable enough to skip reclassification
+  const TRUST_SOURCE_CATEGORIES = ['ticketmaster', 'resident_advisor', 'dice'];
+
   for (const event of events) {
+    if (TRUST_SOURCE_CATEGORIES.includes(event.source)) {
+      skipped++;
+      continue;
+    }
+
     const result = tryReclassify(
       event.title || '',
       event.description || '',

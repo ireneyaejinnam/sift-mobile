@@ -6,8 +6,8 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Platform,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import {
   ArrowLeft,
@@ -60,6 +60,7 @@ export default function EventDetail({
   onBack,
   onRequestSignIn,
 }: EventDetailProps) {
+  const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const {
     isLoggedIn,
@@ -142,16 +143,18 @@ export default function EventDetail({
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Back button */}
+      {/* Sticky back header */}
+      <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
         <Pressable onPress={onBack} style={styles.backButton}>
           <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
           <Text style={styles.backText}>Back to results</Text>
         </Pressable>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Card */}
         <View style={styles.card}>
           {/* Image */}
@@ -420,8 +423,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  backHeader: {
+    paddingHorizontal: spacing.page,
+    paddingBottom: 12,
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
   scrollContent: {
-    paddingTop: Platform.OS === "ios" ? 60 : 20,
+    paddingTop: 16,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
   },
@@ -429,7 +439,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginBottom: 20,
   },
   backText: {
     ...typography.sm,
