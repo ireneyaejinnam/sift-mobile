@@ -127,10 +127,22 @@ export async function fetchMissingImages(table = 'events'): Promise<void> {
   console.log(`[Images] Done. Updated: ${updated}, Failed: ${failed}`);
 }
 
-// Run directly: npx tsx --env-file=.env lib/ingest/fetchImages.ts [--source nycforfree]
+// Run directly: npx tsx --env-file=.env lib/ingest/fetchImages.ts [--source nycforfree | --all]
 if (process.argv[1] && process.argv[1].endsWith('fetchImages.ts')) {
   const sourceIdx = process.argv.indexOf('--source');
   const source = sourceIdx !== -1 ? process.argv[sourceIdx + 1] : undefined;
-  const table = source ? `${source}_events` : 'events';
-  fetchMissingImages(table).catch(console.error);
+  const allSources = ['nycforfree', 'ticketmaster', 'eventbrite', 'resident_advisor',
+    'theskint', 'nycgov', 'nyctourism', 'nyc_parks', 'meetup', 'dice', 'cozycreatives',
+    'new_museum', 'chicmi', 'yelp'];
+
+  if (process.argv.includes('--all')) {
+    (async () => {
+      for (const s of allSources) {
+        await fetchMissingImages(`${s}_events`);
+      }
+    })().catch(console.error);
+  } else {
+    const table = source ? `${source}_events` : 'events';
+    fetchMissingImages(table).catch(console.error);
+  }
 }
