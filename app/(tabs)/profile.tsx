@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Platform } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { User, Pencil, Check } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { events } from "@/data/events";
@@ -47,6 +48,7 @@ export default function ProfileTab() {
     signOut,
   } = useUser();
 
+  const insets = useSafeAreaInsets();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(userDisplayName || "");
 
@@ -57,6 +59,10 @@ export default function ProfileTab() {
       : null;
 
   return (
+    <View style={st.screen}>
+      <View style={[st.stickyHeader, { paddingTop: insets.top + 16 }]}>
+        <Text style={st.stickyHeading}>Profile</Text>
+      </View>
     <ScrollView
       contentContainerStyle={[st.scroll, !isLoggedIn && st.scrollGuest]}
       showsVerticalScrollIndicator={false}
@@ -251,12 +257,27 @@ export default function ProfileTab() {
         </Pressable>
       )}
     </ScrollView>
+    </View>
   );
 }
 
 const st = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  stickyHeader: {
+    paddingHorizontal: spacing.page,
+    paddingBottom: 8,
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  stickyHeading: {
+    ...typography.sectionHeading,
+  },
   scroll: {
-    paddingTop: Platform.OS === "ios" ? 60 : 20,
+    paddingTop: 20,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
   },

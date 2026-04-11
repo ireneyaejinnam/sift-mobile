@@ -7,9 +7,9 @@ import {
   ScrollView,
   Linking,
   StyleSheet,
-  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   CalendarPlus,
   Check,
@@ -72,6 +72,7 @@ function formatTimeShort(time: string): string {
 
 export default function PlanScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const { goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
@@ -79,6 +80,7 @@ export default function PlanScreen() {
 
   // Get full event objects for saved + going events
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
+  const [dbLoading, setDbLoading] = useState(false);
 
   const allIds = useMemo(() => {
     const goingIds = goingEvents.map((e) => e.eventId);
@@ -91,9 +93,14 @@ export default function PlanScreen() {
     const missingIds = allIds.filter(
       (id) => !allEvents.some((e) => e.id === id)
     );
-    if (missingIds.length === 0) return;
+    if (missingIds.length === 0) {
+      setDbLoading(false);
+      return;
+    }
+    setDbLoading(true);
     Promise.all(missingIds.map((id) => fetchEventById(id))).then((results) => {
       setDbEvents(results.filter((e): e is SiftEvent => e !== null));
+      setDbLoading(false);
     });
   }, [allIds]);
 
@@ -177,21 +184,26 @@ export default function PlanScreen() {
   }, []);
 
   // ── Empty state ──────────────────────────────────────
-  if (shortlistEvents.length === 0 && planStep === "shortlist") {
+  if (shortlistEvents.length === 0 && !dbLoading && planStep === "shortlist") {
     return (
-      <View style={s.centered}>
-        <Text style={s.emptyHeading}>No events saved yet</Text>
-        <Text style={s.emptySub}>
-          Browse events on the Discover tab, save the ones you like, then come
-          back here to plan your weekend.
-        </Text>
-        <Pressable
-          onPress={() => router.push("/(tabs)/discover")}
-          style={s.primaryButton}
-        >
-          <Text style={s.primaryButtonText}>Browse events</Text>
-          <ChevronRight size={16} strokeWidth={2} color={colors.white} />
-        </Pressable>
+      <View style={s.screen}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Plan</Text>
+        </View>
+        <View style={s.centered}>
+          <Text style={s.emptyHeading}>No events saved yet</Text>
+          <Text style={s.emptySub}>
+            Browse events on the Discover tab, save the ones you like, then come
+            back here to plan your weekend.
+          </Text>
+          <Pressable
+            onPress={() => router.push("/(tabs)/discover")}
+            style={s.primaryButton}
+          >
+            <Text style={s.primaryButtonText}>Browse events</Text>
+            <ChevronRight size={16} strokeWidth={2} color={colors.white} />
+          </Pressable>
+        </View>
       </View>
     );
   }
@@ -199,6 +211,10 @@ export default function PlanScreen() {
   // ── Success state ────────────────────────────────────
   if (planStep === "success") {
     return (
+      <View style={s.screen}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Plan</Text>
+        </View>
       <ScrollView
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
@@ -325,12 +341,17 @@ export default function PlanScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </View>
     );
   }
 
   // ── Confirm step ─────────────────────────────────────
   if (planStep === "confirm") {
     return (
+      <View style={s.screen}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Plan</Text>
+        </View>
       <ScrollView
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
@@ -409,11 +430,16 @@ export default function PlanScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      </View>
     );
   }
 
   // ── Shortlist step (default) ─────────────────────────
   return (
+    <View style={s.screen}>
+      <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+        <Text style={s.stickyHeading}>Plan</Text>
+      </View>
     <ScrollView
       contentContainerStyle={s.scroll}
       showsVerticalScrollIndicator={false}
@@ -474,10 +500,25 @@ export default function PlanScreen() {
         </Pressable>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  stickyHeader: {
+    paddingHorizontal: spacing.page,
+    paddingBottom: 8,
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  stickyHeading: {
+    ...typography.sectionHeading,
+  },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -486,7 +527,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scroll: {
-    paddingTop: Platform.OS === "ios" ? 60 : 20,
+    paddingTop: 20,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
     backgroundColor: colors.background,
