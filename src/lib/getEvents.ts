@@ -1,6 +1,12 @@
 import { supabase } from "./supabase";
-import type { SiftEvent, EventCategory } from "@/types/event";
+import { todayNYC, nowNYC } from "./time";
+import type { SiftEvent, EventCategory, EventSession } from "@/types/event";
 import type { Filters } from "@/types/quiz";
+
+const SOURCE = process.env.EXPO_PUBLIC_EVENTS_SOURCE; // e.g. "nycforfree", "test"
+const USE_TEST = process.env.EXPO_PUBLIC_USE_TEST_DATA === "true";
+const EVENTS_TABLE   = SOURCE ? `${SOURCE}_events`         : USE_TEST ? "test_events"         : "events";
+const SESSIONS_TABLE = SOURCE ? `${SOURCE}_event_sessions` : USE_TEST ? "test_event_sessions" : "event_sessions";
 
 // Frontend category → DB category
 const CATEGORY_TO_DB: Partial<Record<EventCategory, string>> = {
@@ -23,18 +29,12 @@ const DB_TO_CATEGORY: Record<string, EventCategory> = {
 };
 
 const VALID_BOROUGHS = [
-  "Manhattan",
-  "Brooklyn",
-  "Queens",
-  "Bronx",
-  "Staten Island",
+  "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island",
 ] as const;
 
 function toBorough(b?: string | null): SiftEvent["borough"] {
   if (!b) return "Manhattan";
-  const match = VALID_BOROUGHS.find(
-    (v) => v.toLowerCase() === b.toLowerCase()
-  );
+  const match = VALID_BOROUGHS.find((v) => v.toLowerCase() === b.toLowerCase());
   return (match ?? "Manhattan") as SiftEvent["borough"];
 }
 
@@ -52,33 +52,84 @@ function formatTime(isoDate: string): string {
   }
 }
 
-function formatPriceLabel(row: {
-  is_free: boolean;
-  price_min?: number | null;
-  price_max?: number | null;
-}): string {
-  if (row.is_free || row.price_min === 0) return "Free";
-  if (row.price_min != null && row.price_max != null) {
-    if (row.price_min === row.price_max) return `$${row.price_min}`;
-    return `$${row.price_min}–$${row.price_max}`;
+/** Build price label from aggregate or session-level price data. */
+function formatPriceLabel(
+  isFreeProp: boolean,
+  priceMin?: number | null,
+  priceMax?: number | null,
+  sessions?: EventSession[]
+): string {
+  if (sessions && sessions.length > 1) {
+    const mins = sessions.map((s) => s.priceMin).filter((p): p is number => p != null);
+    const maxs = sessions.map((s) => s.priceMax ?? s.priceMin).filter((p): p is number => p != null);
+    if (mins.length > 0) {
+      const low = Math.min(...mins);
+      const high = Math.max(...maxs);
+      if (low === 0) return high === 0 ? "Free" : `Free–$${high}`;
+      if (low === high) return `$${low}`;
+      return `$${low}–$${high}`;
+    }
   }
-  if (row.price_min != null) return `From $${row.price_min}`;
+  if (isFreeProp || priceMin === 0) return "Free";
+  if (priceMin != null && priceMax != null) {
+    if (priceMin === priceMax) return `$${priceMin}`;
+    return `$${priceMin}–$${priceMax}`;
+  }
+  if (priceMin != null) return `From $${priceMin}`;
   return "See tickets";
 }
 
-function mapRow(row: any): SiftEvent {
-  const startDate = (row.start_date as string).split("T")[0];
-  const endDate = row.end_date
-    ? (row.end_date as string).split("T")[0]
-    : undefined;
+/** Map a DB row + its matched sessions into a frontend SiftEvent. */
+function mapRowWithSessions(row: any, matchedSessions: any[]): SiftEvent {
+  const primaryLink = row.ticket_url ?? row.event_url ?? "";
 
-  const now = new Date();
-  const endOrStart = row.end_date
-    ? new Date(row.end_date)
-    : new Date(row.start_date);
-  const daysLeft = Math.ceil(
-    (endOrStart.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  // Build frontend sessions from matched DB sessions
+  const sessions: EventSession[] = matchedSessions
+    .map((s): EventSession => ({
+      startDate: s.date,
+      time: s.time || undefined,  // treat '' same as null
+      location: s.venue_name ?? undefined,
+      address: s.address ?? undefined,
+      borough: s.borough ?? undefined,
+      priceMin: s.price_min ?? undefined,
+      priceMax: s.price_max ?? undefined,
+      link: primaryLink,
+    }))
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+  const firstSession = sessions[0];
+  const lastSession = sessions[sessions.length - 1];
+
+  const startDate = (row.start_date as string).split("T")[0];
+  const endDate = sessions.length > 1
+    ? lastSession.startDate
+    : (row.end_date ? (row.end_date as string).split("T")[0] : undefined);
+
+  const uniqueLocations = new Set(
+    sessions.map((s) => (s.address ?? s.location ?? "").toLowerCase().replace(/\s+/g, ""))
+      .filter(Boolean)
   );
+  const locationsVary = uniqueLocations.size > 1;
+
+  const primaryLocation = locationsVary
+    ? "Various locations"
+    : (firstSession?.location ?? row.venue_name ?? "");
+  const primaryAddress = firstSession?.address ?? row.address ?? "";
+  const primaryBorough = toBorough(firstSession?.borough ?? row.borough);
+
+  const now = nowNYC();
+  const lastDate = new Date((endDate ?? startDate) + "T12:00:00Z");
+  const daysLeft = Math.ceil((lastDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  const allPriceMins = sessions.map((s) => s.priceMin).filter((p): p is number => p != null);
+  const allPriceMaxs = sessions.map((s) => s.priceMax ?? s.priceMin).filter((p): p is number => p != null);
+  const aggregatePriceMin = allPriceMins.length > 0 ? Math.min(...allPriceMins) : (row.price_min ?? 0);
+  const aggregatePriceMax = allPriceMaxs.length > 0 ? Math.max(...allPriceMaxs) : (row.price_max ?? undefined);
+
+  const uniqueTimes = new Set(sessions.map((s) => s.time ?? "").filter(Boolean));
+  const primaryTime = uniqueTimes.size > 1
+    ? "Various times"
+    : firstSession?.time ?? formatTime(row.start_date);
 
   return {
     id: row.id as string,
@@ -86,145 +137,210 @@ function mapRow(row: any): SiftEvent {
     category: (DB_TO_CATEGORY[row.category] ?? "popups") as EventCategory,
     imageUrl: row.image_url ?? undefined,
     description: row.description ?? "",
-    location: row.venue_name ?? "",
-    address: row.address ?? "",
-    borough: toBorough(row.borough),
+    location: primaryLocation,
+    address: primaryAddress,
+    borough: primaryBorough,
     startDate,
     endDate,
-    time: formatTime(row.start_date),
-    price: row.price_min ?? 0,
-    priceLabel: formatPriceLabel(row),
-    link: row.ticket_url ?? row.event_url ?? "",
+    time: primaryTime,
+    price: aggregatePriceMin,
+    priceLabel: formatPriceLabel(row.is_free, row.price_min, row.price_max, sessions),
+    link: primaryLink,
     tags: row.tags ?? [],
     ticketUrl: row.ticket_url ?? undefined,
     eventUrl: row.event_url ?? undefined,
     onSaleDate: row.on_sale_date ?? undefined,
     endingSoon: daysLeft <= 7 && daysLeft > 0,
     daysLeft: daysLeft > 0 ? daysLeft : undefined,
+    sessions: sessions.length > 0 ? sessions : undefined,
+    locationsVary,
   };
 }
 
 /**
- * Fetch events from Supabase with filtering.
+ * Fetch events from Supabase with session-level filtering.
+ * Filters are applied to event_sessions; results are grouped by event.
  */
 export async function fetchEvents(
   filters: Filters,
   limit = 100
 ): Promise<SiftEvent[]> {
-  const now = new Date().toISOString();
-  const dbCategories = filters.categories?.map((c) => CATEGORY_TO_DB[c] ?? c);
-  const dateFrom = filters.dateFrom ?? now;
-  const dateTo = filters.dateTo ? filters.dateTo + "T23:59:59Z" : null;
-
   if (!supabase) return [];
 
-  let query = supabase
-    .from("events")
-    .select("*")
-    .or(`start_date.gte.${dateFrom},end_date.gte.${dateFrom}`)
-    .order("start_date", { ascending: true })
-    .limit(limit);
+  const today = todayNYC();
+  const dbCategories = filters.categories?.map((c) => CATEGORY_TO_DB[c] ?? c);
+  const dateFrom = filters.dateFrom ?? today;
+  const dateTo = filters.dateTo ?? null;
 
-  if (dateTo) query = query.lte("start_date", dateTo);
-  if (dbCategories?.length) {
-    const cats = dbCategories.join(",");
-    query = query.or(`category.in.(${cats}),tags.ov.{${cats}}`);
-  }
+  // ── Step 1: Find matching event_ids via session-level filters ──
+  let sessionQuery = supabase
+    .from(SESSIONS_TABLE)
+    .select("event_id")
+    .gte("date", dateFrom);
+
+  if (dateTo) sessionQuery = sessionQuery.lte("date", dateTo);
   if (filters.distance === "neighborhood") {
-    query = query.eq("borough", "Manhattan");
+    sessionQuery = sessionQuery.eq("borough", "Manhattan");
   } else if (filters.distance === "borough") {
-    query = query.in("borough", ["Manhattan", "Brooklyn"]);
+    sessionQuery = sessionQuery.in("borough", ["Manhattan", "Brooklyn"]);
   }
   if (filters.price === "free") {
-    query = query.eq("is_free", true);
+    sessionQuery = sessionQuery.eq("price_min", 0);
   } else if (filters.price === "under-20") {
-    query = query.lte("price_min", 20);
+    sessionQuery = sessionQuery.lte("price_min", 20);
   } else if (filters.price === "under-50") {
-    query = query.lte("price_min", 50);
+    sessionQuery = sessionQuery.lte("price_min", 50);
   }
 
-  const { data, error } = await query;
-  if (error) {
-    console.error("[getEvents] Supabase error:", error.message);
+  const { data: sessionMatches, error: sessErr } = await sessionQuery.limit(2000);
+  if (sessErr || !sessionMatches) {
+    console.error("[getEvents] session filter error:", sessErr?.message);
     return [];
   }
 
-  return groupOccurrences((data ?? []).map(mapRow));
+  const matchedEventIds = [...new Set(sessionMatches.map((s: any) => s.event_id as string))];
+  if (matchedEventIds.length === 0) return [];
+
+  // ── Step 2: Fetch those events ──
+  let eventQuery = supabase
+    .from(EVENTS_TABLE)
+    .select("*")
+    .in("id", matchedEventIds.slice(0, limit));
+
+  if (dbCategories?.length) {
+    const cats = dbCategories.join(",");
+    eventQuery = eventQuery.or(`category.in.(${cats}),tags.ov.{${cats}}`);
+  }
+
+  const { data: events, error: evErr } = await eventQuery;
+  if (evErr || !events) {
+    console.error("[getEvents] events fetch error:", evErr?.message);
+    return [];
+  }
+
+  // ── Step 3: Fetch matched sessions for these events ──
+  const finalEventIds = events.map((e: any) => e.id as string);
+  let matchedSessionsQuery = supabase
+    .from(SESSIONS_TABLE)
+    .select("*")
+    .in("event_id", finalEventIds)
+    .gte("date", dateFrom)
+    .order("date", { ascending: true });
+
+  if (dateTo) matchedSessionsQuery = matchedSessionsQuery.lte("date", dateTo);
+  if (filters.distance === "neighborhood") {
+    matchedSessionsQuery = matchedSessionsQuery.eq("borough", "Manhattan");
+  } else if (filters.distance === "borough") {
+    matchedSessionsQuery = matchedSessionsQuery.in("borough", ["Manhattan", "Brooklyn"]);
+  }
+  if (filters.price === "under-20") {
+    matchedSessionsQuery = matchedSessionsQuery.lte("price_min", 20);
+  } else if (filters.price === "under-50") {
+    matchedSessionsQuery = matchedSessionsQuery.lte("price_min", 50);
+  }
+
+  const { data: matchedSessions } = await matchedSessionsQuery;
+
+  // Group sessions by event_id
+  const sessionsByEvent = new Map<string, any[]>();
+  for (const s of matchedSessions ?? []) {
+    if (!sessionsByEvent.has(s.event_id)) sessionsByEvent.set(s.event_id, []);
+    sessionsByEvent.get(s.event_id)!.push(s);
+  }
+
+  return events.map((row: any) =>
+    mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? [])
+  );
 }
 
 /**
- * Fetch a single event by ID from Supabase.
+ * Fetch a single event by ID with all its sessions.
+ * Sessions are sorted by relevance (filter context) then date ascending.
  */
 export async function fetchEventById(
-  id: string
+  id: string,
+  filters?: Partial<Filters>
 ): Promise<SiftEvent | null> {
   if (!supabase) return null;
 
   const { data, error } = await supabase
-    .from("events")
+    .from(EVENTS_TABLE)
     .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    console.error("[getEvents] fetchEventById error:", error?.message);
+  if (error) {
+    console.error("[getEvents] fetchEventById error:", error.message);
     return null;
   }
+  if (!data) return null;
 
-  return mapRow(data);
+  // Fetch all upcoming sessions for this event
+  let sessQuery = supabase
+    .from(SESSIONS_TABLE)
+    .select("*")
+    .eq("event_id", id)
+    .gte("date", todayNYC())
+    .order("date", { ascending: true });
+
+  const { data: sessions } = await sessQuery;
+
+  // If filter context provided, sort matching sessions first
+  let orderedSessions = sessions ?? [];
+  if (filters && orderedSessions.length > 1) {
+    const isMatch = (s: any) => {
+      if (filters.distance === "neighborhood" && s.borough !== "Manhattan") return false;
+      if (filters.distance === "borough" && !["Manhattan", "Brooklyn"].includes(s.borough)) return false;
+      if (filters.price === "free" && s.price_min !== 0) return false;
+      if (filters.price === "under-20" && s.price_min > 20) return false;
+      if (filters.price === "under-50" && s.price_min > 50) return false;
+      return true;
+    };
+    orderedSessions = [
+      ...orderedSessions.filter(isMatch),
+      ...orderedSessions.filter((s) => !isMatch(s)),
+    ];
+  }
+
+  return mapRowWithSessions(data, orderedSessions);
 }
 
 /**
- * Fetch all upcoming events (for recommendation engine).
+ * Fetch all upcoming events for recommendation engine.
  */
 export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
   if (!supabase) return [];
 
-  const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("events")
+  const today = todayNYC();
+
+  const { data: events, error } = await supabase
+    .from(EVENTS_TABLE)
     .select("*")
-    .or(`start_date.gte.${now},end_date.gte.${now}`)
+    .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`)
     .order("start_date", { ascending: true })
     .limit(limit);
 
-  if (error || !data) {
+  if (error || !events) {
     console.error("[getEvents] fetchAllUpcoming error:", error?.message);
     return [];
   }
 
-  return groupOccurrences(data.map(mapRow));
-}
+  const eventIds = events.map((e: any) => e.id as string);
 
-/**
- * Collapse same-title/venue events into one card with a dates array.
- */
-function groupOccurrences(events: SiftEvent[]): SiftEvent[] {
-  const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "")
-      .slice(0, 50);
+  const { data: sessions } = await supabase
+    .from(SESSIONS_TABLE)
+    .select("*")
+    .in("event_id", eventIds)
+    .gte("date", today)
+    .order("date", { ascending: true });
 
-  const groups = new Map<string, SiftEvent[]>();
-  for (const e of events) {
-    const key = `${norm(e.title)}::${norm(e.location)}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(e);
+  const sessionsByEvent = new Map<string, any[]>();
+  for (const s of sessions ?? []) {
+    if (!sessionsByEvent.has(s.event_id)) sessionsByEvent.set(s.event_id, []);
+    sessionsByEvent.get(s.event_id)!.push(s);
   }
 
-  const result: SiftEvent[] = [];
-  for (const group of groups.values()) {
-    group.sort((a, b) => a.startDate.localeCompare(b.startDate));
-    const primary = group[0];
-    result.push({
-      ...primary,
-      dates: group.map((e) => ({
-        startDate: e.startDate,
-        time: e.time,
-        link: e.link,
-      })),
-    });
-  }
-  return result;
+  return events.map((row: any) =>
+    mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? [])
+  );
 }

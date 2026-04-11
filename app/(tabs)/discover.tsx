@@ -23,8 +23,8 @@ import SaveEventSheet from "@/components/events/SaveEventSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
-import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
-import { getRecommendations, getRecommendationsFromDB } from "@/lib/recommend";
+import { getNextCandidate } from "@/lib/eventRecommendations";
+import { getRecommendationsFromDB } from "@/lib/recommend";
 import type { ScoredEvent } from "@/lib/recommend";
 import { fetchEvents } from "@/lib/getEvents";
 import { track, setTrackingUserId } from "@/lib/track";
@@ -106,7 +106,6 @@ export default function DiscoverScreen() {
 
     try {
       if (userProfile) {
-        // Async: fetch from Supabase, score against profile
         const scored = await getRecommendationsFromDB(userProfile, 20);
         const allScored = scored.map((s) => ({
           ...s.event,
@@ -115,14 +114,12 @@ export default function DiscoverScreen() {
             : "Picked for you",
         }));
 
-        // Apply distance filter to all results
         const distanceFiltered = allScored.filter((e) => {
           if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
           if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
           return true;
         });
 
-        // Priority: quiz category matches first, then everything else
         const quizMatches = distanceFiltered.filter(
           (e) => !f.categories?.length || f.categories.includes(e.category)
         );
@@ -131,30 +128,11 @@ export default function DiscoverScreen() {
         );
         resultEvents = [...quizMatches, ...rest];
       } else {
-        // Guest: try Supabase first, fall back to local
-        const dbEvents = await fetchEvents(f);
-        resultEvents = dbEvents.length > 0 ? dbEvents : getAllCandidates(f, [], userProfile);
+        resultEvents = await fetchEvents(f);
       }
-    } catch {
-      // Fallback to local hardcoded data
-      if (userProfile) {
-        const scored = getRecommendations(userProfile, 20);
-        const allFallback = scored.map((s) => ({
-          ...s.event,
-          matchReason: s.matchReasons.length > 0
-            ? s.matchReasons.slice(0, 3).join(" · ")
-            : "Picked for you",
-        }));
-        const fbQuiz = allFallback.filter(
-          (e) => !f.categories?.length || f.categories.includes(e.category)
-        );
-        const fbRest = allFallback.filter(
-          (e) => f.categories?.length && !f.categories.includes(e.category)
-        );
-        resultEvents = [...fbQuiz, ...fbRest];
-      } else {
-        resultEvents = getAllCandidates(f, [], userProfile);
-      }
+    } catch (err) {
+      console.error("[discover] failed to fetch events:", err);
+      resultEvents = [];
     }
 
     setResultPool(resultEvents);

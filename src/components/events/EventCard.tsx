@@ -37,6 +37,7 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import type { EventCategory, SiftEvent } from "@/types/event";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
+import { formatNYCDate } from "@/lib/time";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
@@ -54,11 +55,22 @@ const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
   popups: "popups",
 };
 
+function formatShortDate(d: string) {
+  return formatNYCDate(d, { month: "short", day: "numeric" });
+}
+
 function formatEventDate(event: SiftEvent) {
-  if (event.endDate && event.endDate !== event.startDate) {
-    return `${event.startDate} – ${event.endDate}`;
+  const sessions = event.sessions;
+  if (sessions && sessions.length > 1) {
+    const first = sessions[0].startDate;
+    const last = sessions[sessions.length - 1].startDate;
+    if (first === last) return formatShortDate(first);
+    return `${formatShortDate(first)} – ${formatShortDate(last)}`;
   }
-  return event.startDate;
+  if (event.endDate && event.endDate !== event.startDate) {
+    return `${formatShortDate(event.startDate)} – ${formatShortDate(event.endDate)}`;
+  }
+  return formatShortDate(event.startDate);
 }
 
 interface EventCardProps {
@@ -146,7 +158,7 @@ export default function EventCard({
 
   // ── Going handler ────────────────────────────────────────
 
-  const isMultiDate = (event.dates && event.dates.length > 1) ||
+  const isMultiDate = (event.sessions && event.sessions.length > 1) ||
     (!!event.endDate && event.endDate !== event.startDate);
 
   const handleGoingPress = () => {
@@ -388,6 +400,7 @@ export default function EventCard({
       >
         <GoingDateSheet
           event={event}
+          userProfile={userProfile}
           onConfirm={(date) => {
             toggleGoing({
               eventId: event.id,

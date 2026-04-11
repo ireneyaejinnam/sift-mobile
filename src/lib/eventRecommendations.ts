@@ -2,12 +2,10 @@ import { events } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
 import type { Filters } from "@/types/quiz";
 import type { UserProfile } from "@/types/user";
+import { todayNYC } from "@/lib/time";
 
 function isUpcoming(event: SiftEvent): boolean {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const end = new Date(event.endDate ?? event.startDate);
-  return end >= now;
+  return (event.endDate ?? event.startDate) >= todayNYC();
 }
 
 const INTEREST_TO_CATEGORY: Record<string, string> = {
