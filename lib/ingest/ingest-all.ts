@@ -17,7 +17,7 @@ import { reclassifyEvents } from './reclassify';
 import { enrichEvents } from './enrich';
 import { deduplicateEvents, mergeRecurringEvents } from './dedup';
 import { fetchMissingImages } from './fetchImages';
-import { cleanupExpired } from './cleanup';
+import { cleanupExpired, cleanupNonNYC } from './cleanup';
 
 async function run(name: string, fn: () => Promise<void>) {
   try {
@@ -52,11 +52,12 @@ async function main() {
   // Post-processing
   await run('Geocode',            geocodeAllEvents);
   await run('Reclassify',         reclassifyEvents);
-  await run('Enrich (LLM)',       enrichEvents);
-  await run('Dedup',              deduplicateEvents);
-  await run('Merge Recurring',    mergeRecurringEvents);
+  await run('Dedup',              deduplicateEvents);    // remove cross-source duplicates first
+  await run('Merge Recurring',    mergeRecurringEvents); // group recurring into sessions
+  await run('Enrich (LLM)',       enrichEvents);         // verify from official pages last
   await run('Fetch Images',       fetchMissingImages);
-  await run('Cleanup',            cleanupExpired);
+  await run('Cleanup Expired',    cleanupExpired);
+  await run('Cleanup Non-NYC',    cleanupNonNYC);
 
   const elapsed = ((Date.now() - start) / 1000 / 60).toFixed(1);
   console.log(`\n[Ingest] ====== Pipeline complete (14 sources) in ${elapsed}min ======\n`);

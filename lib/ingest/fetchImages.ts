@@ -75,16 +75,16 @@ async function getPhotoForCategory(category: string): Promise<string | null> {
   return photos[idx];
 }
 
-export async function fetchMissingImages(): Promise<void> {
+export async function fetchMissingImages(table = 'events'): Promise<void> {
   if (!process.env.UNSPLASH_ACCESS_KEY) {
     console.log('[Images] UNSPLASH_ACCESS_KEY not set, skipping image fetch');
     return;
   }
 
-  console.log('[Images] Fetching images for events with no image_url...');
+  console.log(`[Images] Fetching images for ${table} with no image_url...`);
 
   const { data: events, error } = await supabase
-    .from('events')
+    .from(table)
     .select('id, category')
     .is('image_url', null)
     .gte('start_date', new Date().toISOString().split('T')[0])
@@ -105,7 +105,7 @@ export async function fetchMissingImages(): Promise<void> {
 
     if (imageUrl) {
       const { error: updateError } = await supabase
-        .from('events')
+        .from(table)
         .update({ image_url: imageUrl })
         .eq('id', event.id);
 
@@ -127,7 +127,10 @@ export async function fetchMissingImages(): Promise<void> {
   console.log(`[Images] Done. Updated: ${updated}, Failed: ${failed}`);
 }
 
-// Run directly: npx tsx --env-file=.env lib/ingest/fetchImages.ts
+// Run directly: npx tsx --env-file=.env lib/ingest/fetchImages.ts [--source nycforfree]
 if (process.argv[1] && process.argv[1].endsWith('fetchImages.ts')) {
-  fetchMissingImages().catch(console.error);
+  const sourceIdx = process.argv.indexOf('--source');
+  const source = sourceIdx !== -1 ? process.argv[sourceIdx + 1] : undefined;
+  const table = source ? `${source}_events` : 'events';
+  fetchMissingImages(table).catch(console.error);
 }

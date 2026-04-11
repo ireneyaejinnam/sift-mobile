@@ -14,6 +14,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { parse } from 'node-html-parser';
+import { isNYCAddress } from './normalize';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -48,6 +49,16 @@ const ZIP_BOROUGH: [RegExp, string][] = [
   [/\b103\d{2}\b/, 'Staten Island'],
 ];
 
+interface DBSession {
+  date: string;
+  time?: string;
+  venue_name?: string;
+  address?: string;
+  borough?: string;
+  price_min?: number;
+  price_max?: number;
+}
+
 interface EventRow {
   id: string;
   title: string;
@@ -62,17 +73,22 @@ interface EventRow {
   ticket_url?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  price_min?: number | null;
+  price_max?: number | null;
 }
 
 interface EnrichResult {
   category?: string;
-  is_free?: boolean;
+  is_free?: boolean | null;
   borough?: string | null;
   description?: string | null;
   address?: string | null;
   venue_name?: string | null;
-  start_date?: string | null;  // YYYY-MM-DD in local ET time
+  start_date?: string | null;   // YYYY-MM-DD (earliest session)
   end_date?: string | null;
+  price_min?: number | null;
+  price_max?: number | null;
+  sessions?: DBSession[] | null; // all sessions extracted from official page
 }
 
 // ── Borough fix from address ──────────────────────────────────
@@ -98,26 +114,31 @@ const FETCH_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-async function fetchPage(url: string, timeoutMs = 10_000): Promise<{ text: string; links: string[] }> {
+async function fetchPage(url: string, timeoutMs = 10_000): Promise<{ text: string; links: string[]; subLinks: string[] }> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, { signal: controller.signal, headers: FETCH_HEADERS });
     clearTimeout(timer);
-    if (!res.ok) return { text: '', links: [] };
+    if (!res.ok) return { text: '', links: [], subLinks: [] };
 
     const html = await res.text();
     const root = parse(html);
 
-    // Extract all external links with their anchor text
+    // External links (for findOfficialUrls) and same-domain sub-links (for follow-up)
     const links: string[] = [];
+    const subLinks: string[] = [];
     const baseHost = new URL(url).hostname.replace('www.', '');
     root.querySelectorAll('a[href]').forEach((a) => {
       const href = a.getAttribute('href') ?? '';
       if (!href.startsWith('http')) return;
       try {
         const linkHost = new URL(href).hostname.replace('www.', '');
-        if (linkHost !== baseHost) links.push(href);
+        if (linkHost !== baseHost) {
+          links.push(href);
+        } else {
+          subLinks.push(href);
+        }
       } catch { /* skip malformed */ }
     });
 
@@ -128,13 +149,13 @@ async function fetchPage(url: string, timeoutMs = 10_000): Promise<{ text: strin
       const node = root.querySelector(sel);
       if (node) {
         const text = node.text.replace(/\s+/g, ' ').trim();
-        if (text.length > 200) return { text: text.slice(0, 4000), links };
+        if (text.length > 200) return { text: text.slice(0, 4000), links, subLinks };
       }
     }
     const text = (root.querySelector('body')?.text ?? root.text).replace(/\s+/g, ' ').trim().slice(0, 4000);
-    return { text, links };
+    return { text, links, subLinks };
   } catch {
-    return { text: '', links: [] };
+    return { text: '', links: [], subLinks: [] };
   }
 }
 
@@ -226,44 +247,59 @@ async function extractFromPages(
     .join('\n\n');
 
   const strictnessNote = sourceLabel === 'official'
-    ? 'These are OFFICIAL pages from the event organizer/venue. Extract all fields you can confirm. Set null for anything not explicitly stated — do NOT keep current data if the page doesn\'t confirm it.'
-    : 'This is an aggregator page (not the official source). Only extract fields you are highly confident about. Set null for anything uncertain.';
+    ? 'These are OFFICIAL pages from the event organizer/venue. Extract all fields you can confirm. Set null for anything not explicitly stated.'
+    : 'This is an aggregator page (not the official source). Extract all fields you can confirm. Set null for anything not explicitly stated.';
 
   const prompt = `You are verifying NYC event data from ${sourceLabel} page content. ${strictnessNote}
 
-RULES — apply to EVERY field:
-- "venue_name": exact venue name as written on the page. null if not stated.
-- "address": full address exactly as written. null if not stated.
-- "borough": derived ONLY from the address (Brooklyn zip/name = Brooklyn, not Manhattan). null if address not found.
-- "is_free": true if explicitly free, false if price mentioned, null if not stated.
-- "description": 1-2 punchy sentences (max 250 chars) of what this event IS. No "Join us", no HTML, no ticket info. If multiple locations, note briefly. null if not enough info.
+Extract all sessions (date + time + location + price) found on the page. A "session" is one specific performance/occurrence of the event.
+
+TOP-LEVEL FIELDS (summary):
+- "venue_name": primary/first venue. null if not found.
+- "address": primary/first full address. null if not found.
+- "borough": derived ONLY from primary address. null if not found.
+- "is_free": true=free, false=paid, null=not stated.
+- "description": 1-2 punchy sentences (max 250 chars). No "Join us", no HTML, no ticket info. Note if multi-venue. null if not enough info.
 - "category": only change if clearly wrong. Valid: live_music, art, theater, comedy, workshops, fitness, food, outdoors, nightlife, popups.
-- "start_date": date in YYYY-MM-DD using New York local time (NOT UTC). If page says "April 19" → "2026-04-19". null if not found.
-- "end_date": YYYY-MM-DD, only if explicitly an end date. null otherwise.
-- NEVER guess. NEVER infer from the event title. NEVER keep old data — if the page doesn't say it, return null.
-- Return ONLY a JSON object with all 8 fields present (use null for unknowns), no other text.
+- "start_date": YYYY-MM-DD of earliest session (NY local time). null if not found.
+- "end_date": YYYY-MM-DD of latest session if multiple. null if single session.
+- "price_min": lowest price across all sessions (number, no $). null if not found.
+- "price_max": highest price across all sessions. null if same as price_min or not found.
+
+SESSIONS ARRAY — list EVERY distinct session found on the page:
+- "sessions": array of objects, each with:
+  - "date": YYYY-MM-DD (required — skip session if date not found)
+  - "time": e.g. "7:00 PM" (null if not stated)
+  - "venue_name": venue for this session (null if same as primary or not stated)
+  - "address": full address for this session (null if same as primary)
+  - "borough": derived from this session's address (null if same or not found)
+  - "price_min": number (null if not stated)
+  - "price_max": number, only if explicitly different from price_min (null otherwise)
+- If only one session found, still include it as a 1-element array.
+- null if no dates at all found on page.
+
+RULES:
+- NEVER guess. NEVER infer. NEVER keep old data — null means not on page.
+- Return ONLY a JSON object with all 11 fields, no other text.
 
 EXAMPLES:
 
-Example 1 (official page, strict):
-Page: "...Forty Thieves Tours — 2-hour walking tour of Irish history in Lower Manhattan. Every Saturday 11am. Departs from Bowling Green Station exit, Manhattan, NY 10004. $35/person..."
-Current: title="Lower Manhattan Irish History Tour", borough="Manhattan", is_free=true, start_date="2026-04-12"
-Answer: {"venue_name":null,"address":"Bowling Green Station exit, Manhattan, NY 10004","borough":"Manhattan","is_free":false,"description":"Weekly 2-hour walking tour exploring Irish immigrant history in Lower Manhattan with Forty Thieves Tours.","category":"outdoors","start_date":null,"end_date":null}
-
-Example 2 (official page, date correction):
+Example 1 (single session, official):
 Page: "...Yilian Cañizares — Saturday, April 19, 2026. Doors 7pm, Show 8pm. Zankel Hall, Carnegie Hall, 881 7th Ave, New York, NY 10019. Tickets $45..."
-Current: title="Yilian Cañizares", borough="Manhattan", is_free=false, start_date="2026-04-20"
-Answer: {"venue_name":"Zankel Hall, Carnegie Hall","address":"881 7th Ave, New York, NY 10019","borough":"Manhattan","is_free":false,"description":"Cuban-Swiss jazz violinist performs at Carnegie Hall's Zankel Hall. Doors 7pm, show 8pm.","category":"live_music","start_date":"2026-04-19","end_date":null}
+Current: title="Yilian Cañizares", start_date="2026-04-20"
+Answer: {"venue_name":"Zankel Hall, Carnegie Hall","address":"881 7th Ave, New York, NY 10019","borough":"Manhattan","is_free":false,"description":"Cuban-Swiss jazz violinist performs at Carnegie Hall's Zankel Hall. Doors 7pm, show 8pm.","category":"live_music","start_date":"2026-04-19","end_date":null,"price_min":45,"price_max":null,"sessions":[{"date":"2026-04-19","time":"8:00 PM","venue_name":null,"address":null,"borough":null,"price_min":45,"price_max":null}]}
 
-Example 3 (official page, borough correction):
-Page: "...Brooklyn Flea — every Saturday at 80 Ferry St, Brooklyn, NY 11201. Free admission. 100+ vendors: vintage furniture, clothing, food..."
-Current: borough="Manhattan", is_free=false, start_date="2026-04-12"
-Answer: {"venue_name":"Brooklyn Flea","address":"80 Ferry St, Brooklyn, NY 11201","borough":"Brooklyn","is_free":true,"description":"Weekly outdoor flea market with 100+ vendors selling vintage furniture, clothing, jewelry, and street food.","category":"popups","start_date":null,"end_date":null}
+Example 2 (multiple sessions, same venue):
+Page: "...Jazz Night — Apr 18 & Apr 25, 2026, 8pm. Blue Note, 131 W 3rd St, New York, NY 10012. Tickets $30–$50..."
+Answer: {"venue_name":"Blue Note","address":"131 W 3rd St, New York, NY 10012","borough":"Manhattan","is_free":false,"description":"Live jazz nights at Blue Note in Greenwich Village. Two April performances.","category":"live_music","start_date":"2026-04-18","end_date":"2026-04-25","price_min":30,"price_max":50,"sessions":[{"date":"2026-04-18","time":"8:00 PM","venue_name":null,"address":null,"borough":null,"price_min":30,"price_max":50},{"date":"2026-04-25","time":"8:00 PM","venue_name":null,"address":null,"borough":null,"price_min":30,"price_max":50}]}
 
-Example 4 (page with no useful info):
-Page: "...Sign up for our newsletter. Follow us on social media. Check back soon for updates..."
-Current: title="Some Event", borough="Queens", is_free=false, start_date="2026-04-15"
-Answer: {"venue_name":null,"address":null,"borough":null,"is_free":null,"description":null,"category":null,"start_date":null,"end_date":null}
+Example 3 (multiple sessions, different venues):
+Page: "...The Art Show — April 12 at Brooklyn Museum (200 Eastern Pkwy, Brooklyn NY 11238) and April 19 at MoMA (11 W 53rd St, New York NY 10019). Free admission..."
+Answer: {"venue_name":"Brooklyn Museum","address":"200 Eastern Pkwy, Brooklyn, NY 11238","borough":"Brooklyn","is_free":true,"description":"Art show touring Brooklyn Museum on Apr 12 and MoMA on Apr 19.","category":"art","start_date":"2026-04-12","end_date":"2026-04-19","price_min":0,"price_max":null,"sessions":[{"date":"2026-04-12","time":null,"venue_name":"Brooklyn Museum","address":"200 Eastern Pkwy, Brooklyn, NY 11238","borough":"Brooklyn","price_min":0,"price_max":null},{"date":"2026-04-19","time":null,"venue_name":"MoMA","address":"11 W 53rd St, New York, NY 10019","borough":"Manhattan","price_min":0,"price_max":null}]}
+
+Example 4 (no useful info):
+Page: "...Sign up for our newsletter. Follow us on social media..."
+Answer: {"venue_name":null,"address":null,"borough":null,"is_free":null,"description":null,"category":null,"start_date":null,"end_date":null,"price_min":null,"price_max":null,"sessions":null}
 
 Now extract for:
 Current data: title="${event.title}", venue="${event.venue_name ?? 'unknown'}", address="${event.address ?? 'unknown'}", borough="${event.borough ?? 'unknown'}", category="${event.category}", is_free=${event.is_free}, start_date="${event.start_date ?? 'unknown'}"
@@ -274,14 +310,16 @@ Answer:`;
   try {
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
+      max_tokens: 1024,
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = message.content[0].type === 'text' ? message.content[0].text : '';
-    console.log(`  [LLM raw] ${text.trim()}`);
+    const raw = message.content[0].type === 'text' ? message.content[0].text : '';
+    console.log(`  [LLM raw] ${raw.trim()}`);
 
-    const match = text.match(/\{[\s\S]*?\}/);
+    // Strip markdown code fences if present, then grab the outermost JSON object
+    const stripped = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+    const match = stripped.match(/\{[\s\S]*\}/); // greedy — captures full outer object
     if (!match) {
       console.warn('  [LLM] Could not parse JSON from response');
       return {};
@@ -296,7 +334,7 @@ Answer:`;
 
 // ── Main ──────────────────────────────────────────────────────
 
-export async function enrichEvents(): Promise<void> {
+export async function enrichEvents(batchSize = 50): Promise<void> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.log('[Enrich] ANTHROPIC_API_KEY not set, skipping');
     return;
@@ -304,23 +342,35 @@ export async function enrichEvents(): Promise<void> {
 
   console.log('[Enrich] Starting web-verified LLM enrichment...');
 
-  const { data: events, error } = await supabase
-    .from('events')
-    .select('id, title, description, venue_name, address, category, is_free, borough, tags, event_url, ticket_url, start_date, end_date')
-    .gte('start_date', new Date().toISOString().split('T')[0])
-    .limit(30);
+  const today = new Date().toISOString().split('T')[0];
 
-  if (error || !events || events.length === 0) {
-    console.log('[Enrich] No events:', error?.message ?? 'empty');
-    return;
-  }
+  // Paginate through all upcoming events
+  let offset = 0;
+  let totalUpdated = 0;
+  let totalAddressFixed = 0;
+  let grandTotal = 0;
 
-  console.log(`[Enrich] Processing ${events.length} events...`);
+  while (true) {
+    const { data: events, error } = await supabase
+      .from('events')
+      .select('id, title, description, venue_name, address, category, is_free, borough, tags, event_url, ticket_url, start_date, end_date, price_min, price_max')
+      .gte('start_date', today)
+      .order('start_date', { ascending: true })
+      .range(offset, offset + batchSize - 1);
 
-  let updated = 0;
-  let addressFixed = 0;
+    if (error) {
+      console.log('[Enrich] Fetch error:', error.message);
+      break;
+    }
+    if (!events || events.length === 0) break;
 
-  for (const ev of events as EventRow[]) {
+    grandTotal += events.length;
+    console.log(`[Enrich] Batch ${offset}–${offset + events.length - 1} (${events.length} events)...`);
+
+    let updated = 0;
+    let addressFixed = 0;
+
+    for (const ev of events as EventRow[]) {
     const patch: Record<string, unknown> = {};
 
     // ── Step 0: Fix borough/address mismatch programmatically ──
@@ -352,15 +402,19 @@ export async function enrichEvents(): Promise<void> {
     // Deduplicate
     const uniqueUrls = [...new Set(officialUrls)].slice(0, 3);
 
-    // ── Step 2: Fetch official pages ──────────────────────────
+    // ── Step 2: Fetch official pages, collect same-domain sub-links ──
     const pageContents: { url: string; text: string }[] = [];
+    const officialSubLinks: string[] = [];
+    const fetchedUrls = new Set<string>();
+
     for (const url of uniqueUrls) {
-      const { text } = await fetchPage(url);
+      const { text, subLinks } = await fetchPage(url);
+      fetchedUrls.add(url);
       if (text) pageContents.push({ url, text });
+      officialSubLinks.push(...subLinks);
     }
 
     // ── Step 3: Extract data ──────────────────────────────────
-    // Try official pages first; fall back to aggregator page content
     let result: EnrichResult = {};
     let sourceLabel: 'official' | 'aggregator' = 'official';
 
@@ -369,6 +423,47 @@ export async function enrichEvents(): Promise<void> {
         result = await extractFromPages(ev, pageContents, 'official');
       } catch (err) {
         console.warn(`[Enrich] LLM failed for ${ev.id}:`, (err as Error).message);
+      }
+
+      // ── Step 3b: If results thin, follow relevant sub-links ──
+      // "Thin" = no sessions, no date, no address found
+      const isThin = !result.sessions?.length && !result.start_date && !result.address;
+      if (isThin && officialSubLinks.length > 0) {
+        const EVENT_PATH_RE = /\/(event|tour|show|concert|exhibit|performance|schedule|ticket|book|program|agenda|calendar)/i;
+        const candidates = [...new Set(officialSubLinks)]
+          .filter((link) => EVENT_PATH_RE.test(link) && !fetchedUrls.has(link))
+          .slice(0, 2);
+
+        if (candidates.length > 0) {
+          const subContents: { url: string; text: string }[] = [];
+          for (const url of candidates) {
+            const { text } = await fetchPage(url);
+            if (text) subContents.push({ url, text });
+          }
+          if (subContents.length > 0) {
+            try {
+              const subResult = await extractFromPages(ev, subContents, 'official');
+              // Merge: sub-page fills in what the main page missed
+              result = {
+                ...result,
+                sessions:     subResult.sessions     ?? result.sessions,
+                start_date:   subResult.start_date   ?? result.start_date,
+                end_date:     subResult.end_date      ?? result.end_date,
+                address:      subResult.address      ?? result.address,
+                venue_name:   subResult.venue_name   ?? result.venue_name,
+                borough:      subResult.borough      ?? result.borough,
+                price_min:    subResult.price_min    ?? result.price_min,
+                price_max:    subResult.price_max    ?? result.price_max,
+                description:  subResult.description  ?? result.description,
+                is_free:      subResult.is_free      ?? result.is_free,
+                category:     subResult.category     ?? result.category,
+              };
+              console.log(`  [Sub-links] fetched ${subContents.length} sub-page(s): ${candidates.join(', ')}`);
+            } catch (err) {
+              console.warn(`[Enrich] Sub-link LLM failed for ${ev.id}:`, (err as Error).message);
+            }
+          }
+        }
       }
     } else if (ev.event_url) {
       // No official pages found — fall back to aggregator page itself
@@ -384,75 +479,147 @@ export async function enrichEvents(): Promise<void> {
     }
 
     // ── Step 4: Apply results ─────────────────────────────────
-    // When official pages were found, we trust the LLM fully — null means "not on page".
-    // When only aggregator, we only apply confident non-null results.
-    const isOfficial = sourceLabel === 'official' && pageContents.length > 0;
+    // Both official and aggregator now use the same strict prompt, so treat both equally.
+    const isOfficial = pageContents.length > 0 || sourceLabel === 'aggregator';
+    const corrections: string[] = [];
+
+    // ── Helper: log field corrections ─────────────────────────
+    function applyField(field: string, newVal: unknown, oldVal: unknown) {
+      if (newVal === undefined) return;
+      patch[field] = newVal;
+      if (oldVal !== null && oldVal !== undefined && oldVal !== newVal) {
+        corrections.push(`${field}: "${String(oldVal).slice(0, 40)}" → "${String(newVal).slice(0, 40)}"`);
+      }
+    }
 
     // category
     if (result.category && VALID_CATEGORIES.includes(result.category)) {
-      patch.category = result.category;
+      applyField('category', result.category, ev.category);
     }
 
-    // is_free — boolean NOT NULL in DB, so never write null
+    // is_free — NOT NULL in DB
     if (typeof result.is_free === 'boolean') {
-      patch.is_free = result.is_free;
-      if (result.is_free) patch.price_min = 0;
+      applyField('is_free', result.is_free, ev.is_free);
     }
 
-    // address — official: overwrite even with null; aggregator: only if better
-    if (isOfficial) {
+    // sessions — write to event_sessions table, update aggregate fields on events
+    if (Array.isArray(result.sessions) && result.sessions.length > 0) {
+      const validSessions: DBSession[] = result.sessions
+        .filter((s): s is DBSession => typeof s?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.date) && s.date >= today);
+      if (validSessions.length > 0) {
+        // Upsert into event_sessions table
+        const sessionRows = validSessions.map((s) => ({
+          event_id: ev.id,
+          date: s.date,
+          time: s.time ?? null,
+          venue_name: s.venue_name ?? null,
+          address: s.address ?? null,
+          borough: s.borough ?? null,
+          price_min: s.price_min ?? null,
+          price_max: s.price_max ?? null,
+        }));
+        const { error: sessErr } = await supabase
+          .from('event_sessions')
+          .upsert(sessionRows, { onConflict: 'event_id,date' });
+        if (sessErr) console.warn(`  [Sessions] upsert error: ${sessErr.message}`);
+
+        // Update aggregate fields on events
+        const dates = validSessions.map((s) => s.date).sort();
+        applyField('start_date', dates[0], ev.start_date?.slice(0, 10));
+        applyField('end_date', dates.length > 1 ? dates[dates.length - 1] : null, ev.end_date);
+        if (validSessions.length > 1) {
+          corrections.push(`sessions: ${validSessions.length} session(s)`);
+        }
+
+        const mins = validSessions.map((s) => s.price_min).filter((p): p is number => p != null);
+        const maxs = validSessions.map((s) => s.price_max ?? s.price_min).filter((p): p is number => p != null);
+        if (mins.length > 0) {
+          const pMin = Math.min(...mins);
+          const pMax = maxs.length > 0 ? Math.max(...maxs) : null;
+          applyField('price_min', pMin, ev.price_min);
+          applyField('price_max', pMax, ev.price_max);
+          applyField('is_free', pMin === 0, ev.is_free);
+        }
+
+        const first = validSessions[0];
+        if (first.venue_name && first.venue_name.length > 2) applyField('venue_name', first.venue_name, ev.venue_name);
+        else if (isOfficial && result.venue_name === null) applyField('venue_name', null, ev.venue_name);
+        if (first.address && first.address.length > 5) applyField('address', first.address, ev.address);
+        else if (isOfficial && result.address === null) applyField('address', null, ev.address);
+        if (first.borough && VALID_BOROUGHS.includes(first.borough)) applyField('borough', first.borough, ev.borough);
+        else if (first.address) {
+          const derived = boroughFromAddress(first.address);
+          if (derived) applyField('borough', derived, ev.borough);
+        }
+      }
+    } else {
+      // No sessions extracted — correct individual fields
+
+      // address: official overwrites always; aggregator overwrites if the new address is more complete OR if existing is non-NYC
       if (result.address && result.address.length > 5) {
-        patch.address = result.address;
-      } else if (result.address === null) {
-        patch.address = null;
+        const existingIsWrong = ev.address && !isNYCAddress(ev.address);
+        if (isOfficial || !ev.address || existingIsWrong || result.address.length > (ev.address?.length ?? 0)) {
+          applyField('address', result.address, ev.address);
+        }
+      } else if (isOfficial && result.address === null) {
+        applyField('address', null, ev.address);
       }
-    } else if (result.address && result.address.length > 5) {
-      if (!ev.address || result.address.length > ev.address.length) {
-        patch.address = result.address;
+
+      // borough — always re-derive from best available address
+      const finalAddress = (patch.address as string | null | undefined) ?? ev.address;
+      if (finalAddress) {
+        const derived = boroughFromAddress(finalAddress);
+        if (derived) {
+          applyField('borough', derived, ev.borough);
+        } else if (isOfficial && result.borough === null) {
+          applyField('borough', null, ev.borough);
+        } else if (result.borough && VALID_BOROUGHS.includes(result.borough)) {
+          applyField('borough', result.borough, ev.borough);
+        }
+      }
+
+      // venue_name
+      if (result.venue_name && result.venue_name.length > 2) {
+        applyField('venue_name', result.venue_name, ev.venue_name);
+      } else if (isOfficial && result.venue_name === null) {
+        applyField('venue_name', null, ev.venue_name);
+      }
+
+      // start_date
+      if (result.start_date && /^\d{4}-\d{2}-\d{2}$/.test(result.start_date)) {
+        applyField('start_date', result.start_date, ev.start_date?.slice(0, 10));
+      }
+      if (result.end_date && /^\d{4}-\d{2}-\d{2}$/.test(result.end_date)) {
+        applyField('end_date', result.end_date, ev.end_date);
+      }
+
+      // price
+      if (typeof result.price_min === 'number') {
+        applyField('price_min', result.price_min, ev.price_min);
+        applyField('is_free', result.price_min === 0, ev.is_free);
+      }
+      if (typeof result.price_max === 'number') {
+        applyField('price_max', result.price_max, ev.price_max);
       }
     }
 
-    // borough — re-derive from address if address was updated; otherwise use LLM result
-    const finalAddress = (patch.address as string | null | undefined) ?? ev.address;
-    if (finalAddress) {
-      const derived = boroughFromAddress(finalAddress);
-      if (derived) {
-        patch.borough = derived;
-      } else if (isOfficial && result.borough === null) {
-        patch.borough = null;
-      } else if (result.borough && VALID_BOROUGHS.includes(result.borough)) {
-        patch.borough = result.borough;
-      }
-    } else if (!patch.borough) {
-      // address-based fix from Step 0 already applied if applicable
-    }
-
-    // venue_name
-    if (result.venue_name && result.venue_name.length > 2) {
-      patch.venue_name = result.venue_name;
-    } else if (isOfficial && result.venue_name === null) {
-      patch.venue_name = null;
-    }
-
-    // description
+    // description (apply from any source)
     if (result.description && result.description.length > 20) {
-      patch.description = result.description.slice(0, 300).trim();
+      applyField('description', result.description.slice(0, 300).trim(), ev.description);
     } else if (isOfficial && result.description === null) {
-      patch.description = null;
+      applyField('description', null, ev.description);
     }
 
-    // start_date — only correct if LLM found a specific date
-    if (result.start_date && /^\d{4}-\d{2}-\d{2}$/.test(result.start_date)) {
-      const stored = ev.start_date?.slice(0, 10);
-      if (stored && result.start_date !== stored) {
-        patch.start_date = result.start_date;
-        console.log(`  [Date fix] ${stored} → ${result.start_date}`);
-      }
-    }
-    if (result.end_date && /^\d{4}-\d{2}-\d{2}$/.test(result.end_date)) {
-      patch.end_date = result.end_date;
+    // ── Non-NYC check: if official page confirmed a non-NYC address, delete event ──
+    const confirmedAddress = (patch.address as string | undefined) ?? ev.address ?? '';
+    if (isOfficial && confirmedAddress && !isNYCAddress(confirmedAddress)) {
+      await supabase.from('events').delete().eq('id', ev.id);
+      console.log(`  [Deleted] Non-NYC address confirmed by official page: "${confirmedAddress}"`);
+      updated++;
+      continue;
     }
 
+    // ── Write patch ───────────────────────────────────────────
     if (Object.keys(patch).length > 0) {
       const { error: updateErr } = await supabase.from('events').update(patch).eq('id', ev.id);
       if (!updateErr) {
@@ -464,14 +631,23 @@ export async function enrichEvents(): Promise<void> {
 
     const officialNote = pageContents.length > 0
       ? `✓ ${pageContents.length} official page(s)`
-      : sourceLabel === 'aggregator' ? '~ aggregator fallback'
+      : sourceLabel === 'aggregator' ? '~ aggregator'
       : '✗ no pages';
-    console.log(`[Enrich] ${ev.title.slice(0, 50)} ${officialNote}`);
+    const correctionNote = corrections.length > 0 ? `  CORRECTED: ${corrections.join(' | ')}` : '';
+    console.log(`[Enrich] ${ev.title.slice(0, 50)} ${officialNote}${correctionNote}`);
 
-    await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    totalUpdated += updated;
+    totalAddressFixed += addressFixed;
+    console.log(`[Enrich] Batch done. Updated: ${updated} (${addressFixed} borough fixes)`);
+
+    if (events.length < batchSize) break; // last batch
+    offset += batchSize;
   }
 
-  console.log(`\n[Enrich] Done. Updated: ${updated} events (${addressFixed} borough auto-fixed from address)`);
+  console.log(`\n[Enrich] Done. Total: ${grandTotal} events processed, ${totalUpdated} updated (${totalAddressFixed} borough fixes)`);
 }
 
 // Run directly: npx tsx --env-file=.env lib/ingest/enrich.ts

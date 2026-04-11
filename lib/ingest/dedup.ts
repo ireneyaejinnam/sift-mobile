@@ -81,7 +81,7 @@ export async function mergeRecurringEvents(): Promise<void> {
 
   const { data, error } = await supabase
     .from('events')
-    .select('id, title, source, source_id, start_date, venue_name, description, image_url, available_dates, category, borough, address')
+    .select('id, title, source, source_id, start_date, venue_name, address, borough, description, image_url, category, price_min, price_max')
     .gte('start_date', new Date().toISOString().split('T')[0])
     .order('start_date', { ascending: true })
     .limit(5000);
@@ -111,28 +111,40 @@ export async function mergeRecurringEvents(): Promise<void> {
   for (const group of groups.values()) {
     if (group.length < 2) continue;
 
-    // Collect all dates from the group
-    const allDates = new Set<string>();
-    for (const ev of group) {
-      const d = (ev.start_date ?? '').slice(0, 10);
-      if (d) allDates.add(d);
-      for (const d2 of (ev.available_dates ?? [])) {
-        const trimmed = (d2 ?? '').slice(0, 10);
-        if (trimmed) allDates.add(trimmed);
-      }
-    }
-
     // Keep the richest record
     const keeper = group.reduce((best, ev) => dataScore(ev) >= dataScore(best) ? ev : best, group[0]);
     const toDelete = group.filter((ev) => ev.id !== keeper.id).map((ev) => ev.id);
 
-    const sortedDates = Array.from(allDates).sort();
+    // Re-assign all event_sessions from deleted events to the keeper
+    const deleteIds = toDelete;
+    if (deleteIds.length > 0) {
+      // Move sessions from duplicates to keeper
+      await supabase
+        .from('event_sessions')
+        .update({ event_id: keeper.id })
+        .in('event_id', deleteIds);
 
-    // Update keeper with merged dates
-    await supabase
-      .from('events')
-      .update({ available_dates: sortedDates })
-      .eq('id', keeper.id);
+      // Deduplicate sessions by (event_id, date) — keep earliest created
+      await supabase.rpc('deduplicate_event_sessions', { p_event_id: keeper.id });
+    }
+
+    // Recompute aggregate dates on keeper from event_sessions
+    const { data: sessions } = await supabase
+      .from('event_sessions')
+      .select('date')
+      .eq('event_id', keeper.id)
+      .order('date', { ascending: true });
+
+    if (sessions && sessions.length > 0) {
+      const dates = sessions.map((s: any) => s.date as string);
+      await supabase
+        .from('events')
+        .update({
+          start_date: dates[0],
+          end_date: dates.length > 1 ? dates[dates.length - 1] : null,
+        })
+        .eq('id', keeper.id);
+    }
 
     // Delete the rest
     for (let i = 0; i < toDelete.length; i += 50) {
