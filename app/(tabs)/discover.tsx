@@ -4,11 +4,19 @@ import {
   Text,
   Pressable,
   FlatList,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   BackHandler,
 } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  runOnJS,
+} from "react-native-reanimated";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft, CalendarCheck } from "lucide-react-native";
@@ -106,6 +114,30 @@ export default function DiscoverScreen() {
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
+
+  // EventDetail slide animation — transparent modal + Reanimated worklet, no bridge overhead
+  const [eventDetailVisible, setEventDetailVisible] = useState(false);
+  const eventSlideY = useSharedValue(900);
+
+  const eventDetailStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: eventSlideY.value }],
+  }));
+
+  const openEventDetail = useCallback((event: SiftEvent) => {
+    setSelectedEvent(event);
+    eventSlideY.value = 900;
+    setEventDetailVisible(true);
+    eventSlideY.value = withSpring(0, { damping: 60, stiffness: 300 });
+  }, []);
+
+  const closeEventDetail = useCallback(() => {
+    eventSlideY.value = withTiming(900, { duration: 260 }, (finished) => {
+      if (finished) {
+        runOnJS(setEventDetailVisible)(false);
+        runOnJS(setSelectedEvent)(null);
+      }
+    });
+  }, []);
 
   // Load taste profile (AsyncStorage for guests, Supabase for logged-in)
   useEffect(() => {
@@ -309,7 +341,15 @@ export default function DiscoverScreen() {
       return updated;
     }
 
-    // Pool exhausted — show a single end card if we have interest categories to expand to
+    // Pool exhausted for this slot — check if other event slots are still active
+    const otherEventSlots = prev.filter((s, i) => i !== idx && s.type === 'event');
+
+    if (otherEventSlots.length > 0) {
+      // Other cards still visible — silently collapse this slot
+      return prev.filter((_, i) => i !== idx);
+    }
+
+    // Last event slot exhausted — now show the end card if we have interests to expand to
     const interestCats = (userProfile?.interests ?? [])
       .map((i) => INTEREST_TO_CATEGORY[i])
       .filter((c): c is EventCategory => !!c && !quizCategories.includes(c));
@@ -317,14 +357,12 @@ export default function DiscoverScreen() {
     const alreadyHasEndCard = prev.some((s) => s.type === 'end-card');
 
     if (!expandedToInterestsRef.current && interestCats.length > 0 && !alreadyHasEndCard) {
-      const updated = [...prev];
-      updated[idx] = {
+      return [{
         event: null,
         key: `end-card-${Date.now()}`,
         type: 'end-card',
         meta: { quizCategories },
-      };
-      return updated;
+      }];
     }
 
     return prev.filter((_, i) => i !== idx);
@@ -392,17 +430,13 @@ export default function DiscoverScreen() {
     if (!fresh.length) return;
 
     setResultPool((prev) => [...prev, ...fresh]);
-    setSlots((prev) => {
-      const endIdx = prev.findIndex((s) => s.type === 'end-card');
-      if (endIdx === -1) return prev;
-      const updated = [...prev];
-      updated.splice(
-        endIdx, 1,
-        { event: null, key: `divider-${Date.now()}`, type: 'divider' },
-        { event: fresh[0], key: `${fresh[0].id}-${Date.now()}`, type: 'event' },
-      );
-      return updated;
-    });
+    setSlots(
+      fresh.slice(0, 3).map((e) => ({
+        event: e,
+        key: `${e.id}-${Date.now()}-${Math.random()}`,
+        type: 'event' as const,
+      }))
+    );
   }, [userProfile, filters, dismissedIds, resultPool, tasteProfile]);
 
   const handleGoingSwipe = useCallback(
@@ -436,18 +470,6 @@ export default function DiscoverScreen() {
     },
     [isLoggedIn, toggleGoing, advanceGoingSlot, showToast]
   );
-
-  // ── Event detail view ──────────────────────────────────
-
-  if (selectedEvent) {
-    return (
-      <EventDetail
-        event={selectedEvent}
-        onBack={() => setSelectedEvent(null)}
-        onRequestSignIn={() => router.push("/(auth)/signin")}
-      />
-    );
-  }
 
   // ── Welcome ────────────────────────────────────────────
 
@@ -604,7 +626,7 @@ export default function DiscoverScreen() {
       <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
         <View style={s.resultsHeaderRow}>
           <Text style={s.resultsHeading}>
-            {slots.length > 0
+            {loading || slots.length > 0
               ? userProfile ? "Your Top Picks" : "Here's what we found"
               : "Hmm, nothing matched"}
           </Text>
@@ -725,7 +747,7 @@ export default function DiscoverScreen() {
               event={item.event}
               onPress={() => {
                 track("card_tap", { event_id: item.event!.id, category: item.event!.category });
-                setSelectedEvent(item.event);
+                openEventDetail(item.event!);
               }}
               onDismiss={() => handleDismissEvent(item.event!.id)}
               onGoing={() => handleGoingSwipe(item.event!)}
@@ -842,6 +864,24 @@ export default function DiscoverScreen() {
           />
         )}
       </BottomSheet>
+
+      <Modal
+        visible={eventDetailVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeEventDetail}
+        statusBarTranslucent
+      >
+        <Animated.View style={[StyleSheet.absoluteFill, eventDetailStyle]}>
+          {selectedEvent && (
+            <EventDetail
+              event={selectedEvent}
+              onBack={closeEventDetail}
+              onRequestSignIn={() => router.push("/(auth)/signin")}
+            />
+          )}
+        </Animated.View>
+      </Modal>
     </View>
   );
 }

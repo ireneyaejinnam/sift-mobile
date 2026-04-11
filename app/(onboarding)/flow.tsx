@@ -5,9 +5,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { setOnboardingDoneFlag } from "@/lib/storage";
@@ -120,6 +120,7 @@ function OptionRow({
 
 export default function OnboardingFlow() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { setUserProfile, userProfile, isLoggedIn } = useUser();
 
   // Onboarding is for logged-in users only
@@ -244,7 +245,7 @@ export default function OnboardingFlow() {
   return (
     <View style={styles.container}>
       {/* Progress */}
-      <View style={styles.progressTrack}>
+      <View style={[styles.progressTrack, { marginTop: insets.top + 8 }]}>
         <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
 
@@ -478,7 +479,6 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 3,
     backgroundColor: colors.border,
-    marginTop: Platform.OS === "ios" ? 54 : 8,
   },
   progressFill: {
     height: 3,

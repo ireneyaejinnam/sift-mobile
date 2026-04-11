@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -36,6 +36,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import type { EventCategory, SiftEvent } from "@/types/event";
+import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 import { formatNYCDate } from "@/lib/time";
 
@@ -115,6 +116,13 @@ export default function EventCard({
     isGoing,
   } = useUser();
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
+  const [fallbackImage, setFallbackImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!event.imageUrl) {
+      getUnsplashFallback(event.category).then(setFallbackImage);
+    }
+  }, [event.id, event.category, event.imageUrl]);
 
   const interests = userProfile?.interests ?? [];
   const matchesInterests =
@@ -240,9 +248,9 @@ export default function EventCard({
               <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
             </Animated.View>
             {/* Image */}
-            {event.imageUrl ? (
+            {event.imageUrl || fallbackImage ? (
               <Image
-                source={{ uri: event.imageUrl }}
+                source={{ uri: event.imageUrl ?? fallbackImage! }}
                 style={styles.image}
                 resizeMode="cover"
               />

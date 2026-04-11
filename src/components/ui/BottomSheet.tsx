@@ -1,10 +1,20 @@
+import { useState, useEffect } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
   Modal,
+  StyleSheet,
+  Text,
   TouchableWithoutFeedback,
+  View,
 } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  Easing,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { colors, radius, typography } from "@/lib/theme";
 
 interface BottomSheetProps {
@@ -14,35 +24,104 @@ interface BottomSheetProps {
   children: React.ReactNode;
 }
 
+const DISMISS_THRESHOLD = 100;
+const DISMISS_VELOCITY = 800;
+const OFFSCREEN = 600;
+
 export default function BottomSheet({
   open,
   onClose,
   title,
   children,
 }: BottomSheetProps) {
+  const [visible, setVisible] = useState(false);
+  const translateY = useSharedValue(OFFSCREEN);
+  const dragY = useSharedValue(0);
+  const backdropOpacity = useSharedValue(0);
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value + dragY.value }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+
+  useEffect(() => {
+    if (open) {
+      translateY.value = OFFSCREEN;
+      dragY.value = 0;
+      backdropOpacity.value = 0;
+      setVisible(true);
+      translateY.value = withTiming(0, {
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+      });
+      backdropOpacity.value = withTiming(1, { duration: 220 });
+    } else {
+      dragY.value = 0;
+      translateY.value = withTiming(OFFSCREEN, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
+      backdropOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
+        if (finished) runOnJS(setVisible)(false);
+      });
+    }
+  }, [open]);
+
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      // Only allow dragging downward
+      dragY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      const drag = dragY.value;
+      if (drag > DISMISS_THRESHOLD || e.velocityY > DISMISS_VELOCITY) {
+        // Absorb current drag offset into translateY so the slide starts from
+        // the exact visual position the user released at — no jump
+        translateY.value = translateY.value + drag;
+        dragY.value = 0;
+        translateY.value = withTiming(
+          OFFSCREEN,
+          { duration: 220, easing: Easing.in(Easing.cubic) },
+          () => {
+            runOnJS(setVisible)(false);
+            runOnJS(onClose)();
+          }
+        );
+        backdropOpacity.value = withTiming(0, { duration: 200 });
+      } else {
+        // Snap back
+        dragY.value = withSpring(0, { damping: 20, stiffness: 300 });
+      }
+    });
+
   return (
     <Modal
-      visible={open}
+      visible={visible}
       transparent
-      animationType="slide"
+      animationType="none"
       onRequestClose={onClose}
       statusBarTranslucent
     >
       <View style={styles.overlay}>
         <TouchableWithoutFeedback onPress={onClose}>
-          <View style={styles.backdrop} />
+          <Animated.View style={[styles.backdrop, backdropStyle]} />
         </TouchableWithoutFeedback>
-        <View style={styles.sheet}>
-          <View style={styles.handleContainer}>
-            <View style={styles.handle} />
-          </View>
-          {title && (
-            <View style={styles.titleRow}>
-              <Text style={styles.title}>{title}</Text>
+        <GestureDetector gesture={panGesture}>
+          <Animated.View style={[styles.sheet, sheetStyle]}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
             </View>
-          )}
-          <View style={styles.body}>{children}</View>
-        </View>
+            {title && (
+              <View style={styles.titleRow}>
+                <Text style={styles.title}>{title}</Text>
+              </View>
+            )}
+            <View style={styles.body}>{children}</View>
+          </Animated.View>
+        </GestureDetector>
       </View>
     </Modal>
   );
@@ -52,6 +131,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: "flex-end",
+    backgroundColor: "transparent",
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -77,7 +157,7 @@ const styles = StyleSheet.create({
   titleRow: {
     paddingHorizontal: 20,
     paddingVertical: 16,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   title: {
