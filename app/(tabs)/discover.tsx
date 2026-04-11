@@ -24,7 +24,7 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getNextCandidate } from "@/lib/eventRecommendations";
-import { getRecommendationsFromDB } from "@/lib/recommend";
+import { rankEvents } from "@/lib/recommend";
 import { fetchEvents } from "@/lib/getEvents";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
@@ -107,31 +107,10 @@ export default function DiscoverScreen() {
     let resultEvents: SiftEvent[];
 
     try {
-      if (userProfile) {
-        const scored = await getRecommendationsFromDB(userProfile, 20);
-        const allScored = scored.map((s) => ({
-          ...s.event,
-          matchReason: s.matchReasons.length > 0
-            ? s.matchReasons.slice(0, 3).join(" · ")
-            : "Picked for you",
-        }));
-
-        const distanceFiltered = allScored.filter((e) => {
-          if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-          if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-          return true;
-        });
-
-        const quizMatches = distanceFiltered.filter(
-          (e) => !f.categories?.length || f.categories.includes(e.category)
-        );
-        const rest = distanceFiltered.filter(
-          (e) => f.categories?.length && !f.categories.includes(e.category)
-        );
-        resultEvents = [...quizMatches, ...rest];
-      } else {
-        resultEvents = await fetchEvents(f);
-      }
+      const dbEvents = await fetchEvents(f);
+      resultEvents = userProfile && dbEvents.length > 0
+        ? rankEvents(dbEvents, userProfile)
+        : dbEvents;
     } catch (err) {
       console.error("[discover] failed to fetch events:", err);
       resultEvents = [];

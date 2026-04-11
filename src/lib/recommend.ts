@@ -274,6 +274,22 @@ function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
 }
 
 /**
+ * Score and sort a pre-fetched list of events against a user profile.
+ * Unlike getRecommendationsFromDB, applies no score > 0 cutoff —
+ * all events are returned, ordered best-match first.
+ */
+export function rankEvents(events: SiftEvent[], profile: UserProfile): SiftEvent[] {
+  const scored = events.map((e) => scoreEvent(e, profile));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => ({
+    ...s.event,
+    matchReason: s.matchReasons.length > 0
+      ? s.matchReasons.slice(0, 3).join(" · ")
+      : "Picked for you",
+  }));
+}
+
+/**
  * Post-scoring diversification.
  * Ensures no more than 2 consecutive events of the same category.
  * If 3+ interests, ensures at least 2 categories in top 5.

@@ -268,7 +268,29 @@ export async function fetchEvents(
     sessionsByEvent.get(s.event_id)!.push(s);
   }
 
-  return events.map((row: any) =>
+  // ── Step 4: Also fetch ongoing range events (started before dateFrom but haven't ended) ──
+  // These won't appear in session queries because their sessions are all past dates.
+  let ongoingQuery = supabase
+    .from(EVENTS_TABLE)
+    .select("*")
+    .lt("start_date", dateFrom)
+    .gte("end_date", dateFrom);
+
+  if (dbCategories?.length) {
+    const cats = dbCategories.join(",");
+    ongoingQuery = ongoingQuery.or(`category.in.(${cats}),tags.ov.{${cats}}`);
+  }
+  if (dateTo) ongoingQuery = ongoingQuery.lte("start_date", dateTo);
+
+  const { data: ongoingEvents } = await ongoingQuery;
+
+  // Merge: dedup by id (session-based events take priority)
+  const sessionEventIds = new Set(events.map((e: any) => e.id));
+  const extraEvents = (ongoingEvents ?? []).filter((e: any) => !sessionEventIds.has(e.id));
+
+  const allEvents = [...events, ...extraEvents];
+
+  return allEvents.map((row: any) =>
     mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? [])
   );
 }
@@ -334,7 +356,7 @@ export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
   const { data: events, error } = await supabase
     .from(EVENTS_TABLE)
     .select("*")
-    .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`)
+    .or(`end_date.gte.${today},start_date.gte.${today}`)
     .order("start_date", { ascending: true })
     .limit(limit);
 
