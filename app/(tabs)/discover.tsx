@@ -56,9 +56,17 @@ const distances: { value: EventDistance; label: string; desc: string }[] = [
   { value: "anywhere", label: "Anywhere in NYC", desc: "All boroughs" },
 ];
 
+const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
+  live_music: "music", art_exhibitions: "arts", theater: "theater",
+  workshops: "workshops", fitness: "fitness", comedy: "comedy",
+  food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
+};
+
 interface Slot {
-  event: SiftEvent;
+  event: SiftEvent | null;
   key: string;
+  type: 'event' | 'end-card' | 'divider';
+  meta?: { quizCategories?: string[] };
 }
 
 export default function DiscoverScreen() {
@@ -97,6 +105,7 @@ export default function DiscoverScreen() {
   const [showGestureTip, setShowGestureTip] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const loadingRef = useRef(false);
+  const expandedToInterestsRef = useRef(false);
 
   // Load taste profile (AsyncStorage for guests, Supabase for logged-in)
   useEffect(() => {
@@ -165,11 +174,6 @@ export default function DiscoverScreen() {
         return true;
       });
 
-    const INTEREST_TO_CATEGORY: Record<string, string> = {
-      live_music: "music", art_exhibitions: "arts", theater: "theater",
-      workshops: "workshops", fitness: "fitness", comedy: "comedy",
-      food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
-    };
 
     // Re-rank within a tier by composite score × taste weight.
     const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
@@ -259,9 +263,11 @@ export default function DiscoverScreen() {
     }
 
     setResultPool(resultEvents);
+    expandedToInterestsRef.current = false;
     const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
+      type: 'event' as const,
     }));
     setSlots(initial);
     setDismissedIds([]);
@@ -290,13 +296,49 @@ export default function DiscoverScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, [filters, goToResults]);
 
+  // Returns the next slot update — end card if pool exhausted, otherwise next event
+  const nextSlotUpdate = (
+    prev: Slot[],
+    idx: number,
+    excludedIds: Set<string>,
+    quizCategories: string[]
+  ): Slot[] => {
+    const next = resultPool.find((e) => !excludedIds.has(e.id))
+      ?? getNextCandidate([...excludedIds], filters, userProfile);
+
+    if (next) {
+      const updated = [...prev];
+      updated[idx] = { event: next, key: `${next.id}-${Date.now()}-${Math.random()}`, type: 'event' };
+      return updated;
+    }
+
+    // Pool exhausted — show a single end card if we have interest categories to expand to
+    const interestCats = (userProfile?.interests ?? [])
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter((c): c is EventCategory => !!c && !quizCategories.includes(c));
+
+    const alreadyHasEndCard = prev.some((s) => s.type === 'end-card');
+
+    if (!expandedToInterestsRef.current && interestCats.length > 0 && !alreadyHasEndCard) {
+      const updated = [...prev];
+      updated[idx] = {
+        event: null,
+        key: `end-card-${Date.now()}`,
+        type: 'end-card',
+        meta: { quizCategories },
+      };
+      return updated;
+    }
+
+    return prev.filter((_, i) => i !== idx);
+  };
+
   const handleDismissEvent = useCallback(
     (eventId: string) => {
       sessionDismissedRef.current.add(eventId);
       const nextDismissed = [...dismissedIds, eventId];
       setDismissedIds(nextDismissed);
 
-      // Persist dismissed category to learn preferences over time
       const dismissed = resultPool.find((e) => e.id === eventId);
       if (dismissed?.category) {
         const record: DismissedRecord = {
@@ -306,26 +348,14 @@ export default function DiscoverScreen() {
         };
         addDismissedEvent(record);
         setDismissedHistory((prev) => [...prev, record]);
-        // Update taste profile (fire-and-forget)
         recordDislike(eventId, dismissed.category).then(setTasteProfile).catch(() => {});
       }
       setSlots((prev) => {
-        const idx = prev.findIndex((s) => s.event.id === eventId);
+        const idx = prev.findIndex((s) => s.event?.id === eventId);
         if (idx === -1) return prev;
-        const shownIds = new Set(prev.map((s) => s.event.id));
+        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
         const excludedIds = new Set([...nextDismissed, ...shownIds]);
-
-        // Draw next from the pre-ranked result pool (preserves priority order)
-        const next = resultPool.find((e) => !excludedIds.has(e.id))
-          ?? getNextCandidate([...excludedIds], filters, userProfile);
-
-        if (!next) return prev.filter((_, i) => i !== idx);
-        const updated = [...prev];
-        updated[idx] = {
-          event: next,
-          key: `${next.id}-${Date.now()}-${Math.random()}`,
-        };
-        return updated;
+        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
       });
     },
     [dismissedIds, filters, userProfile, resultPool]
@@ -338,20 +368,45 @@ export default function DiscoverScreen() {
       const nextDismissed = [...dismissedIds, eventId];
       setDismissedIds(nextDismissed);
       setSlots((prev) => {
-        const idx = prev.findIndex((s) => s.event.id === eventId);
+        const idx = prev.findIndex((s) => s.event?.id === eventId);
         if (idx === -1) return prev;
-        const shownIds = new Set(prev.map((s) => s.event.id));
+        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
         const excludedIds = new Set([...nextDismissed, ...shownIds]);
-        const next = resultPool.find((e) => !excludedIds.has(e.id))
-          ?? getNextCandidate([...excludedIds], filters, userProfile);
-        if (!next) return prev.filter((_, i) => i !== idx);
-        const updated = [...prev];
-        updated[idx] = { event: next, key: `${next.id}-${Date.now()}-${Math.random()}` };
-        return updated;
+        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
       });
     },
     [dismissedIds, filters, userProfile, resultPool]
   );
+
+  // Fetches interest-based events and injects them after the end card
+  const expandToInterests = useCallback(async () => {
+    if (expandedToInterestsRef.current) return;
+    expandedToInterestsRef.current = true;
+
+    const interestCats = (userProfile?.interests ?? [])
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter((c): c is EventCategory => !!c && !(filters.categories ?? []).includes(c));
+
+    if (!interestCats.length) return;
+
+    const events = await fetchAllUpcoming(200, interestCats, tasteProfile?.categoryWeights);
+    const alreadyUsed = new Set([...dismissedIds, ...resultPool.map((e) => e.id)]);
+    const fresh = events.filter((e) => !alreadyUsed.has(e.id));
+    if (!fresh.length) return;
+
+    setResultPool((prev) => [...prev, ...fresh]);
+    setSlots((prev) => {
+      const endIdx = prev.findIndex((s) => s.type === 'end-card');
+      if (endIdx === -1) return prev;
+      const updated = [...prev];
+      updated.splice(
+        endIdx, 1,
+        { event: null, key: `divider-${Date.now()}`, type: 'divider' },
+        { event: fresh[0], key: `${fresh[0].id}-${Date.now()}`, type: 'event' },
+      );
+      return updated;
+    });
+  }, [userProfile, filters, dismissedIds, resultPool, tasteProfile]);
 
   const handleGoingSwipe = useCallback(
     (event: SiftEvent) => {
@@ -542,9 +597,9 @@ export default function DiscoverScreen() {
       {/* Sticky header — stays put while list scrolls */}
       <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
         <View style={s.resultsHeaderRow}>
-          <Text style={s.heading}>
+          <Text style={s.resultsHeading}>
             {slots.length > 0
-              ? userProfile ? "Your top picks" : "Here's what we found"
+              ? userProfile ? "Your Top Picks" : "Here's what we found"
               : "Hmm, nothing matched"}
           </Text>
           <Pressable onPress={reset} hitSlop={8}>
@@ -630,26 +685,56 @@ export default function DiscoverScreen() {
             </ScrollView>
           </View>
         }
-        renderItem={({ item }) => (
-          <EventCard
-            event={item.event}
-            onPress={() => {
-              track("card_tap", { event_id: item.event.id, category: item.event.category });
-              setSelectedEvent(item.event);
-            }}
-            onDismiss={() => handleDismissEvent(item.event.id)}
-            onGoing={() => handleGoingSwipe(item.event)}
-            onRequestSignIn={() => router.push("/(auth)/signin")}
-            onBookmarkPress={() => {
-              track("event_saved", { event_id: item.event.id });
-              setSaveSheetEvent(item.event);
-            }}
-            onSharePress={() => {
-              track("share_tap", { event_id: item.event.id });
-              setShareSheetEvent(item.event);
-            }}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (item.type === 'divider') {
+            return (
+              <View style={s.dividerRow}>
+                <View style={s.dividerLine} />
+                <Text style={s.dividerLabel}>Now showing events for you</Text>
+                <View style={s.dividerLine} />
+              </View>
+            );
+          }
+          if (item.type === 'end-card') {
+            const quizLabels = (item.meta?.quizCategories ?? [])
+              .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
+              .join(' · ');
+            return (
+              <View style={s.endCard}>
+                <Text style={s.endCardTitle}>
+                  {quizLabels ? `That's all for\n${quizLabels}` : "You've seen everything"}
+                </Text>
+                <Text style={s.endCardSub}>
+                  We found more events based on your interests
+                </Text>
+                <Pressable onPress={expandToInterests} style={s.endCardButton}>
+                  <Text style={s.endCardButtonText}>Keep exploring →</Text>
+                </Pressable>
+              </View>
+            );
+          }
+          if (!item.event) return null;
+          return (
+            <EventCard
+              event={item.event}
+              onPress={() => {
+                track("card_tap", { event_id: item.event!.id, category: item.event!.category });
+                setSelectedEvent(item.event);
+              }}
+              onDismiss={() => handleDismissEvent(item.event!.id)}
+              onGoing={() => handleGoingSwipe(item.event!)}
+              onRequestSignIn={() => router.push("/(auth)/signin")}
+              onBookmarkPress={() => {
+                track("event_saved", { event_id: item.event!.id });
+                setSaveSheetEvent(item.event!);
+              }}
+              onSharePress={() => {
+                track("share_tap", { event_id: item.event!.id });
+                setShareSheetEvent(item.event!);
+              }}
+            />
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <View>
@@ -803,7 +888,7 @@ const s = StyleSheet.create({
   distDesc: { ...typography.sm, color: colors.textSecondary, lineHeight: 22 },
   stickyHeader: {
     paddingHorizontal: spacing.page,
-    paddingBottom: 12,
+    paddingBottom: 8,
     backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
@@ -862,7 +947,9 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 4,
+  },
+  resultsHeading: {
+    ...typography.sectionHeading,
   },
   planCta: {
     flexDirection: "row",
@@ -890,5 +977,56 @@ const s = StyleSheet.create({
     fontSize: 18,
     color: colors.primary,
     fontWeight: "600",
+  },
+  // End card — shown when result pool is exhausted
+  endCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 28,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  endCardTitle: {
+    ...typography.sectionHeading,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  endCardSub: {
+    ...typography.sm,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  endCardButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: radius.full,
+  },
+  endCardButtonText: {
+    ...typography.sm,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  // Divider — shown after interest expansion
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+  },
+  dividerLabel: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    fontWeight: "500",
   },
 });
