@@ -3,6 +3,7 @@ import { View, StyleSheet } from "react-native";
 import { Calendar } from "react-native-calendars";
 import type { DateData, MarkedDates } from "react-native-calendars/src/types";
 import { colors, radius } from "@/lib/theme";
+import { todayNYC } from "@/lib/time";
 
 interface DateRangePickerProps {
   dateFrom?: string; // "YYYY-MM-DD"
@@ -15,8 +16,7 @@ export default function DateRangePicker({
   dateTo,
   onChange,
 }: DateRangePickerProps) {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const today = todayNYC();
 
   const markedDates = useMemo<MarkedDates>(() => {
     if (!dateFrom) return {};
@@ -56,6 +56,7 @@ export default function DateRangePicker({
 
   const handleDayPress = (day: DateData) => {
     const selected = day.dateString;
+    if (selected < today) return; // disallow past dates
 
     if (!dateFrom || (dateFrom && dateTo)) {
       // Start new selection

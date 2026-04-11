@@ -14,20 +14,31 @@ export type EventDistance = "neighborhood" | "borough" | "anywhere";
 
 export type PriceRange = "free" | "under-20" | "under-50" | "any";
 
+export interface EventSession {
+  startDate: string;    // YYYY-MM-DD
+  time?: string;        // e.g. "7:00 PM"
+  location?: string;    // venue_name for this session
+  address?: string;
+  borough?: string;
+  priceMin?: number;
+  priceMax?: number;
+  link?: string;        // ticket/event URL for this session
+}
+
 export interface SiftEvent {
   id: string;
   title: string;
   category: EventCategory;
   imageUrl?: string;
   description: string;
-  location: string;
-  address: string;
+  location: string;      // primary venue (first session, or "Multiple venues")
+  address: string;       // primary address
   borough: "Manhattan" | "Brooklyn" | "Queens" | "Bronx" | "Staten Island";
-  startDate: string;
-  endDate?: string;
-  time: string;
-  price: number;
-  priceLabel: string;
+  startDate: string;     // earliest upcoming session date
+  endDate?: string;      // latest session date (undefined = single session)
+  time: string;          // primary session time
+  price: number;         // lowest price across sessions (for budget filter compat)
+  priceLabel: string;    // display string e.g. "$25–$45" or "Free"
   link: string;
   matchReason?: string;
   endingSoon?: boolean;
@@ -36,5 +47,6 @@ export interface SiftEvent {
   ticketUrl?: string;
   eventUrl?: string;
   onSaleDate?: string;
-  dates?: { startDate: string; time: string; link: string }[];
+  sessions?: EventSession[];    // all upcoming sessions; undefined = treat as single session
+  locationsVary?: boolean;      // true if sessions have different venues/addresses
 }

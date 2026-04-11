@@ -1,5 +1,6 @@
 import { events } from "@/data/events";
 import { fetchAllUpcoming } from "@/lib/getEvents";
+import { todayNYC } from "@/lib/time";
 import type { SiftEvent } from "@/types/event";
 import type { UserProfile } from "@/types/user";
 
@@ -67,7 +68,7 @@ const POPULAR_VENUES = [
   "smorgasburg", "chelsea market", "lincoln center",
 ];
 
-function getBudgetMax(budget: string): number | null {
+export function getBudgetMax(budget: string): number | null {
   switch (budget) {
     case "free": return 0;
     case "under_20": return 20;
@@ -99,6 +100,75 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * Score a single session against the user profile.
+ * Returns { sessionScore, sessionReasons } without the event-level bonuses
+ * (those are added once per event, not per session).
+ */
+export function scoreSession(
+  session: { startDate: string; time?: string; address?: string; borough?: string; priceMin?: number },
+  profile: UserProfile,
+  eventBudgetMax: number | null
+): { pts: number; reasons: string[] } {
+  let pts = 0;
+  const reasons: string[] = [];
+
+  // Borough match
+  const sessionBorough = session.borough as SiftEvent["borough"] | undefined;
+  if (sessionBorough === profile.borough) {
+    pts += 20;
+    reasons.push(`it's in ${profile.borough}`);
+  } else if (sessionBorough && ADJACENT_BOROUGHS[profile.borough]?.includes(sessionBorough)) {
+    pts += 10;
+  }
+
+  // Neighborhood match
+  if (profile.neighborhood && session.address?.toLowerCase().includes(profile.neighborhood.toLowerCase())) {
+    pts += 10;
+    reasons.push("it's in your neighborhood");
+  }
+
+  // Budget match for this session's price
+  const sessionPrice = session.priceMin ?? 0;
+  if (sessionPrice === 0 && profile.budget === "free") {
+    pts += 15;
+    reasons.push("it's free");
+  } else if (eventBudgetMax !== null && sessionPrice <= eventBudgetMax) {
+    pts += 15;
+    if (eventBudgetMax > 0) reasons.push(`under your $${eventBudgetMax} budget`);
+  } else if (eventBudgetMax === null) {
+    pts += 15;
+  } else {
+    pts -= 20;
+  }
+
+  // Day match
+  const day = getDayOfWeek(session.startDate);
+  if (profile.freeDays?.includes(day)) {
+    pts += 15;
+    reasons.push(`you're free ${capitalize(day)}`);
+  }
+
+  // Time match
+  const time = getTimeOfDay(session.time ?? "");
+  if (profile.freeTime?.includes(time)) {
+    pts += 10;
+  }
+
+  // Recency boost (session starting within 3 days)
+  const daysUntil = Math.ceil(
+    (new Date(session.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  );
+  if (daysUntil >= 0 && daysUntil <= 3) {
+    pts += 8;
+    if (daysUntil === 0) reasons.push("happening today");
+    else if (daysUntil === 1) reasons.push("happening tomorrow");
+    else reasons.push("coming up soon");
+  }
+
+  return { pts, reasons };
+}
+
 function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
   let score = 0;
   const reasons: string[] = [];
@@ -106,24 +176,20 @@ function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
   const profileCategories = profile.interests.map(
     (i) => INTEREST_TO_CATEGORY[i]
   );
+  const budgetMax = getBudgetMax(profile.budget);
 
-  // ── Category match (25 points — reduced from 30 since we now have description matching)
+  // ── Category match (25 pts)
   if (profileCategories.includes(event.category)) {
     score += 25;
-    reasons.push(
-      `you're into ${CATEGORY_LABELS[event.category] || event.category}`
-    );
+    reasons.push(`you're into ${CATEGORY_LABELS[event.category] || event.category}`);
   }
 
-  // ── Description keyword matching (5-10 points)
-  // Gives partial credit when event description mentions interest-related keywords
-  // even if the category doesn't directly match
+  // ── Description keyword matching (5–10 pts)
   const descLower = `${event.description} ${event.title}`.toLowerCase();
   let descBonus = 0;
   for (const interest of profile.interests) {
     const keywords = INTEREST_KEYWORDS[interest];
     if (!keywords) continue;
-    // Skip if already matched by category
     if (INTEREST_TO_CATEGORY[interest] === event.category) continue;
     const matches = keywords.filter((kw) => descLower.includes(kw));
     if (matches.length >= 2) {
@@ -135,84 +201,54 @@ function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
   }
   score += descBonus;
 
-  // ── Borough match (20 points for same, 10 for adjacent)
-  if (event.borough === profile.borough) {
-    score += 20;
-    reasons.push(`it's in ${profile.borough}`);
-  } else if (ADJACENT_BOROUGHS[profile.borough]?.includes(event.borough)) {
-    score += 10;
+  // ── Best-session scoring: find the session that scores highest for this user ──
+  // Considers borough, neighborhood, price, day, time, recency per session.
+  const sessions = event.sessions ?? [{
+    startDate: event.startDate,
+    time: event.time,
+    address: event.address,
+    borough: event.borough,
+    priceMin: event.price,
+  }];
+
+  let bestSessionPts = -Infinity;
+  let bestSessionReasons: string[] = [];
+
+  for (const session of sessions) {
+    const { pts, reasons: sReasons } = scoreSession(session, profile, budgetMax);
+    if (pts > bestSessionPts) {
+      bestSessionPts = pts;
+      bestSessionReasons = sReasons;
+    }
+  }
+  score += bestSessionPts;
+  for (const r of bestSessionReasons) {
+    if (!reasons.includes(r)) reasons.push(r);
   }
 
-  // ── Neighborhood match (bonus 10 on top of borough)
-  if (
-    profile.neighborhood &&
-    event.address?.toLowerCase().includes(profile.neighborhood.toLowerCase())
-  ) {
-    score += 10;
-    reasons.push("it's in your neighborhood");
-  }
-
-  // ── Budget match (15 points)
-  const budgetMax = getBudgetMax(profile.budget);
-  if (event.price === 0 && profile.budget === "free") {
-    score += 15;
-    reasons.push("it's free");
-  } else if (budgetMax !== null && event.price <= budgetMax) {
-    score += 15;
-    if (budgetMax > 0) reasons.push(`under your $${budgetMax} budget`);
-  } else if (budgetMax === null) {
-    score += 15;
-  } else {
-    score -= 20; // over budget penalty
-  }
-
-  // ── Day match (15 points)
-  const eventDay = getDayOfWeek(event.startDate);
-  if (profile.freeDays?.includes(eventDay)) {
-    score += 15;
-    reasons.push(`you're free ${capitalize(eventDay)}`);
-  }
-
-  // ── Time match (10 points)
-  const eventTime = getTimeOfDay(event.time);
-  if (profile.freeTime?.includes(eventTime)) {
-    score += 10;
-  }
-
-  // ── Recency boost (8 points — events starting within 3 days)
-  const daysUntilStart = Math.ceil(
-    (new Date(event.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-  );
-  if (daysUntilStart >= 0 && daysUntilStart <= 3) {
-    score += 8;
-    if (daysUntilStart === 0) reasons.push("happening today");
-    else if (daysUntilStart === 1) reasons.push("happening tomorrow");
-    else reasons.push("coming up soon");
-  }
-
-  // ── Ending soon boost (10 points — urgency)
+  // ── Ending soon boost (10 pts — urgency)
   if (event.endingSoon && event.daysLeft != null && event.daysLeft <= 7) {
     score += 10;
-    reasons.push(
-      `ends in ${event.daysLeft} day${event.daysLeft === 1 ? "" : "s"}`
-    );
+    reasons.push(`ends in ${event.daysLeft} day${event.daysLeft === 1 ? "" : "s"}`);
   }
 
-  // ── Popular venue boost (5 points — when vibe = popular_spots)
+  // ── Popular venue boost (5 pts)
   if (profile.vibe === "popular_spots") {
-    const locationLower = event.location.toLowerCase();
-    if (POPULAR_VENUES.some((v) => locationLower.includes(v))) {
+    const locationsToCheck = event.locationsVary
+      ? sessions.map((s) => s.location ?? s.address ?? "")
+      : [event.location];
+    if (locationsToCheck.some((loc) => POPULAR_VENUES.some((v) => loc.toLowerCase().includes(v)))) {
       score += 5;
       reasons.push("popular venue");
     }
   }
 
-  // ── Free event bonus (5 points)
+  // ── Free event bonus (5 pts)
   if (event.price === 0) {
     score += 5;
   }
 
-  // ── Has image bonus (3 points)
+  // ── Has image bonus (3 pts)
   if (event.imageUrl) {
     score += 3;
   }
@@ -228,15 +264,29 @@ function scoreEvent(event: SiftEvent, profile: UserProfile): ScoredEvent {
       score += 5;
     }
   } else if (profile.vibe === "popular_spots") {
-    const popularTags = [
-      "arena", "festival", "concert", "stand-up", "club", "candlelight",
-    ];
+    const popularTags = ["arena", "festival", "concert", "stand-up", "club", "candlelight"];
     if (event.tags.some((t) => popularTags.includes(t))) {
       score += 5;
     }
   }
 
   return { event, score, matchReasons: reasons };
+}
+
+/**
+ * Score and sort a pre-fetched list of events against a user profile.
+ * Unlike getRecommendationsFromDB, applies no score > 0 cutoff —
+ * all events are returned, ordered best-match first.
+ */
+export function rankEvents(events: SiftEvent[], profile: UserProfile): SiftEvent[] {
+  const scored = events.map((e) => scoreEvent(e, profile));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => ({
+    ...s.event,
+    matchReason: s.matchReasons.length > 0
+      ? s.matchReasons.slice(0, 3).join(" · ")
+      : "Picked for you",
+  }));
 }
 
 /**
@@ -297,12 +347,9 @@ export function getRecommendations(
   profile: UserProfile,
   limit: number = 5
 ): ScoredEvent[] {
-  const now = new Date();
+  const today = todayNYC();
 
-  const upcoming = events.filter((e) => {
-    const end = e.endDate ? new Date(e.endDate) : new Date(e.startDate);
-    return end >= now;
-  });
+  const upcoming = events.filter((e) => (e.endDate ?? e.startDate) >= today);
 
   const scored = upcoming.map((e) => scoreEvent(e, profile));
   scored.sort((a, b) => b.score - a.score);
@@ -344,12 +391,9 @@ export function getGuestRecommendations(
   categories?: string[],
   limit: number = 10
 ): SiftEvent[] {
-  const now = new Date();
+  const today = todayNYC();
 
-  let upcoming = events.filter((e) => {
-    const end = e.endDate ? new Date(e.endDate) : new Date(e.startDate);
-    return end >= now;
-  });
+  let upcoming = events.filter((e) => (e.endDate ?? e.startDate) >= today);
 
   if (categories?.length) {
     upcoming = upcoming.filter((e) => categories.includes(e.category));

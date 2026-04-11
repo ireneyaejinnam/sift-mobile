@@ -26,13 +26,26 @@ import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
-import type { SiftEvent } from "@/types/event";
+import type { SiftEvent, EventSession } from "@/types/event";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
+import { scoreSession, getBudgetMax } from "@/lib/recommend";
+import { formatNYCDate } from "@/lib/time";
 
 interface EventDetailProps {
   event: SiftEvent;
   onBack: () => void;
   onRequestSignIn?: () => void;
+}
+
+function formatShortDate(d: string): string {
+  return formatNYCDate(d, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function formatSessionPrice(s: EventSession): string | null {
+  if (s.priceMin === 0) return "Free";
+  if (s.priceMin != null && s.priceMax != null && s.priceMin !== s.priceMax) return `$${s.priceMin}–$${s.priceMax}`;
+  if (s.priceMin != null) return `$${s.priceMin}`;
+  return null;
 }
 
 function formatEventDate(event: SiftEvent) {
@@ -50,11 +63,30 @@ export default function EventDetail({
   const { showToast } = useToast();
   const {
     isLoggedIn,
+    userProfile,
     getSavedListForEvent,
     removeSavedEvent,
     toggleGoing,
     isGoing,
   } = useUser();
+
+  // Score and sort sessions for display
+  const sessions = event.sessions ?? [];
+  const scoredSessions = sessions.length > 1
+    ? [...sessions]
+        .map((s) => ({
+          session: s,
+          pts: userProfile
+            ? scoreSession(s, userProfile, getBudgetMax(userProfile.budget)).pts
+            : 0,
+        }))
+        .sort((a, b) => b.pts - a.pts)
+    : [];
+
+  const sessionKey = (s: { startDate: string; time?: string }) => `${s.startDate}::${s.time ?? ""}`;
+  const defaultKey = scoredSessions.length > 0 ? sessionKey(scoredSessions[0].session) : null;
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(defaultKey);
+
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
@@ -71,8 +103,8 @@ export default function EventDetail({
     }
   };
 
-  const isMultiDate = (event.dates && event.dates.length > 1) ||
-    (!!event.endDate && event.endDate !== event.startDate);
+  // Range exhibitions (no sessions array, just a date span) still need the sheet
+  const isRangeExhibition = sessions.length <= 1 && !!event.endDate && event.endDate !== event.startDate;
 
   const handleGoingPress = () => {
     if (going) {
@@ -88,7 +120,15 @@ export default function EventDetail({
       onRequestSignIn();
       return;
     }
-    if (isMultiDate) {
+    // Multi-session event: use the selected session directly
+    if (scoredSessions.length > 0 && selectedSessionKey) {
+      const date = selectedSessionKey.split("::")[0];
+      toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: date });
+      showToast("Marked as going");
+      return;
+    }
+    // Range exhibition: open sheet to pick a day
+    if (isRangeExhibition) {
       setGoingSheetOpen(true);
       return;
     }
@@ -189,9 +229,11 @@ export default function EventDetail({
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>{event.location}</Text>
-                <Text style={styles.infoSub}>
-                  {event.address}, {event.borough}
-                </Text>
+                {!event.locationsVary && (
+                  <Text style={styles.infoSub}>
+                    {event.address}, {event.borough}
+                  </Text>
+                )}
               </View>
             </View>
 
@@ -219,6 +261,54 @@ export default function EventDetail({
                 </View>
               ))}
             </View>
+
+            {/* Sessions */}
+            {scoredSessions.length > 0 && (
+              <View style={styles.sessionsSection}>
+                <Text style={styles.sectionLabel}>Sessions</Text>
+                {scoredSessions.map(({ session, pts }, i) => {
+                  const isBest = i === 0 && !!userProfile;
+                  const key = sessionKey(session);
+                  const isSelected = selectedSessionKey === key;
+                  const price = formatSessionPrice(session);
+                  return (
+                    <Pressable
+                      key={`${key}-${i}`}
+                      onPress={() => setSelectedSessionKey(key)}
+                      style={[
+                        styles.sessionRow,
+                        isBest && styles.sessionRowBest,
+                        isSelected && styles.sessionRowSelected,
+                      ]}
+                    >
+                      <View style={styles.sessionLeft}>
+                        <Text style={[styles.sessionDate, isSelected && styles.sessionTextSelected]}>
+                          {formatShortDate(session.startDate)}
+                          {session.time ? `  ·  ${session.time}` : ""}
+                        </Text>
+                        {session.location && (event.locationsVary || session.location !== event.location) && (
+                          <Text style={[styles.sessionLocation, isSelected && styles.sessionTextSelectedSub]}>
+                            {session.location}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.sessionRight}>
+                        {price && (
+                          <Text style={[styles.sessionPrice, isSelected && styles.sessionTextSelected]}>
+                            {price}
+                          </Text>
+                        )}
+                        {isBest && (
+                          <View style={[styles.mostFitBadge, isSelected && styles.mostFitBadgeSelected]}>
+                            <Text style={[styles.mostFitText, isSelected && { color: colors.white }]}>Most Fit</Text>
+                          </View>
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
@@ -307,6 +397,7 @@ export default function EventDetail({
       >
         <GoingDateSheet
           event={event}
+          userProfile={userProfile}
           onConfirm={(date) => {
             toggleGoing({
               eventId: event.id,
@@ -450,6 +541,78 @@ const styles = StyleSheet.create({
     ...typography.sm,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  sessionsSection: {
+    marginBottom: 24,
+  },
+  sectionLabel: {
+    ...typography.xs,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  sessionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    marginBottom: 6,
+  },
+  sessionRowBest: {
+    borderColor: `${colors.primary}50`,
+  },
+  sessionRowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  sessionLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  sessionRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  sessionDate: {
+    ...typography.sm,
+    fontWeight: "500",
+    color: colors.foreground,
+  },
+  sessionLocation: {
+    ...typography.xs,
+    color: colors.textSecondary,
+  },
+  sessionPrice: {
+    ...typography.xs,
+    color: colors.textSecondary,
+  },
+  sessionTextSelected: {
+    color: colors.white,
+    fontWeight: "600",
+  },
+  sessionTextSelectedSub: {
+    color: `${colors.white}CC`,
+  },
+  mostFitBadge: {
+    backgroundColor: `${colors.primary}25`,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: 4,
+  },
+  mostFitBadgeSelected: {
+    backgroundColor: `${colors.white}30`,
+  },
+  mostFitText: {
+    ...typography.xs,
+    fontWeight: "600",
+    color: colors.primary,
   },
   tags: {
     flexDirection: "row",

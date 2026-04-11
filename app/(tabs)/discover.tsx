@@ -23,8 +23,9 @@ import SaveEventSheet from "@/components/events/SaveEventSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
-import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
-import { fetchAllUpcoming } from "@/lib/getEvents";
+import { getNextCandidate } from "@/lib/eventRecommendations";
+import { rankEvents } from "@/lib/recommend";
+import { fetchEvents } from "@/lib/getEvents";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
@@ -105,85 +106,14 @@ export default function DiscoverScreen() {
 
     let resultEvents: SiftEvent[];
 
-    // Priority ordering:
-    //   Tier 1: Quiz categories (what user just picked)
-    //   Tier 2: Onboarding interests (logged-in only, skip for guest)
-    //   Tier 3: Everything else in the date range
-
-    const applyDistanceFilter = (list: SiftEvent[]) =>
-      list.filter((e) => {
-        if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-        if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-        return true;
-      });
-
-    const INTEREST_TO_CATEGORY: Record<string, string> = {
-      live_music: "music", art_exhibitions: "arts", theater: "theater",
-      workshops: "workshops", fitness: "fitness", comedy: "comedy",
-      food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
-    };
-
-    const tieredSort = (all: SiftEvent[]) => {
-      let pool = applyDistanceFilter(all);
-
-      // Apply date range filter if user picked dates
-      if (f.dateFrom && f.dateTo) {
-        const from = new Date(f.dateFrom);
-        const to = new Date(f.dateTo);
-        from.setDate(from.getDate() - 1); // ±1 day padding
-        to.setDate(to.getDate() + 1);
-        pool = pool.filter((e) => {
-          const start = new Date(e.startDate);
-          const end = new Date(e.endDate ?? e.startDate);
-          return start <= to && end >= from;
-        });
-      }
-
-      const quizCats = f.categories ?? [];
-
-      // Tier 1: matches quiz categories
-      const tier1 = quizCats.length > 0
-        ? pool.filter((e) => quizCats.includes(e.category))
-            .map((e) => ({ ...e, matchReason: "Matches your mood" }))
-        : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
-
-      if (quizCats.length === 0) return tier1;
-
-      const tier1Ids = new Set(tier1.map((e) => e.id));
-
-      // Tier 2: matches onboarding interests (logged-in only)
-      let tier2: SiftEvent[] = [];
-      if (userProfile?.interests?.length) {
-        const interestCats = userProfile.interests
-          .map((i) => INTEREST_TO_CATEGORY[i])
-          .filter(Boolean);
-        tier2 = pool
-          .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
-          .map((e) => ({ ...e, matchReason: "Based on your interests" }));
-      }
-
-      const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
-
-      // Tier 3: everything else
-      const tier3 = pool
-        .filter((e) => !usedIds.has(e.id))
-        .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
-
-      return [...tier1, ...tier2, ...tier3];
-    };
-
     try {
-      // Fetch all upcoming events, then sort into tiers client-side
-      const allEvents = await fetchAllUpcoming(500);
-      if (allEvents.length > 0) {
-        resultEvents = tieredSort(allEvents);
-      } else {
-        // Supabase returned nothing — fall back to local data
-        resultEvents = getAllCandidates(f, [], userProfile);
-      }
-    } catch {
-      showToast("Couldn't connect — showing cached results");
-      resultEvents = getAllCandidates(f, [], userProfile);
+      const dbEvents = await fetchEvents(f);
+      resultEvents = userProfile && dbEvents.length > 0
+        ? rankEvents(dbEvents, userProfile)
+        : dbEvents;
+    } catch (err) {
+      console.error("[discover] failed to fetch events:", err);
+      resultEvents = [];
     }
 
     setResultPool(resultEvents);

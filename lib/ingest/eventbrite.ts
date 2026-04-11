@@ -49,26 +49,26 @@ async function fetchOrgEvents(orgId: string, defaultCategory: string): Promise<S
       const startDate = ev.start?.utc;
       const endDate = ev.end?.utc;
 
-      // Build available_dates for multi-day events
-      let availableDates: string[] | undefined;
-      if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays > 1 && diffDays < 180) {
-          availableDates = [];
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            availableDates.push(d.toISOString().split('T')[0]);
-          }
-        }
-      }
-
       const priceMin = ev.ticket_availability?.minimum_ticket_price?.major_value
         ? parseFloat(ev.ticket_availability.minimum_ticket_price.major_value)
         : undefined;
       const priceMax = ev.ticket_availability?.maximum_ticket_price?.major_value
         ? parseFloat(ev.ticket_availability.maximum_ticket_price.major_value)
         : undefined;
+
+      // Build sessions for multi-day events
+      let sessions: { date: string; price_min?: number; price_max?: number }[] | undefined;
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays > 1 && diffDays < 180) {
+          sessions = [];
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            sessions.push({ date: d.toISOString().split('T')[0], price_min: priceMin ?? 0, price_max: priceMax });
+          }
+        }
+      }
 
       const normalized = normalizeEvent({
         source: 'eventbrite',
@@ -78,7 +78,7 @@ async function fetchOrgEvents(orgId: string, defaultCategory: string): Promise<S
         category,
         start_date: startDate,
         end_date: endDate,
-        available_dates: availableDates,
+        sessions,
         venue_name: ev.venue?.name,
         address: ev.venue?.address?.localized_address_display,
         latitude: ev.venue?.latitude ? parseFloat(ev.venue.latitude) : undefined,
