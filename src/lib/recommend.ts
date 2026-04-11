@@ -362,7 +362,7 @@ export async function getRecommendationsFromDB(
       return diversified.slice(0, limit);
     }
   } catch (err) {
-    console.warn("[recommend] Supabase fetch failed, using local data:", err);
+    // Supabase fetch failed — fall through to local data
   }
   // Fallback to hardcoded data
   return getRecommendations(profile, limit);

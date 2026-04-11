@@ -22,6 +22,7 @@ import {
   DollarSign,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
+import * as WebBrowser from "expo-web-browser";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
@@ -101,11 +102,19 @@ export default function PlanScreen() {
     const activeIds = allIds.filter((id) => !removedIds.includes(id));
     return combined
       .filter((e) => activeIds.includes(e.id))
+      .map((e) => {
+        // Use the user-selected date from goingEvents instead of the event's original startDate
+        const goingEntry = goingEvents.find((g) => g.eventId === e.id);
+        if (goingEntry && goingEntry.eventDate !== e.startDate) {
+          return { ...e, startDate: goingEntry.eventDate };
+        }
+        return e;
+      })
       .sort(
         (a, b) =>
           new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
       );
-  }, [allIds, dbEvents, removedIds]);
+  }, [allIds, dbEvents, removedIds, goingEvents]);
 
   const dayGroups = useMemo(() => groupByDay(shortlistEvents), [shortlistEvents]);
 
@@ -276,7 +285,7 @@ export default function PlanScreen() {
                     <Pressable
                       onPress={() => {
                         track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                        Linking.openURL(event.ticketUrl!);
+                        if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
                       }}
                       style={s.calendarLink}
                     >
@@ -371,7 +380,7 @@ export default function PlanScreen() {
                 </View>
                 {event.ticketUrl && (
                   <Pressable
-                    onPress={() => Linking.openURL(event.ticketUrl!)}
+                    onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
                     style={[s.calendarLink, { marginTop: 8 }]}
                   >
                     <Ticket

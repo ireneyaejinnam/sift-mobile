@@ -79,8 +79,28 @@ function formatPriceLabel(
   return "See tickets";
 }
 
+interface EventRow {
+  id: string;
+  title: string;
+  category: string;
+  image_url?: string | null;
+  description?: string | null;
+  venue_name?: string | null;
+  address?: string | null;
+  borough?: string | null;
+  start_date: string;
+  end_date?: string | null;
+  price_min?: number | null;
+  price_max?: number | null;
+  is_free: boolean;
+  ticket_url?: string | null;
+  event_url?: string | null;
+  on_sale_date?: string | null;
+  tags?: string[] | null;
+}
+
 /** Map a DB row + its matched sessions into a frontend SiftEvent. */
-function mapRowWithSessions(row: any, matchedSessions: any[]): SiftEvent {
+function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
   const primaryLink = row.ticket_url ?? row.event_url ?? "";
 
   // Build frontend sessions from matched DB sessions
@@ -276,14 +296,12 @@ export async function fetchEventById(
   if (!data) return null;
 
   // Fetch all upcoming sessions for this event
-  let sessQuery = supabase
+  const { data: sessions } = await supabase
     .from(SESSIONS_TABLE)
     .select("*")
     .eq("event_id", id)
     .gte("date", todayNYC())
     .order("date", { ascending: true });
-
-  const { data: sessions } = await sessQuery;
 
   // If filter context provided, sort matching sessions first
   let orderedSessions = sessions ?? [];

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 2778" width="1284" height="2778">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,700&amp;display=swap');
+    </style>
+  </defs>
+
+  <rect width="1284" height="2778" fill="#293132"/>
+
+  <text
+    x="642"
+    y="1440"
+    font-family="Merriweather, Georgia, serif"
+    font-weight="700"
+    font-style="italic"
+    font-size="200"
+    fill="#EFEFF0"
+    letter-spacing="-4"
+    text-anchor="middle"
+  >Sift</text>
+</svg>

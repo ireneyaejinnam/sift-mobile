@@ -26,6 +26,19 @@ const MAX_LOCAL_EVENTS = 5000;
 // Firebase Measurement Protocol endpoint
 const FIREBASE_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 
+// Generate a stable fake app_instance_id (32-char hex string).
+// Measurement Protocol requires this format even without a native SDK.
+function getFirebaseInstanceId(userId: string): string {
+  // Simple hash: convert string to a consistent 32-char hex
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash << 5) - hash + userId.charCodeAt(i)) | 0;
+  }
+  const hex = Math.abs(hash).toString(16).padStart(8, "0");
+  // Repeat to fill 32 chars
+  return (hex + hex + hex + hex).substring(0, 32);
+}
+
 export type AnalyticsEventType =
   | "app_open"
   | "onboarding_started"
@@ -44,7 +57,10 @@ export type AnalyticsEventType =
   | "ticket_click"
   | "share_tap"
   | "shared_link_opened"
-  | "calendar_export";
+  | "calendar_export"
+  | "guest_started"
+  | "sign_in_completed"
+  | "onboarding_step_4_complete";
 
 interface AnalyticsEvent {
   event_type: AnalyticsEventType;
@@ -62,7 +78,7 @@ function getUserId(): string {
 
 export function setTrackingUserId(userId: string) {
   cachedUserId = userId;
-  setUserId(userId)?.catch(() => {});
+  try { setUserId(userId); } catch {}
 }
 
 /**
@@ -81,7 +97,7 @@ export function track(
   };
 
   persistEvent(entry).catch(() => {});
-  amplitudeTrack(eventType, metadata ?? {});
+  try { amplitudeTrack(eventType, metadata ?? {}); } catch {}
   persistToSupabase(entry).catch(() => {});
   persistToFirebase(entry).catch(() => {});
 }
@@ -147,7 +163,7 @@ async function persistToFirebase(entry: AnalyticsEvent) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        app_instance_id: entry.user_id === "guest" ? "guest_instance" : entry.user_id.replace(/-/g, "").substring(0, 32),
+        app_instance_id: getFirebaseInstanceId(entry.user_id),
         user_id: entry.user_id === "guest" ? undefined : entry.user_id,
         events: [
           {

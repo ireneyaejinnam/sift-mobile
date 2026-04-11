@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import {
+  ActivityIndicator,
   Alert,
   View,
   Text,
@@ -10,6 +11,7 @@ import {
   StyleSheet,
   Platform,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
@@ -59,6 +61,7 @@ export default function SharedEventPage() {
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
   const [dbEvent, setDbEvent] = useState<SiftEvent | null>(null);
+  const [dbLoading, setDbLoading] = useState(false);
 
   // Try hardcoded first, then fetch from Supabase
   const localEvent = useMemo(() => events.find((e) => e.id === id), [id]);
@@ -66,7 +69,10 @@ export default function SharedEventPage() {
 
   useEffect(() => {
     if (!localEvent && id) {
-      fetchEventById(id).then((e) => setDbEvent(e));
+      setDbLoading(true);
+      fetchEventById(id)
+        .then((e) => setDbEvent(e))
+        .finally(() => setDbLoading(false));
     }
   }, [id, localEvent]);
 
@@ -120,6 +126,14 @@ export default function SharedEventPage() {
       setSaveSheetOpen(true);
     }
   };
+
+  if (dbLoading) {
+    return (
+      <View style={s.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   if (!event) {
     return (
@@ -231,7 +245,7 @@ export default function SharedEventPage() {
             {/* Ticket button */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => Linking.openURL(event.ticketUrl!)}
+                onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
                 style={s.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -308,7 +322,7 @@ export default function SharedEventPage() {
 
             {/* View event link */}
             <Pressable
-              onPress={() => Linking.openURL(event.eventUrl || event.link)}
+              onPress={() => { const url = event.eventUrl || event.link; if (url) WebBrowser.openBrowserAsync(url); }}
               style={s.viewEventButton}
             >
               <Text style={s.viewEventText}>View on source</Text>
@@ -360,6 +374,7 @@ export default function SharedEventPage() {
         <ShareSheet
           eventId={event.id}
           eventTitle={event.title}
+          eventUrl={event.eventUrl || event.link}
           onClose={() => setShareSheetOpen(false)}
         />
       </BottomSheet>

@@ -1,12 +1,14 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { setGuestFlag } from "@/lib/storage";
+import { track } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 
 export default function AuthGate() {
   const router = useRouter();
 
   const handleContinueAsGuest = () => {
+    track("guest_started");
     setGuestFlag();
     router.replace("/(tabs)/discover");
   };

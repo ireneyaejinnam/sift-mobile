@@ -1,5 +1,6 @@
 {
   "expo": {
+    "owner": "irenenams-organization",
     "name": "Sift",
     "slug": "sift-mobile",
     "version": "1.0.0",
@@ -9,16 +10,22 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "backgroundColor": "#FAF9F7"
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#293132"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.sift.mobile"
+      "bundleIdentifier": "com.siftnyc.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#FAF9F7"
+        "backgroundColor": "#293132"
       },
       "package": "com.sift.mobile"
     },
@@ -32,6 +39,14 @@
       "expo-secure-store",
       "expo-asset",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "bade516a-4743-4772-846a-c81095aa3f8f"
+      }
+    }
   }
 }

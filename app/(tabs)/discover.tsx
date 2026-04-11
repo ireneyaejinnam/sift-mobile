@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -25,7 +25,6 @@ import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getNextCandidate } from "@/lib/eventRecommendations";
 import { getRecommendationsFromDB } from "@/lib/recommend";
-import type { ScoredEvent } from "@/lib/recommend";
 import { fetchEvents } from "@/lib/getEvents";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
@@ -82,6 +81,7 @@ export default function DiscoverScreen() {
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const loadingRef = useRef(false);
 
   const reset = useCallback(() => {
     setStep("welcome");
@@ -99,6 +99,8 @@ export default function DiscoverScreen() {
   }, [step]);
 
   const goToResults = useCallback(async (f: Filters) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     setStep("results");
 
@@ -143,6 +145,7 @@ export default function DiscoverScreen() {
     setSlots(initial);
     setDismissedIds([]);
     setLoading(false);
+    loadingRef.current = false;
     track("recommendations_viewed", {
       count: initial.length,
       categories: f.categories,
@@ -532,6 +535,7 @@ export default function DiscoverScreen() {
           <ShareSheet
             eventId={shareSheetEvent.id}
             eventTitle={shareSheetEvent.title}
+            eventUrl={shareSheetEvent.eventUrl || shareSheetEvent.link}
             onClose={() => setShareSheetEvent(null)}
           />
         )}
