@@ -6,7 +6,7 @@
     { "path": "/api/cron/ingest-geocode",    "schedule": "15 7 * * *" },
     { "path": "/api/cron/ingest-postprocess","schedule": "20 7 * * *" },
     { "path": "/api/cron/ingest-score",      "schedule": "25 7 * * *" },
-    { "path": "/api/cron/process-social",    "schedule": "0 * * * *"  }
+    { "path": "/api/cron/process-social",    "schedule": "0 8 * * *"  }
   ],
   "functions": {
     "api/cron/ingest-score.ts": { "maxDuration": 300 }
