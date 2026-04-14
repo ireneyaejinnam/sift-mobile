@@ -354,7 +354,16 @@ export async function fetchEventById(
 ): Promise<SiftEvent | null> {
   if (!supabase) return null;
 
-  const { data, error } = await supabase
+  // Try the configured table first, then fall back to the other table.
+  // This ensures plan events are always found regardless of which source
+  // the app is currently browsing (EXPO_PUBLIC_EVENTS_SOURCE=ai vs default).
+  const fallbackTable = EVENTS_TABLE === "ai_events" ? "events" : "ai_events";
+  const fallbackSessionsTable = SESSIONS_TABLE === "ai_event_sessions" ? "event_sessions" : "ai_event_sessions";
+
+  let data: any = null;
+  let resolvedSessionsTable = SESSIONS_TABLE;
+
+  const { data: primary, error } = await supabase
     .from(EVENTS_TABLE)
     .select("*")
     .eq("id", id)
@@ -364,11 +373,25 @@ export async function fetchEventById(
     console.error("[getEvents] fetchEventById error:", error.message);
     return null;
   }
+
+  if (primary) {
+    data = primary;
+  } else {
+    // Not found in primary table — try fallback
+    const { data: fallback } = await supabase
+      .from(fallbackTable)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    data = fallback;
+    resolvedSessionsTable = fallbackSessionsTable;
+  }
+
   if (!data) return null;
 
-  // Fetch all upcoming sessions for this event
+  // Fetch all upcoming sessions from whichever table the event was found in
   const { data: sessions } = await supabase
-    .from(SESSIONS_TABLE)
+    .from(resolvedSessionsTable)
     .select("*")
     .eq("event_id", id)
     .gte("date", todayNYC())
