@@ -189,9 +189,6 @@ export default function DiscoverScreen() {
     // tieredSort groups them into tiers while preserving that order within each tier.
     const tieredSort = (all: SiftEvent[]) => {
       let pool = applyDistanceFilter(all);
-      // Filter out events the user has previously dismissed (cross-session)
-      const dislikedSet = new Set(tasteProfile?.dislikedIds ?? []);
-      pool = pool.filter((e) => !dislikedSet.has(e.id));
 
       // Apply date range filter if user picked dates
       if (f.dateFrom && f.dateTo) {
