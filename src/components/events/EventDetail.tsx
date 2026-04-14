@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
 } from "react-native";
+import { Calendar } from "react-native-calendars";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import {
@@ -265,53 +266,102 @@ export default function EventDetail({
               ))}
             </View>
 
-            {/* Sessions */}
-            {scoredSessions.length > 0 && (
-              <View style={styles.sessionsSection}>
-                <Text style={styles.sectionLabel}>Sessions</Text>
-                {scoredSessions.map(({ session, pts }, i) => {
-                  const isBest = i === 0 && !!userProfile;
-                  const key = sessionKey(session);
-                  const isSelected = selectedSessionKey === key;
-                  const price = formatSessionPrice(session);
-                  return (
-                    <Pressable
-                      key={`${key}-${i}`}
-                      onPress={() => setSelectedSessionKey(key)}
-                      style={[
-                        styles.sessionRow,
-                        isBest && styles.sessionRowBest,
-                        isSelected && styles.sessionRowSelected,
-                      ]}
-                    >
-                      <View style={styles.sessionLeft}>
-                        <Text style={[styles.sessionDate, isSelected && styles.sessionTextSelected]}>
-                          {formatShortDate(session.startDate)}
-                          {session.time ? `  ·  ${session.time}` : ""}
-                        </Text>
-                        {session.location && (event.locationsVary || session.location !== event.location) && (
-                          <Text style={[styles.sessionLocation, isSelected && styles.sessionTextSelectedSub]}>
-                            {session.location}
+            {/* Sessions Calendar */}
+            {scoredSessions.length > 0 && (() => {
+              // Group by date — multiple sessions per date allowed
+              const sessionsByDate = new Map<string, typeof scoredSessions>();
+              for (const s of scoredSessions) {
+                const d = s.session.startDate;
+                if (!sessionsByDate.has(d)) sessionsByDate.set(d, []);
+                sessionsByDate.get(d)!.push(s);
+              }
+              const dates = [...sessionsByDate.keys()].sort();
+              const selectedDate = selectedSessionKey?.split("::")[0] ?? dates[0];
+              const sessionsForDate = sessionsByDate.get(selectedDate) ?? sessionsByDate.get(dates[0]) ?? [];
+
+              const markedDates: Record<string, any> = {};
+              for (const date of dates) {
+                markedDates[date] = {
+                  marked: true,
+                  dotColor: date === selectedDate ? colors.white : colors.primary,
+                  selected: date === selectedDate,
+                  selectedColor: colors.primary,
+                  selectedTextColor: colors.white,
+                };
+              }
+
+              return (
+                <View style={styles.sessionsSection}>
+                  <Text style={styles.sectionLabel}>Sessions</Text>
+                  <Calendar
+                    minDate={dates[0]}
+                    maxDate={dates[dates.length - 1]}
+                    current={selectedDate}
+                    onDayPress={(day: { dateString: string }) => {
+                      const group = sessionsByDate.get(day.dateString);
+                      if (group) setSelectedSessionKey(sessionKey(group[0].session));
+                    }}
+                    markedDates={markedDates}
+                    enableSwipeMonths
+                    hideExtraDays={false}
+                    theme={{
+                      backgroundColor: colors.card,
+                      calendarBackground: colors.card,
+                      todayTextColor: colors.primary,
+                      selectedDayBackgroundColor: colors.primary,
+                      selectedDayTextColor: colors.white,
+                      dayTextColor: colors.foreground,
+                      textDisabledColor: colors.border,
+                      arrowColor: colors.primary,
+                      monthTextColor: colors.foreground,
+                      textMonthFontWeight: "600",
+                      textDayFontSize: 14,
+                      textMonthFontSize: 15,
+                      textDayHeaderFontSize: 12,
+                      dotColor: colors.primary,
+                    }}
+                    style={styles.sessionCalendar}
+                  />
+                  {sessionsForDate.map(({ session, pts }, i) => {
+                    const key = sessionKey(session);
+                    const isSelected = selectedSessionKey === key;
+                    const isBest = !!userProfile && scoredSessions[0] && key === sessionKey(scoredSessions[0].session);
+                    const price = formatSessionPrice(session);
+                    const showLocation = session.location && (event.locationsVary || session.location !== event.location);
+                    return (
+                      <Pressable
+                        key={`${key}-${i}`}
+                        onPress={() => setSelectedSessionKey(key)}
+                        style={[styles.sessionDetail, isSelected && styles.sessionDetailSelected]}
+                      >
+                        <View style={styles.sessionDetailLeft}>
+                          <Text style={[styles.sessionDetailDate, isSelected && styles.sessionDetailTextActive]}>
+                            {formatShortDate(session.startDate)}
+                            {session.time ? `  ·  ${session.time}` : ""}
                           </Text>
-                        )}
-                      </View>
-                      <View style={styles.sessionRight}>
-                        {price && (
-                          <Text style={[styles.sessionPrice, isSelected && styles.sessionTextSelected]}>
-                            {price}
-                          </Text>
-                        )}
-                        {isBest && (
-                          <View style={[styles.mostFitBadge, isSelected && styles.mostFitBadgeSelected]}>
-                            <Text style={[styles.mostFitText, isSelected && { color: colors.white }]}>Most Fit</Text>
-                          </View>
-                        )}
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
+                          {showLocation && (
+                            <View style={styles.sessionDetailLocationRow}>
+                              <MapPin size={11} strokeWidth={1.5} color={isSelected ? colors.white : colors.textSecondary} />
+                              <Text style={[styles.sessionDetailLocation, isSelected && styles.sessionDetailTextActive]} numberOfLines={1}>
+                                {session.location}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={styles.sessionDetailRight}>
+                          {price && <Text style={[styles.sessionDetailPrice, isSelected && styles.sessionDetailTextActive]}>{price}</Text>}
+                          {isBest && (
+                            <View style={[styles.mostFitBadge, isSelected && styles.mostFitBadgeSelected]}>
+                              <Text style={[styles.mostFitText, isSelected && { color: colors.white }]}>Most Fit</Text>
+                            </View>
+                          )}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              );
+            })()}
 
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
@@ -562,7 +612,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 8,
   },
-  sessionRow: {
+  sessionCalendar: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 8,
+  },
+  sessionDetail: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -574,40 +630,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     marginBottom: 6,
   },
-  sessionRowBest: {
-    borderColor: `${colors.primary}50`,
-  },
-  sessionRowSelected: {
+  sessionDetailSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.primary,
   },
-  sessionLeft: {
+  sessionDetailLeft: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
-  sessionRight: {
+  sessionDetailRight: {
     alignItems: "flex-end",
     gap: 4,
+    marginLeft: 8,
   },
-  sessionDate: {
+  sessionDetailDate: {
     ...typography.sm,
     fontWeight: "500",
     color: colors.foreground,
   },
-  sessionLocation: {
-    ...typography.xs,
-    color: colors.textSecondary,
-  },
-  sessionPrice: {
-    ...typography.xs,
-    color: colors.textSecondary,
-  },
-  sessionTextSelected: {
+  sessionDetailTextActive: {
     color: colors.white,
-    fontWeight: "600",
   },
-  sessionTextSelectedSub: {
-    color: `${colors.white}CC`,
+  sessionDetailLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  sessionDetailLocation: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    flex: 1,
+  },
+  sessionDetailPrice: {
+    ...typography.sm,
+    color: colors.textSecondary,
   },
   mostFitBadge: {
     backgroundColor: `${colors.primary}25`,
