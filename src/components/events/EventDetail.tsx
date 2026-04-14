@@ -6,8 +6,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Linking,
+  Platform,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
+import { WebView } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import {
@@ -225,12 +228,7 @@ export default function EventDetail({
 
             {/* Location */}
             <View style={styles.infoBlock}>
-              <MapPin
-                size={18}
-                strokeWidth={1.5}
-                color={colors.primary}
-                style={{ marginTop: 2 }}
-              />
+              <MapPin size={18} strokeWidth={1.5} color={colors.primary} style={{ marginTop: 2 }} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>{event.location}</Text>
                 {!event.locationsVary && (
@@ -240,6 +238,29 @@ export default function EventDetail({
                 )}
               </View>
             </View>
+
+            {/* Map preview */}
+            {!event.locationsVary && (event.address || event.location) && (() => {
+              const encoded = encodeURIComponent(
+                [event.address, event.borough, "New York"].filter(Boolean).join(", ")
+              );
+              const mapsUrl = Platform.OS === "ios"
+                ? `maps://0,0?q=${encoded}`
+                : `geo:0,0?q=${encoded}`;
+              return (
+                <Pressable style={styles.mapPreview} onPress={() => Linking.openURL(mapsUrl)}>
+                  <WebView
+                    source={{ html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0}html,body,iframe{width:100%;height:100%;border:0}</style></head><body><iframe src="https://maps.google.com/maps?q=${encoded}&output=embed&zoom=15" allowfullscreen loading="lazy"></iframe></body></html>` }}
+                    style={styles.mapWebView}
+                    scrollEnabled={false}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    pointerEvents="none"
+                  />
+                  <View style={StyleSheet.absoluteFill} />
+                </Pressable>
+              );
+            })()}
 
             {/* Date + Time */}
             <View style={styles.infoBlock}>
@@ -585,6 +606,17 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     lineHeight: 22,
     marginBottom: 24,
+  },
+  mapPreview: {
+    height: 160,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  mapWebView: {
+    flex: 1,
   },
   infoBlock: {
     flexDirection: "row",
