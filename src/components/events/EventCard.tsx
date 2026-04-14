@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Dimensions,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import Animated, {
   useSharedValue,
@@ -23,7 +24,6 @@ import {
   Check,
   DollarSign,
   ExternalLink,
-  ImageIcon,
   MapPin,
   Share2,
   Sparkles,
@@ -41,6 +41,19 @@ import { formatNYCDate } from "@/lib/time";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
+
+const CATEGORY_STYLE: Record<string, { colors: [string, string]; emoji: string }> = {
+  arts:      { colors: ["#C9A882", "#8B5E3C"], emoji: "🎨" },
+  music:     { colors: ["#5B8DB8", "#2C4F70"], emoji: "🎵" },
+  outdoors:  { colors: ["#5A9E6F", "#2D6644"], emoji: "🌿" },
+  fitness:   { colors: ["#C0554A", "#7A2E28"], emoji: "🏃" },
+  comedy:    { colors: ["#B8A840", "#6E6020"], emoji: "😂" },
+  food:      { colors: ["#C47830", "#7A4810"], emoji: "🍷" },
+  nightlife: { colors: ["#6B4E9E", "#3A2060"], emoji: "🌙" },
+  theater:   { colors: ["#4A7A9E", "#1E4060"], emoji: "🎭" },
+  workshops: { colors: ["#6A9E50", "#304E20"], emoji: "🛠️" },
+  popups:    { colors: ["#B87050", "#6A3820"], emoji: "🛍️" },
+};
 
 const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
   live_music: "music",
@@ -77,6 +90,7 @@ interface EventCardProps {
   event: SiftEvent;
   onPress: () => void;
   onDismiss: () => void;
+  onGoing: () => void;
   onRequestSignIn?: () => void;
   onBookmarkPress: () => void;
   onSharePress: () => void;
@@ -86,6 +100,7 @@ export default function EventCard({
   event,
   onPress,
   onDismiss,
+  onGoing,
   onRequestSignIn,
   onBookmarkPress,
   onSharePress,
@@ -108,53 +123,6 @@ export default function EventCard({
 
   const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
-
-  // ── Swipe gesture ────────────────────────────────────────
-
-  const translateX = useSharedValue(0);
-
-  const onSwipeComplete = () => {
-    onDismiss();
-  };
-
-  const panGesture = Gesture.Pan()
-    .activeOffsetX([-20, 20])
-    .failOffsetY([-10, 10])
-    .onUpdate((e) => {
-      // Only allow swipe left
-      if (e.translationX < 0) {
-        translateX.value = e.translationX;
-      }
-    })
-    .onEnd((e) => {
-      if (e.translationX < -SWIPE_THRESHOLD) {
-        translateX.value = withTiming(-SCREEN_WIDTH, { duration: 250 }, () => {
-          runOnJS(onSwipeComplete)();
-        });
-      } else {
-        translateX.value = withTiming(0, { duration: 200 });
-      }
-    });
-
-  const animatedCardStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      {
-        rotate: `${interpolate(
-          translateX.value,
-          [-SCREEN_WIDTH, 0],
-          [-8, 0],
-          Extrapolation.CLAMP
-        )}deg`,
-      },
-    ],
-    opacity: interpolate(
-      translateX.value,
-      [-SCREEN_WIDTH, -SWIPE_THRESHOLD, 0],
-      [0, 0.7, 1],
-      Extrapolation.CLAMP
-    ),
-  }));
 
   // ── Going handler ────────────────────────────────────────
 
@@ -188,6 +156,66 @@ export default function EventCard({
     showToast("Marked as going");
   };
 
+  // ── Swipe gesture ────────────────────────────────────────
+
+  const translateX = useSharedValue(0);
+
+  const onSwipeComplete = () => {
+    onDismiss();
+  };
+
+  const onSwipeRightComplete = () => {
+    onGoing();
+  };
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-20, 20])
+    .failOffsetY([-10, 10])
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+    })
+    .onEnd((e) => {
+      if (e.translationX < -SWIPE_THRESHOLD) {
+        translateX.value = withTiming(-SCREEN_WIDTH, { duration: 250 }, () => {
+          runOnJS(onSwipeComplete)();
+        });
+      } else if (e.translationX > SWIPE_THRESHOLD) {
+        translateX.value = withTiming(SCREEN_WIDTH, { duration: 250 }, () => {
+          runOnJS(onSwipeRightComplete)();
+        });
+      } else {
+        translateX.value = withTiming(0, { duration: 200 });
+      }
+    });
+
+  const animatedCardStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      {
+        rotate: `${interpolate(
+          translateX.value,
+          [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
+          [-8, 0, 8],
+          Extrapolation.CLAMP
+        )}deg`,
+      },
+    ],
+    opacity: interpolate(
+      Math.abs(translateX.value),
+      [0, SWIPE_THRESHOLD, SCREEN_WIDTH],
+      [1, 0.7, 0],
+      Extrapolation.CLAMP
+    ),
+  }));
+
+  const goingOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [0, SWIPE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
+  }));
+
+  const skipOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateX.value, [0, -SWIPE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
+  }));
+
   const handleBookmarkPress = () => {
     if (savedList) {
       removeSavedEvent(event.id);
@@ -197,19 +225,20 @@ export default function EventCard({
     }
   };
 
-  // ── Swipe hint (dismiss label behind the card) ───────────
-
   return (
     <View style={styles.wrapper}>
-      {/* Background dismiss hint */}
-      <View style={styles.dismissHint}>
-        <X size={20} color={colors.textMuted} strokeWidth={1.5} />
-        <Text style={styles.dismissHintText}>Skip</Text>
-      </View>
-
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.card, animatedCardStyle, event.endingSoon && styles.cardEndingSoon]}>
           <Pressable onPress={onPress} style={styles.cardInner}>
+            {/* Going overlay — fades in on right swipe */}
+            <Animated.View style={[styles.swipeOverlayLeft, goingOverlayStyle]}>
+              <Text style={styles.swipeOverlayTextGoing}>GOING ✓</Text>
+            </Animated.View>
+
+            {/* Skip overlay — fades in on left swipe */}
+            <Animated.View style={[styles.swipeOverlayRight, skipOverlayStyle]}>
+              <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
+            </Animated.View>
             {/* Image */}
             {event.imageUrl ? (
               <Image
@@ -218,13 +247,19 @@ export default function EventCard({
                 resizeMode="cover"
               />
             ) : (
-              <View style={styles.imagePlaceholder}>
-                <ImageIcon
-                  size={28}
-                  strokeWidth={1}
-                  color={colors.textMuted}
-                />
-              </View>
+              <LinearGradient
+                colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.imagePlaceholder}
+              >
+                <Text style={styles.placeholderEmoji}>
+                  {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
+                </Text>
+                <Text style={styles.placeholderTitle} numberOfLines={2}>
+                  {event.title}
+                </Text>
+              </LinearGradient>
             )}
 
             {/* Action icons over image */}
@@ -325,6 +360,13 @@ export default function EventCard({
                 </View>
               </View>
 
+              {/* Description snippet */}
+              {event.description && event.description.length > 40 && (
+                <Text style={styles.descriptionSnippet} numberOfLines={2}>
+                  {event.description}
+                </Text>
+              )}
+
               {/* Match reason */}
               {event.matchReason && (
                 <View style={styles.matchRow}>
@@ -420,18 +462,43 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     position: "relative",
   },
-  dismissHint: {
+  swipeOverlayLeft: {
     position: "absolute",
-    right: 24,
-    top: 0,
-    bottom: 0,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 4,
+    top: 20,
+    left: 16,
+    zIndex: 10,
+    borderWidth: 3,
+    borderColor: "#34C759",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(52, 199, 89, 0.15)",
+    transform: [{ rotate: "-15deg" }],
   },
-  dismissHintText: {
-    ...typography.xs,
-    color: colors.textMuted,
+  swipeOverlayRight: {
+    position: "absolute",
+    top: 20,
+    right: 16,
+    zIndex: 10,
+    borderWidth: 3,
+    borderColor: "#FF3B30",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(255, 59, 48, 0.15)",
+    transform: [{ rotate: "15deg" }],
+  },
+  swipeOverlayTextGoing: {
+    color: "#34C759",
+    fontWeight: "800",
+    fontSize: 18,
+    letterSpacing: 1,
+  },
+  swipeOverlayTextSkip: {
+    color: "#FF3B30",
+    fontWeight: "800",
+    fontSize: 18,
+    letterSpacing: 1,
   },
   card: {
     backgroundColor: colors.card,
@@ -455,9 +522,27 @@ const styles = StyleSheet.create({
   imagePlaceholder: {
     width: "100%",
     height: 200,
-    backgroundColor: colors.muted,
     alignItems: "center",
     justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 24,
+  },
+  placeholderEmoji: {
+    fontSize: 40,
+    lineHeight: 48,
+  },
+  placeholderTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.9)",
+    textAlign: "center",
+    lineHeight: 21,
+  },
+  descriptionSnippet: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 8,
   },
   imageActions: {
     position: "absolute",
@@ -562,6 +647,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 16,
     paddingBottom: 16,
+    gap: 10,
   },
   ticketButton: {
     flex: 1,

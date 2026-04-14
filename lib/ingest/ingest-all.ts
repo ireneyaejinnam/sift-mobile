@@ -1,4 +1,6 @@
 import { ingestTicketmaster } from './ticketmaster';
+import { ingestLuma } from './luma';
+import { ingestFever } from './fever';
 import { ingestEventbrite } from './eventbrite';
 import { ingestNYCParks } from './nyc-parks';
 import { ingestMuseums } from './museums';
@@ -14,12 +16,16 @@ import { ingestNYCGov } from './nycgov';
 import { ingestTheSkint } from './theskint';
 import { geocodeAllEvents } from './geocode';
 import { reclassifyEvents } from './reclassify';
-import { enrichEvents } from './enrich';
-import { deduplicateEvents, mergeRecurringEvents } from './dedup';
-import { fetchMissingImages } from './fetchImages';
-import { cleanupExpired, cleanupNonNYC } from './cleanup';
+import { deduplicateEvents } from './dedup';
+import { cleanupExpired } from './cleanup';
+import { fillMissingPhotos } from './google-places';
+import { DISABLED_SOURCES } from './config';
 
-async function run(name: string, fn: () => Promise<void>) {
+async function run(name: string, source: string, fn: () => Promise<void>) {
+  if (DISABLED_SOURCES.has(source)) {
+    console.log(`[Ingest] Skipping ${name} (disabled)`);
+    return;
+  }
   try {
     await fn();
   } catch (e) {
@@ -31,36 +37,36 @@ async function main() {
   const start = Date.now();
   console.log(`\n[Ingest] ====== Full pipeline starting at ${new Date().toISOString()} ======\n`);
 
-  // Existing sources
-  await run('Ticketmaster',       ingestTicketmaster);
-  await run('Eventbrite',         ingestEventbrite);
-  await run('NYC Parks',          ingestNYCParks);
-  await run('Museums',            ingestMuseums);
-  await run('Popups',             ingestPopups);
-  await run('NYCForFree',         ingestNYCForFree);
-  await run('CozyCratives',      ingestCozyCretaives);
-  await run('NYCTourism',         ingestNYCTourism);
+  await run('Ticketmaster',     'ticketmaster',     ingestTicketmaster);
+  await run('Eventbrite',       'eventbrite',       ingestEventbrite);
+  await run('NYC Parks',        'nyc_parks',        ingestNYCParks);
+  await run('Museums',          'museums',          ingestMuseums);
+  await run('Popups',           'popups',           ingestPopups);
+  await run('NYCForFree',       'nyc_for_free',     ingestNYCForFree);
+  await run('CozyCratives',     'cozy_creatives',   ingestCozyCretaives);
+  await run('NYCTourism',       'nyc_tourism',      ingestNYCTourism);
+  await run('Meetup',           'meetup',           ingestMeetup);
+  await run('Yelp',             'yelp',             ingestYelp);
+  await run('Dice.fm',          'dice',             ingestDice);
+  await run('Resident Advisor', 'resident_advisor', ingestResidentAdvisor);
+  await run('NYC.gov',          'nyc_gov',          ingestNYCGov);
+  await run('The Skint',        'the_skint',        ingestTheSkint);
+  await run('Luma',             'luma',             ingestLuma);
+  await run('Fever',            'fever',            ingestFever);
 
-  // New sources
-  await run('Meetup',             ingestMeetup);
-  await run('Yelp',               ingestYelp);
-  await run('Dice.fm',            ingestDice);
-  await run('Resident Advisor',   ingestResidentAdvisor);
-  await run('NYC.gov',            ingestNYCGov);
-  await run('The Skint',          ingestTheSkint);
-
-  // Post-processing
-  await run('Geocode',            geocodeAllEvents);
-  await run('Reclassify',         reclassifyEvents);
-  await run('Dedup',              deduplicateEvents);    // remove cross-source duplicates first
-  await run('Merge Recurring',    mergeRecurringEvents); // group recurring into sessions
-  await run('Enrich (LLM)',       enrichEvents);         // verify from official pages last
-  await run('Fetch Images',       fetchMissingImages);
-  await run('Cleanup Expired',    cleanupExpired);
-  await run('Cleanup Non-NYC',    cleanupNonNYC);
+  // Post-processing (no source gate — always runs)
+  for (const [name, fn] of [
+    ['Geocode',    geocodeAllEvents],
+    ['Reclassify', reclassifyEvents],
+    ['Dedup',      deduplicateEvents],
+    ['Cleanup',    cleanupExpired],
+    ['Photos',     fillMissingPhotos],
+  ] as [string, () => Promise<void>][]) {
+    try { await fn(); } catch (e) { console.error(`[Ingest] ${name} failed:`, e); }
+  }
 
   const elapsed = ((Date.now() - start) / 1000 / 60).toFixed(1);
-  console.log(`\n[Ingest] ====== Pipeline complete (14 sources) in ${elapsed}min ======\n`);
+  console.log(`\n[Ingest] ====== Pipeline complete (16 sources) in ${elapsed}min ======\n`);
 }
 
 main().catch(console.error);

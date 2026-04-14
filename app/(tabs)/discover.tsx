@@ -7,25 +7,31 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Platform,
+  BackHandler,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft, CalendarCheck } from "lucide-react-native";
 import ProgressBar from "@/components/layout/ProgressBar";
 import OptionCard from "@/components/quiz/OptionCard";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
+import GestureTutorial from "@/components/ui/GestureTutorial";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveEventSheet from "@/components/events/SaveEventSheet";
+import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
-import { getNextCandidate } from "@/lib/eventRecommendations";
-import { rankEvents } from "@/lib/recommend";
-import { fetchEvents } from "@/lib/getEvents";
+import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
+import { fetchAllUpcoming, computeEventScore } from "@/lib/getEvents";
+import { loadTasteProfile, recordDislike, recordLike, hydrateTasteProfile } from "@/lib/tasteProfile";
+import type { TasteProfile } from "@/lib/tasteProfile";
+import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
+import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
@@ -50,15 +56,24 @@ const distances: { value: EventDistance; label: string; desc: string }[] = [
   { value: "anywhere", label: "Anywhere in NYC", desc: "All boroughs" },
 ];
 
+const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
+  live_music: "music", art_exhibitions: "arts", theater: "theater",
+  workshops: "workshops", fitness: "fitness", comedy: "comedy",
+  food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
+};
+
 interface Slot {
-  event: SiftEvent;
+  event: SiftEvent | null;
   key: string;
+  type: 'event' | 'end-card' | 'divider';
+  meta?: { quizCategories?: string[] };
 }
 
 export default function DiscoverScreen() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents } = useUser();
+  const insets = useSafeAreaInsets();
+  const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
   const planCount = isLoggedIn ? new Set([
     ...savedEvents.map((e) => e.eventId),
     ...goingEvents.map((e) => e.eventId),
@@ -71,29 +86,71 @@ export default function DiscoverScreen() {
     track("app_open", { has_profile: !!userProfile });
   }, []);
 
-  const [step, setStep] = useState<Step>("welcome");
+  useEffect(() => {
+    getDismissedEvents().then(setDismissedHistory);
+  }, []);
+
+  const [step, setStep] = useState<Step>("category");
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
   const [resultPool, setResultPool] = useState<SiftEvent[]>([]);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
+  const [dismissedHistory, setDismissedHistory] = useState<DismissedRecord[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
   const [saveSheetEvent, setSaveSheetEvent] = useState<SiftEvent | null>(null);
+  const [goingSheetEvent, setGoingSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showGestureTip, setShowGestureTip] = useState(false);
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const loadingRef = useRef(false);
+  const expandedToInterestsRef = useRef(false);
+
+  // Load taste profile (AsyncStorage for guests, Supabase for logged-in)
+  useEffect(() => {
+    loadTasteProfile().then(setTasteProfile);
+  }, [isLoggedIn]);
+
+  // Seed from full save/going history — runs once per install
+  useEffect(() => {
+    if (!tasteProfile || tasteProfile.seededFromHistory) return;
+    const savedIds = savedEvents.map((e) => e.eventId);
+    const goingIds = goingEvents.map((e) => e.eventId);
+    hydrateTasteProfile(savedIds, goingIds).then((updated) => {
+      if (updated) setTasteProfile(updated);
+    });
+  }, [tasteProfile, savedEvents, goingEvents]);
+  // Session-dismissed: never cleared by reset() — events stay gone for the whole session
+  const sessionDismissedRef = useRef(new Set<string>());
+
+  // Intercept Android hardware back when mid-quiz to go back one step instead of exiting
+  useFocusEffect(
+    useCallback(() => {
+      const onBack = () => {
+        if (step !== "category") {
+          handleBack();
+          return true; // consume the event
+        }
+        return false;
+      };
+      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+      return () => sub.remove();
+    }, [step])
+  );
 
   const reset = useCallback(() => {
-    setStep("welcome");
+    setStep("category");
     setFilters({});
     setSlots([]);
     setResultPool([]);
     setDismissedIds([]);
     setSelectedEvent(null);
+    sessionDismissedRef.current = new Set();
   }, []);
 
   const handleBack = useCallback(() => {
-    const flow: Step[] = ["welcome", "category", "date", "distance", "results"];
+    const flow: Step[] = ["category", "date", "distance", "results"];
     const idx = flow.indexOf(step);
     if (idx > 0) setStep(flow[idx - 1]);
   }, [step]);
@@ -106,20 +163,109 @@ export default function DiscoverScreen() {
 
     let resultEvents: SiftEvent[];
 
+    // Priority ordering:
+    //   Tier 1: Quiz categories (what user just picked)
+    //   Tier 2: Onboarding interests (logged-in only, skip for guest)
+    //   Tier 3: Everything else in the date range
+
+    const applyDistanceFilter = (list: SiftEvent[]) =>
+      list.filter((e) => {
+        if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+        if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+        return true;
+      });
+
+
+    // Re-rank within a tier by composite score × taste weight.
+    const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
+      if (Object.keys(weights).length === 0) return tier;
+      return [...tier].sort((a, b) => {
+        const wa = weights[a.category] ?? 1.0;
+        const wb = weights[b.category] ?? 1.0;
+        return computeEventScore(b, wb) - computeEventScore(a, wa);
+      });
+    };
+
+    // Events arrive pre-sorted by composite score (vibe + timeliness + completeness).
+    // tieredSort groups them into tiers while preserving that order within each tier.
+    const tieredSort = (all: SiftEvent[]) => {
+      let pool = applyDistanceFilter(all);
+
+      // Apply date range filter if user picked dates
+      if (f.dateFrom && f.dateTo) {
+        const from = new Date(f.dateFrom);
+        const to = new Date(f.dateTo);
+        from.setDate(from.getDate() - 1); // ±1 day padding
+        to.setDate(to.getDate() + 1);
+        pool = pool.filter((e) => {
+          const start = new Date(e.startDate);
+          const end = new Date(e.endDate ?? e.startDate);
+          return start <= to && end >= from;
+        });
+      }
+
+      const quizCats = f.categories ?? [];
+
+      // Tier 1: matches quiz categories
+      const tier1 = quizCats.length > 0
+        ? pool.filter((e) => quizCats.includes(e.category))
+            .map((e) => ({ ...e, matchReason: "Matches your mood" }))
+        : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
+
+      if (quizCats.length === 0) return tier1;
+
+      const tier1Ids = new Set(tier1.map((e) => e.id));
+
+      // Tier 2: matches onboarding interests (logged-in only)
+      let tier2: SiftEvent[] = [];
+      if (userProfile?.interests?.length) {
+        const interestCats = userProfile.interests
+          .map((i) => INTEREST_TO_CATEGORY[i])
+          .filter(Boolean);
+        tier2 = pool
+          .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
+          .map((e) => ({ ...e, matchReason: "Based on your interests" }));
+      }
+
+      const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
+
+      // Tier 3: everything else
+      const tier3 = pool
+        .filter((e) => !usedIds.has(e.id))
+        .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
+
+      // Re-rank within each tier by composite score × learned category weights
+      const weights = tasteProfile?.categoryWeights ?? {};
+      return [
+        ...applyPrefs(tier1, weights),
+        ...applyPrefs(tier2, weights),
+        ...applyPrefs(tier3, weights),
+      ];
+    };
+
     try {
-      const dbEvents = await fetchEvents(f);
-      resultEvents = userProfile && dbEvents.length > 0
-        ? rankEvents(dbEvents, userProfile)
-        : dbEvents;
-    } catch (err) {
-      console.error("[discover] failed to fetch events:", err);
-      resultEvents = [];
+      // Fetch all upcoming events, pre-sorted by composite score with taste weights
+      const categoryWeights = tasteProfile?.categoryWeights;
+      const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
+      if (allEvents.length > 0) {
+        resultEvents = tieredSort(allEvents).filter(
+          (e) => !sessionDismissedRef.current.has(e.id)
+        );
+      } else {
+        // Supabase returned nothing — fall back to local data
+        resultEvents = getAllCandidates(f, [], userProfile);
+      }
+    } catch {
+      showToast("Couldn't connect — showing cached results");
+      resultEvents = getAllCandidates(f, [], userProfile);
     }
 
     setResultPool(resultEvents);
+    expandedToInterestsRef.current = false;
     const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
+      type: 'event' as const,
     }));
     setSlots(initial);
     setDismissedIds([]);
@@ -129,7 +275,12 @@ export default function DiscoverScreen() {
       count: initial.length,
       categories: f.categories,
     });
-  }, [userProfile]);
+
+    // Show gesture tutorial on first ever results view
+    hasGestureTipSeen().then((seen) => {
+      if (!seen) setShowGestureTip(true);
+    });
+  }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
@@ -143,30 +294,148 @@ export default function DiscoverScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, [filters, goToResults]);
 
+  // Returns the next slot update — end card if pool exhausted, otherwise next event
+  const nextSlotUpdate = (
+    prev: Slot[],
+    idx: number,
+    excludedIds: Set<string>,
+    quizCategories: string[]
+  ): Slot[] => {
+    const next = resultPool.find((e) => !excludedIds.has(e.id))
+      ?? getNextCandidate([...excludedIds], filters, userProfile);
+
+    if (next) {
+      const updated = [...prev];
+      updated[idx] = { event: next, key: `${next.id}-${Date.now()}-${Math.random()}`, type: 'event' };
+      return updated;
+    }
+
+    // Pool exhausted — show a single end card if we have interest categories to expand to
+    const interestCats = (userProfile?.interests ?? [])
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter((c): c is EventCategory => !!c && !quizCategories.includes(c));
+
+    const alreadyHasEndCard = prev.some((s) => s.type === 'end-card');
+
+    if (!expandedToInterestsRef.current && interestCats.length > 0 && !alreadyHasEndCard) {
+      const updated = [...prev];
+      updated[idx] = {
+        event: null,
+        key: `end-card-${Date.now()}`,
+        type: 'end-card',
+        meta: { quizCategories },
+      };
+      return updated;
+    }
+
+    return prev.filter((_, i) => i !== idx);
+  };
+
   const handleDismissEvent = useCallback(
     (eventId: string) => {
+      sessionDismissedRef.current.add(eventId);
       const nextDismissed = [...dismissedIds, eventId];
       setDismissedIds(nextDismissed);
-      setSlots((prev) => {
-        const idx = prev.findIndex((s) => s.event.id === eventId);
-        if (idx === -1) return prev;
-        const shownIds = new Set(prev.map((s) => s.event.id));
-        const excludedIds = new Set([...nextDismissed, ...shownIds]);
 
-        // Draw next from the pre-ranked result pool (preserves priority order)
-        const next = resultPool.find((e) => !excludedIds.has(e.id))
-          ?? getNextCandidate([...excludedIds], filters, userProfile);
-
-        if (!next) return prev.filter((_, i) => i !== idx);
-        const updated = [...prev];
-        updated[idx] = {
-          event: next,
-          key: `${next.id}-${Date.now()}-${Math.random()}`,
+      const dismissed = resultPool.find((e) => e.id === eventId);
+      if (dismissed?.category) {
+        const record: DismissedRecord = {
+          eventId,
+          category: dismissed.category,
+          dismissedAt: new Date().toISOString(),
         };
-        return updated;
+        addDismissedEvent(record);
+        setDismissedHistory((prev) => [...prev, record]);
+        recordDislike(eventId, dismissed.category).then(setTasteProfile).catch(() => {});
+      }
+      setSlots((prev) => {
+        const idx = prev.findIndex((s) => s.event?.id === eventId);
+        if (idx === -1) return prev;
+        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
+        const excludedIds = new Set([...nextDismissed, ...shownIds]);
+        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
       });
     },
     [dismissedIds, filters, userProfile, resultPool]
+  );
+
+  // Advances the slot for a going-swiped event (shared by instant-going and date-picker confirm)
+  const advanceGoingSlot = useCallback(
+    (eventId: string) => {
+      sessionDismissedRef.current.add(eventId);
+      const nextDismissed = [...dismissedIds, eventId];
+      setDismissedIds(nextDismissed);
+      setSlots((prev) => {
+        const idx = prev.findIndex((s) => s.event?.id === eventId);
+        if (idx === -1) return prev;
+        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
+        const excludedIds = new Set([...nextDismissed, ...shownIds]);
+        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
+      });
+    },
+    [dismissedIds, filters, userProfile, resultPool]
+  );
+
+  // Fetches interest-based events and injects them after the end card
+  const expandToInterests = useCallback(async () => {
+    if (expandedToInterestsRef.current) return;
+    expandedToInterestsRef.current = true;
+
+    const interestCats = (userProfile?.interests ?? [])
+      .map((i) => INTEREST_TO_CATEGORY[i])
+      .filter((c): c is EventCategory => !!c && !(filters.categories ?? []).includes(c));
+
+    if (!interestCats.length) return;
+
+    const events = await fetchAllUpcoming(200, interestCats, tasteProfile?.categoryWeights);
+    const alreadyUsed = new Set([...dismissedIds, ...resultPool.map((e) => e.id)]);
+    const fresh = events.filter((e) => !alreadyUsed.has(e.id));
+    if (!fresh.length) return;
+
+    setResultPool((prev) => [...prev, ...fresh]);
+    setSlots((prev) => {
+      const endIdx = prev.findIndex((s) => s.type === 'end-card');
+      if (endIdx === -1) return prev;
+      const updated = [...prev];
+      updated.splice(
+        endIdx, 1,
+        { event: null, key: `divider-${Date.now()}`, type: 'divider' },
+        { event: fresh[0], key: `${fresh[0].id}-${Date.now()}`, type: 'event' },
+      );
+      return updated;
+    });
+  }, [userProfile, filters, dismissedIds, resultPool, tasteProfile]);
+
+  const handleGoingSwipe = useCallback(
+    (event: SiftEvent) => {
+      if (!isLoggedIn) {
+        router.push("/(auth)/signin");
+        return;
+      }
+      const isMultiDate = (event.sessions && event.sessions.length > 1) ||
+        (!!event.endDate && event.endDate !== event.startDate);
+
+      if (isMultiDate) {
+        // Store the event and open the date picker — advance the slot on confirm
+        setGoingSheetEvent(event);
+        advanceGoingSlot(event.id);
+        return;
+      }
+
+      toggleGoing({
+        eventId: event.id,
+        eventTitle: event.title,
+        eventDate: event.startDate,
+        eventEndDate: event.endDate,
+      });
+      track("event_going", { event_id: event.id, source: "swipe" });
+      showToast("Marked as going");
+      if (event.category) {
+        recordLike(event.id, event.category).then(setTasteProfile).catch(() => {});
+      }
+      advanceGoingSlot(event.id);
+    },
+    [isLoggedIn, toggleGoing, advanceGoingSlot, showToast]
   );
 
   // ── Event detail view ──────────────────────────────────
@@ -183,36 +452,6 @@ export default function DiscoverScreen() {
 
   // ── Welcome ────────────────────────────────────────────
 
-  if (step === "welcome") {
-    return (
-      <View style={s.centered}>
-        <View style={s.heroContent}>
-          <Text style={s.heroHeading}>
-            What do you want to do{"\n"}
-            <Text style={s.heroItalic}>this weekend?</Text>
-          </Text>
-          <Text style={s.heroSub}>
-            You don't need more options. You need the right 3–5, matched to what
-            you actually care about.
-          </Text>
-          <Text style={s.heroDetail}>
-            Tell us what you're into, when you're free, and how far you'll go.
-            We'll tell you what's worth your time.
-          </Text>
-          <Pressable
-            onPress={() => setStep("category")}
-            style={({ pressed }) => [
-              s.primaryButton,
-              pressed && { opacity: 0.85 },
-            ]}
-          >
-            <Text style={s.primaryButtonText}>Show me what's happening →</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
   // ── Quiz steps ─────────────────────────────────────────
 
   if (step === "category" || step === "date" || step === "distance") {
@@ -220,14 +459,16 @@ export default function DiscoverScreen() {
       <View style={s.container}>
         <ProgressBar step={step} />
         <ScrollView
-          contentContainerStyle={s.quizScroll}
+          contentContainerStyle={[s.quizScroll, { paddingTop: insets.top + 28 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Pressable onPress={handleBack} style={s.backButton}>
-            <ArrowLeft size={16} color={colors.foreground} strokeWidth={1.5} />
-            <Text style={s.backText}>Back</Text>
-          </Pressable>
+          {step !== "category" && (
+            <Pressable onPress={handleBack} style={s.backButton}>
+              <ArrowLeft size={16} color={colors.foreground} strokeWidth={1.5} />
+              <Text style={s.backText}>Back</Text>
+            </Pressable>
+          )}
 
           {step === "category" && (
             <View>
@@ -260,7 +501,7 @@ export default function DiscoverScreen() {
                   );
                 })}
               </View>
-              <View style={{ marginTop: 20, alignItems: "center" }}>
+              <View style={{ marginTop: 20, gap: 12, alignItems: "center" }}>
                 <Pressable
                   onPress={() => setStep("date")}
                   disabled={!filters.categories?.length}
@@ -271,6 +512,15 @@ export default function DiscoverScreen() {
                   ]}
                 >
                   <Text style={s.primaryButtonText}>Continue</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setFilters((f) => ({ ...f, categories: undefined }));
+                    setStep("date");
+                  }}
+                  style={s.browseLinkButton}
+                >
+                  <Text style={s.browseLinkText}>Surprise me</Text>
                 </Pressable>
               </View>
             </View>
@@ -287,7 +537,7 @@ export default function DiscoverScreen() {
                   setFilters((f) => ({ ...f, dateFrom: from, dateTo: to }))
                 }
               />
-              <View style={{ marginTop: 20, alignItems: "center" }}>
+              <View style={{ marginTop: 20, gap: 12, alignItems: "center" }}>
                 <Pressable
                   onPress={() => {
                     // If only a start date is picked, treat it as a single-day range
@@ -304,6 +554,15 @@ export default function DiscoverScreen() {
                   ]}
                 >
                   <Text style={s.primaryButtonText}>Continue</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setFilters((f) => ({ ...f, dateFrom: undefined, dateTo: undefined }));
+                    setStep("distance");
+                  }}
+                  style={s.browseLinkButton}
+                >
+                  <Text style={s.browseLinkText}>Just browsing — no specific date</Text>
                 </Pressable>
               </View>
             </View>
@@ -342,6 +601,20 @@ export default function DiscoverScreen() {
 
   return (
     <View style={s.container}>
+      {/* Sticky header — stays put while list scrolls */}
+      <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+        <View style={s.resultsHeaderRow}>
+          <Text style={s.resultsHeading}>
+            {slots.length > 0
+              ? userProfile ? "Your Top Picks" : "Here's what we found"
+              : "Hmm, nothing matched"}
+          </Text>
+          <Pressable onPress={reset} hitSlop={8}>
+            <Text style={s.startOverText}>Start over</Text>
+          </Pressable>
+        </View>
+      </View>
+
       <FlatList
         data={slots}
         keyExtractor={(item) => item.key}
@@ -356,16 +629,14 @@ export default function DiscoverScreen() {
         }
         ListHeaderComponent={
           <View style={{ marginBottom: 20 }}>
-            <Text style={s.heading}>
-              {slots.length > 0
-                ? userProfile
-                  ? `Your top ${slots.length} picks`
-                  : "Here's what we found"
-                : "Hmm, nothing matched"}
-            </Text>
-            {userProfile ? (
+            {resultPool.length > 0 && (
+              <Text style={s.eventCountLabel}>
+                {resultPool.length} event{resultPool.length !== 1 ? "s" : ""} · swipe right to go, left to skip
+              </Text>
+            )}
+            {userProfile && (
               <Text style={s.personalizeHint}>
-                Recommendations for you · {userProfile.neighborhood || "NYC"} ·{" "}
+                {userProfile.neighborhood || "NYC"} ·{" "}
                 {(userProfile.interests ?? [])
                   .slice(0, 2)
                   .map((i) =>
@@ -373,18 +644,19 @@ export default function DiscoverScreen() {
                   )
                   .join(", ")}
               </Text>
-            ) : (
-              <Text style={s.sub}>
-                {slots.length > 0
-                  ? "Swipe left to skip, or tap a card to learn more."
-                  : "Try broadening your filters — or just explore everything."}
-              </Text>
             )}
             {!userProfile && (
               <Pressable onPress={() => router.push("/(auth)/signin")}>
                 <Text style={s.personalizeLink}>Personalize your results →</Text>
               </Pressable>
             )}
+            <GestureTutorial
+              visible={showGestureTip}
+              onDismiss={() => {
+                setShowGestureTip(false);
+                setGestureTipSeen();
+              }}
+            />
             <View style={{ marginTop: 12 }}>
               <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
             </View>
@@ -409,49 +681,67 @@ export default function DiscoverScreen() {
                         categories: next.length > 0 ? next : undefined,
                       });
                     }}
-                    style={[
-                      s.categoryPill,
-                      isActive && s.categoryPillActive,
-                    ]}
+                    style={[s.categoryPill, isActive && s.categoryPillActive]}
                   >
-                    <Text
-                      style={[
-                        s.categoryPillText,
-                        isActive && s.categoryPillTextActive,
-                      ]}
-                    >
+                    <Text style={[s.categoryPillText, isActive && s.categoryPillTextActive]}>
                       {c.emoji} {c.label}
                     </Text>
                   </Pressable>
                 );
               })}
             </ScrollView>
-            <Pressable onPress={reset} style={{ marginTop: 12 }}>
-              <Text style={{ ...typography.sm, color: colors.primary, fontWeight: "500" }}>
-                Start over
-              </Text>
-            </Pressable>
           </View>
         }
-        renderItem={({ item }) => (
-          <EventCard
-            event={item.event}
-            onPress={() => {
-              track("card_tap", { event_id: item.event.id, category: item.event.category });
-              setSelectedEvent(item.event);
-            }}
-            onDismiss={() => handleDismissEvent(item.event.id)}
-            onRequestSignIn={() => router.push("/(auth)/signin")}
-            onBookmarkPress={() => {
-              track("event_saved", { event_id: item.event.id });
-              setSaveSheetEvent(item.event);
-            }}
-            onSharePress={() => {
-              track("share_tap", { event_id: item.event.id });
-              setShareSheetEvent(item.event);
-            }}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (item.type === 'divider') {
+            return (
+              <View style={s.dividerRow}>
+                <View style={s.dividerLine} />
+                <Text style={s.dividerLabel}>Now showing events for you</Text>
+                <View style={s.dividerLine} />
+              </View>
+            );
+          }
+          if (item.type === 'end-card') {
+            const quizLabels = (item.meta?.quizCategories ?? [])
+              .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
+              .join(' · ');
+            return (
+              <View style={s.endCard}>
+                <Text style={s.endCardTitle}>
+                  {quizLabels ? `That's all for\n${quizLabels}` : "You've seen everything"}
+                </Text>
+                <Text style={s.endCardSub}>
+                  We found more events based on your interests
+                </Text>
+                <Pressable onPress={expandToInterests} style={s.endCardButton}>
+                  <Text style={s.endCardButtonText}>Keep exploring →</Text>
+                </Pressable>
+              </View>
+            );
+          }
+          if (!item.event) return null;
+          return (
+            <EventCard
+              event={item.event}
+              onPress={() => {
+                track("card_tap", { event_id: item.event!.id, category: item.event!.category });
+                setSelectedEvent(item.event);
+              }}
+              onDismiss={() => handleDismissEvent(item.event!.id)}
+              onGoing={() => handleGoingSwipe(item.event!)}
+              onRequestSignIn={() => router.push("/(auth)/signin")}
+              onBookmarkPress={() => {
+                track("event_saved", { event_id: item.event!.id });
+                setSaveSheetEvent(item.event!);
+              }}
+              onSharePress={() => {
+                track("share_tap", { event_id: item.event!.id });
+                setShareSheetEvent(item.event!);
+              }}
+            />
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <View>
@@ -500,7 +790,41 @@ export default function DiscoverScreen() {
             event={saveSheetEvent}
             currentListName={null}
             onClose={() => setSaveSheetEvent(null)}
-            onSaved={(name) => showToast(`Saved to ${name}`)}
+            onSaved={(name) => {
+              showToast(`Saved to ${name}`);
+              if (saveSheetEvent?.category) {
+                recordLike(saveSheetEvent.id, saveSheetEvent.category)
+                  .then(setTasteProfile).catch(() => {});
+              }
+            }}
+          />
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={!!goingSheetEvent}
+        onClose={() => setGoingSheetEvent(null)}
+        title="Pick a date"
+      >
+        {goingSheetEvent && (
+          <GoingDateSheet
+            event={goingSheetEvent}
+            onConfirm={(date) => {
+              toggleGoing({
+                eventId: goingSheetEvent.id,
+                eventTitle: goingSheetEvent.title,
+                eventDate: date,
+                eventEndDate: goingSheetEvent.endDate,
+              });
+              track("event_going", { event_id: goingSheetEvent.id, source: "swipe" });
+              showToast("Marked as going");
+              if (goingSheetEvent.category) {
+                recordLike(goingSheetEvent.id, goingSheetEvent.category)
+                  .then(setTasteProfile).catch(() => {});
+              }
+              setGoingSheetEvent(null);
+            }}
+            onCancel={() => setGoingSheetEvent(null)}
           />
         )}
       </BottomSheet>
@@ -558,7 +882,6 @@ const s = StyleSheet.create({
   },
   primaryButtonText: { ...typography.body, fontWeight: "600", color: colors.white },
   quizScroll: {
-    paddingTop: Platform.OS === "ios" ? 76 : 36,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
   },
@@ -570,17 +893,42 @@ const s = StyleSheet.create({
   catCell: { width: "47%" },
   catLabel: { ...typography.body, fontWeight: "500", color: colors.foreground },
   distDesc: { ...typography.sm, color: colors.textSecondary, lineHeight: 22 },
+  stickyHeader: {
+    paddingHorizontal: spacing.page,
+    paddingBottom: 8,
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  startOverText: {
+    ...typography.sm,
+    color: colors.primary,
+    fontWeight: "600",
+  },
   resultsScroll: {
-    paddingTop: Platform.OS === "ios" ? 60 : 20,
+    paddingTop: 16,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
   },
-  personalizeHint: { ...typography.sm, color: colors.textSecondary, marginBottom: 12 },
+  eventCountLabel: {
+    ...typography.sm,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  personalizeHint: { ...typography.xs, color: colors.textMuted, marginBottom: 12 },
   personalizeLink: {
     ...typography.sm,
     color: colors.primary,
     textDecorationLine: "underline",
     marginBottom: 12,
+  },
+  browseLinkButton: {
+    paddingVertical: 8,
+  },
+  browseLinkText: {
+    ...typography.sm,
+    color: colors.primary,
+    textDecorationLine: "underline",
   },
   categoryPill: {
     paddingVertical: 6,
@@ -601,6 +949,14 @@ const s = StyleSheet.create({
   },
   categoryPillTextActive: {
     color: colors.white,
+  },
+  resultsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  resultsHeading: {
+    ...typography.sectionHeading,
   },
   planCta: {
     flexDirection: "row",
@@ -628,5 +984,56 @@ const s = StyleSheet.create({
     fontSize: 18,
     color: colors.primary,
     fontWeight: "600",
+  },
+  // End card — shown when result pool is exhausted
+  endCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 28,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  endCardTitle: {
+    ...typography.sectionHeading,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  endCardSub: {
+    ...typography.sm,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  endCardButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: radius.full,
+  },
+  endCardButtonText: {
+    ...typography.sm,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  // Divider — shown after interest expansion
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+  },
+  dividerLabel: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    fontWeight: "500",
   },
 });

@@ -2,6 +2,16 @@ import { supabase } from "./supabase";
 import { todayNYC, nowNYC } from "./time";
 import type { SiftEvent, EventCategory, EventSession } from "@/types/event";
 import type { Filters } from "@/types/quiz";
+import VIBE_SUPPRESSED_IDS from "../../lib/ingest/vibe-suppressed-ids.json";
+
+// Sources excluded from the client feed (low quality / wrong demographic).
+const EXCLUDED_SOURCES = ['nyc_tourism', 'nyc_gov', 'yelp', 'meetup'];
+
+// Only show events in NYC boroughs — hard filter at the DB level.
+const NYC_BOROUGHS = ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island'];
+
+// Events suppressed by Claude vibe check — client-side filter until DB migration runs.
+const VIBE_SUPPRESSED = new Set<string>(VIBE_SUPPRESSED_IDS);
 
 const SOURCE = process.env.EXPO_PUBLIC_EVENTS_SOURCE; // e.g. "nycforfree", "test"
 const USE_TEST = process.env.EXPO_PUBLIC_USE_TEST_DATA === "true";
@@ -97,6 +107,7 @@ interface EventRow {
   event_url?: string | null;
   on_sale_date?: string | null;
   tags?: string[] | null;
+  vibe_score?: number | null;
 }
 
 /** Map a DB row + its matched sessions into a frontend SiftEvent. */
@@ -174,7 +185,40 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
     daysLeft: daysLeft > 0 ? daysLeft : undefined,
     sessions: sessions.length > 0 ? sessions : undefined,
     locationsVary,
+    vibeScore: row.vibe_score ?? undefined,
   };
+}
+
+/**
+ * Composite ranking score: vibe * 0.60 + timeliness * 0.25 + completeness * 0.15
+ * categoryWeight (from taste profile) is applied as a multiplier.
+ */
+export function computeEventScore(
+  event: SiftEvent,
+  categoryWeight = 1.0
+): number {
+  // Vibe: 1–10 → 0–1, unchecked events default to 0.5 (neutral)
+  const vibe = event.vibeScore != null ? (event.vibeScore - 1) / 9 : 0.5;
+
+  // Timeliness: peak at 1–3 days, decays beyond 14
+  const daysUntil = event.daysLeft ?? 30;
+  const timeliness =
+    daysUntil <= 0  ? 0
+    : daysUntil <= 3  ? 1.0
+    : daysUntil <= 7  ? 0.8
+    : daysUntil <= 14 ? 0.5
+    : daysUntil <= 30 ? 0.3
+    : 0.1;
+
+  // Completeness: rewards rich event data
+  const completeness =
+    (event.imageUrl ? 0.4 : 0) +
+    (event.description && event.description.length > 20 ? 0.3 : 0) +
+    (event.location ? 0.2 : 0) +
+    (event.priceLabel && event.priceLabel !== "See tickets" ? 0.1 : 0);
+
+  const base = vibe * 0.60 + timeliness * 0.25 + completeness * 0.15;
+  return base * categoryWeight;
 }
 
 /**
@@ -221,11 +265,14 @@ export async function fetchEvents(
   const matchedEventIds = [...new Set(sessionMatches.map((s: any) => s.event_id as string))];
   if (matchedEventIds.length === 0) return [];
 
-  // ── Step 2: Fetch those events ──
+  // ── Step 2: Fetch those events (with quality filters) ──
   let eventQuery = supabase
     .from(EVENTS_TABLE)
     .select("*")
-    .in("id", matchedEventIds.slice(0, limit));
+    .in("id", matchedEventIds.slice(0, limit))
+    .neq("is_suppressed", true)
+    .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
+    .or("vibe_score.gte.5,vibe_score.is.null");
 
   if (dbCategories?.length) {
     const cats = dbCategories.join(",");
@@ -269,12 +316,14 @@ export async function fetchEvents(
   }
 
   // ── Step 4: Also fetch ongoing range events (started before dateFrom but haven't ended) ──
-  // These won't appear in session queries because their sessions are all past dates.
   let ongoingQuery = supabase
     .from(EVENTS_TABLE)
     .select("*")
     .lt("start_date", dateFrom)
-    .gte("end_date", dateFrom);
+    .gte("end_date", dateFrom)
+    .neq("is_suppressed", true)
+    .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
+    .or("vibe_score.gte.5,vibe_score.is.null");
 
   if (dbCategories?.length) {
     const cats = dbCategories.join(",");
@@ -290,9 +339,9 @@ export async function fetchEvents(
 
   const allEvents = [...events, ...extraEvents];
 
-  return allEvents.map((row: any) =>
-    mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? [])
-  );
+  return allEvents
+    .filter((row: any) => !VIBE_SUPPRESSED.has(row.id))
+    .map((row: any) => mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? []));
 }
 
 /**
@@ -347,19 +396,33 @@ export async function fetchEventById(
 
 /**
  * Fetch all upcoming events for recommendation engine.
+ * Pre-sorted by composite score (vibe + timeliness + completeness) × taste weight.
  */
-export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
+export async function fetchAllUpcoming(
+  limit = 500,
+  categories?: EventCategory[],
+  categoryWeights?: Partial<Record<EventCategory, number>>
+): Promise<SiftEvent[]> {
   if (!supabase) return [];
 
   const today = todayNYC();
 
-  const { data: events, error } = await supabase
+  let eventQuery = supabase
     .from(EVENTS_TABLE)
     .select("*")
     .or(`end_date.gte.${today},start_date.gte.${today}`)
+    .neq("is_suppressed", true)
+    .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
+    .or("vibe_score.gte.5,vibe_score.is.null")
     .order("start_date", { ascending: true })
     .limit(limit);
 
+  if (categories?.length) {
+    const dbCats = categories.map((c) => CATEGORY_TO_DB[c] ?? c);
+    eventQuery = eventQuery.in("category", dbCats);
+  }
+
+  const { data: events, error } = await eventQuery;
   if (error || !events) {
     console.error("[getEvents] fetchAllUpcoming error:", error?.message);
     return [];
@@ -380,7 +443,18 @@ export async function fetchAllUpcoming(limit = 500): Promise<SiftEvent[]> {
     sessionsByEvent.get(s.event_id)!.push(s);
   }
 
-  return events.map((row: any) =>
-    mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? [])
-  );
+  const mapped = events
+    .filter((row: any) => !VIBE_SUPPRESSED.has(row.id))
+    .map((row: any) => mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? []));
+
+  // Sort by composite score, applying taste profile category weights
+  if (categoryWeights && Object.keys(categoryWeights).length > 0) {
+    mapped.sort((a: SiftEvent, b: SiftEvent) => {
+      const wa = categoryWeights[a.category] ?? 1.0;
+      const wb = categoryWeights[b.category] ?? 1.0;
+      return computeEventScore(b, wb) - computeEventScore(a, wa);
+    });
+  }
+
+  return mapped;
 }

@@ -22,3 +22,6 @@ android/
 # TypeScript
 *.tsbuildinfo
 .claude/
+
+# AI data collection output
+lib/ai-collect-data/output/

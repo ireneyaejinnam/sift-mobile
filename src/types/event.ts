@@ -49,4 +49,5 @@ export interface SiftEvent {
   onSaleDate?: string;
   sessions?: EventSession[];    // all upcoming sessions; undefined = treat as single session
   locationsVary?: boolean;      // true if sessions have different venues/addresses
+  vibeScore?: number;           // 1–10 from Claude vibe check, undefined = not yet checked
 }
