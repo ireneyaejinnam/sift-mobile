@@ -500,7 +500,7 @@ export default function DiscoverScreen() {
                   );
                 })}
               </View>
-              <View style={{ marginTop: 20, alignItems: "center" }}>
+              <View style={{ marginTop: 20, gap: 12, alignItems: "center" }}>
                 <Pressable
                   onPress={() => setStep("date")}
                   disabled={!filters.categories?.length}
@@ -511,6 +511,15 @@ export default function DiscoverScreen() {
                   ]}
                 >
                   <Text style={s.primaryButtonText}>Continue</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setFilters((f) => ({ ...f, categories: undefined }));
+                    setStep("date");
+                  }}
+                  style={s.browseLinkButton}
+                >
+                  <Text style={s.browseLinkText}>Surprise me</Text>
                 </Pressable>
               </View>
             </View>
