@@ -20,13 +20,10 @@ import Animated, {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   Bookmark,
-  CalendarDays,
   Check,
-  DollarSign,
   ExternalLink,
   MapPin,
   Share2,
-  Sparkles,
   Ticket,
   X,
 } from "lucide-react-native";
@@ -35,9 +32,9 @@ import GoingDateSheet from "@/components/events/GoingDateSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
-import type { EventCategory, SiftEvent } from "@/types/event";
+import type { SiftEvent } from "@/types/event";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
-import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
+import { colors, radius, shadows } from "@/lib/theme";
 import { formatNYCDate } from "@/lib/time";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -56,18 +53,6 @@ const CATEGORY_STYLE: Record<string, { colors: [string, string]; emoji: string }
   popups:    { colors: ["#B87050", "#6A3820"], emoji: "🛍️" },
 };
 
-const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
-  live_music: "music",
-  art_exhibitions: "arts",
-  theater: "theater",
-  workshops: "workshops",
-  fitness: "fitness",
-  comedy: "comedy",
-  food: "food",
-  outdoor: "outdoors",
-  nightlife: "nightlife",
-  popups: "popups",
-};
 
 function formatShortDate(d: string) {
   return formatNYCDate(d, { month: "short", day: "numeric" });
@@ -123,11 +108,6 @@ export default function EventCard({
       getUnsplashFallback(event.category).then(setFallbackImage);
     }
   }, [event.id, event.category, event.imageUrl]);
-
-  const interests = userProfile?.interests ?? [];
-  const matchesInterests =
-    interests.length > 0 &&
-    interests.some((i) => INTEREST_TO_CATEGORY[i] === event.category);
 
   const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
@@ -233,208 +213,144 @@ export default function EventCard({
     }
   };
 
+  // Compact meta line: "venue · date · price"
+  const metaLine = [
+    event.location,
+    formatEventDate(event),
+    event.priceLabel,
+  ].filter(Boolean).join("  ·  ");
+
   return (
     <View style={styles.wrapper}>
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.card, animatedCardStyle, event.endingSoon && styles.cardEndingSoon]}>
+        <Animated.View style={[styles.card, animatedCardStyle]}>
           <Pressable onPress={onPress} style={styles.cardInner}>
-            {/* Going overlay — fades in on right swipe */}
-            <Animated.View style={[styles.swipeOverlayLeft, goingOverlayStyle]}>
-              <Text style={styles.swipeOverlayTextGoing}>GOING ✓</Text>
-            </Animated.View>
-
-            {/* Skip overlay — fades in on left swipe */}
-            <Animated.View style={[styles.swipeOverlayRight, skipOverlayStyle]}>
-              <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
-            </Animated.View>
-            {/* Image */}
-            {event.imageUrl || fallbackImage ? (
-              <Image
-                source={{ uri: event.imageUrl ?? fallbackImage! }}
-                style={styles.image}
-                resizeMode="cover"
-              />
-            ) : (
-              <LinearGradient
-                colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.imagePlaceholder}
-              >
-                <Text style={styles.placeholderEmoji}>
-                  {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
-                </Text>
-                <Text style={styles.placeholderTitle} numberOfLines={2}>
-                  {event.title}
-                </Text>
-              </LinearGradient>
-            )}
-
-            {/* Action icons over image */}
-            <View style={styles.imageActions}>
-              <Pressable
-                onPress={handleBookmarkPress}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
-                <Bookmark
-                  size={16}
-                  strokeWidth={1.5}
-                  color={savedList ? colors.primary : colors.foreground}
-                  fill={savedList ? colors.primary : "none"}
+            {/* ── Image hero ─────────────────────────────── */}
+            <View style={styles.heroContainer}>
+              {event.imageUrl || fallbackImage ? (
+                <Image
+                  source={{ uri: event.imageUrl ?? fallbackImage! }}
+                  style={styles.image}
+                  resizeMode="cover"
                 />
-              </Pressable>
-              <Pressable
-                onPress={onSharePress}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
-                <Share2
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.foreground}
-                />
-              </Pressable>
-              <Pressable
-                onPress={onDismiss}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
-                <X
-                  size={16}
-                  strokeWidth={2}
-                  color={colors.textSecondary}
-                />
-              </Pressable>
-            </View>
+              ) : (
+                <LinearGradient
+                  colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.imagePlaceholder}
+                >
+                  <Text style={styles.placeholderEmoji}>
+                    {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
+                  </Text>
+                </LinearGradient>
+              )}
 
-            {/* Card body */}
-            <View style={styles.body}>
-              {/* Pills */}
-              <View style={styles.pills}>
-                <View style={styles.pillCategory}>
-                  <Text style={styles.pillCategoryText}>{event.category}</Text>
+              {/* Swipe overlays */}
+              <Animated.View style={[styles.swipeOverlayLeft, goingOverlayStyle]}>
+                <Text style={styles.swipeOverlayTextGoing}>GOING ✓</Text>
+              </Animated.View>
+              <Animated.View style={[styles.swipeOverlayRight, skipOverlayStyle]}>
+                <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
+              </Animated.View>
+
+              {/* Pills — overlaid top-left */}
+              <View style={styles.pillsOverlay}>
+                <View style={styles.pillGlass}>
+                  <Text style={styles.pillGlassText}>{event.category}</Text>
                 </View>
                 {event.endingSoon && (
-                  <View style={styles.pillEnding}>
-                    <Text style={styles.pillEndingText}>
+                  <View style={[styles.pillGlass, styles.pillEnding]}>
+                    <Text style={[styles.pillGlassText, styles.pillEndingText]}>
                       Ends in {event.daysLeft}d
                     </Text>
                   </View>
                 )}
                 {event.price === 0 && (
-                  <View style={styles.pillFree}>
-                    <Text style={styles.pillFreeText}>Free</Text>
-                  </View>
-                )}
-                {matchesInterests && (
-                  <View style={styles.pillForYou}>
-                    <Sparkles size={11} strokeWidth={1.5} color={colors.primary} />
-                    <Text style={styles.pillForYouText}>For you</Text>
+                  <View style={[styles.pillGlass, styles.pillFree]}>
+                    <Text style={[styles.pillGlassText, styles.pillFreeText]}>Free</Text>
                   </View>
                 )}
               </View>
 
-              {/* Title */}
-              <Text style={styles.title} numberOfLines={2}>
-                {event.title}
-              </Text>
-
-              {/* Meta */}
-              <View style={styles.meta}>
-                <View style={styles.metaRow}>
-                  <MapPin size={13} strokeWidth={1.5} color={colors.textSecondary} />
-                  <Text style={styles.metaText} numberOfLines={1}>
-                    {event.location}
-                  </Text>
-                </View>
-                <View style={styles.metaRow}>
-                  <CalendarDays
-                    size={13}
+              {/* Actions — overlaid top-right */}
+              <View style={styles.imageActions}>
+                <Pressable onPress={handleBookmarkPress} style={styles.iconButton} hitSlop={8}>
+                  <Bookmark
+                    size={16}
                     strokeWidth={1.5}
-                    color={colors.textSecondary}
+                    color={savedList ? colors.primary : "#fff"}
+                    fill={savedList ? colors.primary : "none"}
                   />
-                  <Text style={styles.metaText}>
-                    {formatEventDate(event)}
-                  </Text>
-                </View>
-                <View style={styles.metaRow}>
-                  <DollarSign
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={styles.metaText}>{event.priceLabel}</Text>
-                </View>
+                </Pressable>
+                <Pressable onPress={onSharePress} style={styles.iconButton} hitSlop={8}>
+                  <Share2 size={16} strokeWidth={1.5} color="#fff" />
+                </Pressable>
               </View>
 
-              {/* Description snippet */}
-              {event.description && event.description.length > 40 && (
-                <Text style={styles.descriptionSnippet} numberOfLines={2}>
+              {/* Title + meta overlaid on gradient at bottom of image */}
+              <LinearGradient
+                colors={["transparent", "rgba(0,0,0,0.75)"]}
+                style={styles.heroGradient}
+              >
+                <Text style={styles.heroTitle} numberOfLines={2}>
+                  {event.title}
+                </Text>
+                <View style={styles.heroMeta}>
+                  <MapPin size={12} strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
+                  <Text style={styles.heroMetaText} numberOfLines={1}>
+                    {metaLine}
+                  </Text>
+                </View>
+              </LinearGradient>
+            </View>
+
+            {/* ── Body: description hook + CTA ───────────── */}
+            <View style={styles.body}>
+              {event.description && event.description.length > 30 && (
+                <Text style={styles.hookText}>
                   {event.description}
                 </Text>
               )}
 
-              {/* Match reason */}
-              {event.matchReason && (
-                <View style={styles.matchRow}>
-                  <Sparkles
-                    size={12}
-                    strokeWidth={1.5}
-                    color={colors.primary}
-                  />
-                  <Text style={styles.matchText}>{event.matchReason}</Text>
-                </View>
-              )}
-            </View>
+              <View style={styles.footer}>
+                {event.ticketUrl ? (
+                  <Pressable
+                    onPress={() => {
+                      track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
+                      if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
+                    }}
+                    style={styles.ctaButton}
+                  >
+                    <Ticket size={14} strokeWidth={1.5} color={colors.white} />
+                    <Text style={styles.ctaButtonText}>Get tickets</Text>
+                  </Pressable>
+                ) : event.onSaleDate && new Date(event.onSaleDate) > new Date() ? (
+                  <View style={styles.onSaleBadge}>
+                    <Text style={styles.onSaleText}>
+                      Tickets drop {new Date(event.onSaleDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </Text>
+                  </View>
+                ) : event.eventUrl ? (
+                  <Pressable
+                    onPress={() => { if (event.eventUrl) WebBrowser.openBrowserAsync(event.eventUrl); }}
+                    style={styles.ctaButtonOutline}
+                  >
+                    <ExternalLink size={14} strokeWidth={1.5} color={colors.primary} />
+                    <Text style={styles.ctaButtonOutlineText}>View event</Text>
+                  </Pressable>
+                ) : null}
 
-            {/* Action buttons */}
-            <View style={styles.footer}>
-              {event.ticketUrl ? (
                 <Pressable
-                  onPress={() => {
-                    track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                    if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
-                  }}
-                  style={styles.ticketButton}
+                  onPress={handleGoingPress}
+                  style={[styles.goingButton, going && styles.goingButtonActive]}
                 >
-                  <Ticket size={14} strokeWidth={1.5} color={colors.white} />
-                  <Text style={styles.ticketButtonText}>Get tickets</Text>
-                </Pressable>
-              ) : event.onSaleDate && new Date(event.onSaleDate) > new Date() ? (
-                <View style={styles.onSaleBadge}>
-                  <Text style={styles.onSaleText}>
-                    Tickets drop {new Date(event.onSaleDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {going && <Check size={14} strokeWidth={2} color={colors.white} />}
+                  <Text style={[styles.goingButtonText, going && styles.goingButtonTextActive]}>
+                    Going
                   </Text>
-                </View>
-              ) : event.eventUrl ? (
-                <Pressable
-                  onPress={() => { if (event.eventUrl) WebBrowser.openBrowserAsync(event.eventUrl); }}
-                  style={styles.viewEventButton}
-                >
-                  <ExternalLink size={14} strokeWidth={1.5} color={colors.primary} />
-                  <Text style={styles.viewEventText}>View event</Text>
                 </Pressable>
-              ) : null}
-              <Pressable
-                onPress={handleGoingPress}
-                style={[
-                  styles.goingButton,
-                  going && styles.goingButtonActive,
-                ]}
-              >
-                {going && (
-                  <Check size={14} strokeWidth={2} color={colors.white} />
-                )}
-                <Text
-                  style={[
-                    styles.goingButtonText,
-                    going && styles.goingButtonTextActive,
-                  ]}
-                >
-                  Going
-                </Text>
-              </Pressable>
+              </View>
             </View>
           </Pressable>
         </Animated.View>
@@ -465,242 +381,234 @@ export default function EventCard({
   );
 }
 
+const IMAGE_HEIGHT = 340;
+
 const styles = StyleSheet.create({
   wrapper: {
-    marginBottom: 16,
+    marginBottom: 20,
     position: "relative",
   },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    ...shadows.card,
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  cardInner: {
+    overflow: "hidden",
+  },
+
+  // ── Hero image section ──────────────────────────────────
+  heroContainer: {
+    position: "relative",
+    width: "100%",
+    height: IMAGE_HEIGHT,
+  },
+  image: {
+    width: "100%",
+    height: IMAGE_HEIGHT,
+  },
+  imagePlaceholder: {
+    width: "100%",
+    height: IMAGE_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  placeholderEmoji: {
+    fontSize: 48,
+    lineHeight: 56,
+  },
+
+  // ── Swipe overlays ──────────────────────────────────────
   swipeOverlayLeft: {
     position: "absolute",
-    top: 20,
-    left: 16,
+    top: 60,
+    left: 20,
     zIndex: 10,
     borderWidth: 3,
     borderColor: "#34C759",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: "rgba(52, 199, 89, 0.15)",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: "rgba(52, 199, 89, 0.2)",
     transform: [{ rotate: "-15deg" }],
   },
   swipeOverlayRight: {
     position: "absolute",
-    top: 20,
-    right: 16,
+    top: 60,
+    right: 20,
     zIndex: 10,
     borderWidth: 3,
     borderColor: "#FF3B30",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: "rgba(255, 59, 48, 0.15)",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255, 59, 48, 0.2)",
     transform: [{ rotate: "15deg" }],
   },
   swipeOverlayTextGoing: {
     color: "#34C759",
     fontWeight: "800",
-    fontSize: 18,
-    letterSpacing: 1,
+    fontSize: 22,
+    letterSpacing: 1.5,
   },
   swipeOverlayTextSkip: {
     color: "#FF3B30",
     fontWeight: "800",
-    fontSize: 18,
-    letterSpacing: 1,
+    fontSize: 22,
+    letterSpacing: 1.5,
   },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: "hidden",
-    ...shadows.card,
-  },
-  cardEndingSoon: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
-  },
-  cardInner: {
-    overflow: "hidden",
-  },
-  image: {
-    width: "100%",
-    height: 200,
-  },
-  imagePlaceholder: {
-    width: "100%",
-    height: 200,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingHorizontal: 24,
-  },
-  placeholderEmoji: {
-    fontSize: 40,
-    lineHeight: 48,
-  },
-  placeholderTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.9)",
-    textAlign: "center",
-    lineHeight: 21,
-  },
-  descriptionSnippet: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginTop: 8,
-  },
-  imageActions: {
+
+  // ── Pills overlaid on image ─────────────────────────────
+  pillsOverlay: {
     position: "absolute",
-    top: 12,
-    right: 12,
+    top: 14,
+    left: 14,
     flexDirection: "row",
     gap: 6,
     zIndex: 2,
   },
-  iconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 9999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: "rgba(255,255,255,0.9)",
-    alignItems: "center",
-    justifyContent: "center",
+  pillGlass: {
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
   },
-  body: {
-    padding: 16,
-  },
-  pills: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 10,
-  },
-  pillCategory: {
-    backgroundColor: colors.pillCategoryBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-  },
-  pillCategoryText: {
-    ...typography.pill,
-    color: colors.pillCategoryText,
+  pillGlassText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fff",
+    textTransform: "capitalize",
+    letterSpacing: 0.3,
   },
   pillEnding: {
-    backgroundColor: colors.pillEndingBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    backgroundColor: "rgba(200,60,60,0.7)",
   },
   pillEndingText: {
-    ...typography.pill,
-    color: colors.pillEndingText,
+    color: "#fff",
   },
   pillFree: {
-    backgroundColor: colors.pillFreeBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    backgroundColor: "rgba(34,139,34,0.6)",
   },
   pillFreeText: {
-    ...typography.pill,
-    color: colors.pillFreeText,
+    color: "#fff",
   },
-  pillForYou: {
-    backgroundColor: colors.primaryLight,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+
+  // ── Action icons overlaid top-right ─────────────────────
+  imageActions: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    flexDirection: "row",
+    gap: 8,
+    zIndex: 2,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 9999,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // ── Title + meta gradient overlay ───────────────────────
+  heroGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 60,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+  },
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
+    lineHeight: 28,
+    marginBottom: 6,
+    textShadowColor: "rgba(0,0,0,0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  heroMeta: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-  },
-  pillForYouText: {
-    ...typography.pill,
-    color: colors.primary,
-  },
-  title: {
-    ...typography.h3,
-    fontSize: 17,
-    lineHeight: 23,
-    marginBottom: 10,
-  },
-  meta: {
     gap: 5,
   },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  metaText: {
-    ...typography.xs,
-    color: colors.textSecondary,
+  heroMetaText: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "500",
     flex: 1,
   },
-  matchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 10,
-  },
-  matchText: {
-    ...typography.xs,
-    color: colors.primary,
-    fontWeight: "500",
-  },
-  footer: {
+
+  // ── Body (below image) ──────────────────────────────────
+  body: {
     paddingHorizontal: 16,
+    paddingTop: 14,
     paddingBottom: 16,
+  },
+  hookText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.foreground,
+    marginBottom: 14,
+  },
+
+  // ── Footer CTA ─────────────────────────────────────────
+  footer: {
+    flexDirection: "row",
     gap: 10,
   },
-  ticketButton: {
+  ctaButton: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
   },
-  ticketButtonText: {
-    ...typography.sm,
+  ctaButtonText: {
+    fontSize: 14,
     fontWeight: "600",
     color: colors.white,
   },
-  onSaleBadge: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(232, 170, 106, 0.15)",
-  },
-  onSaleText: {
-    ...typography.xs,
-    fontWeight: "500",
-    color: colors.accent,
-  },
-  viewEventButton: {
+  ctaButtonOutline: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.card,
   },
-  viewEventText: {
-    ...typography.sm,
+  ctaButtonOutlineText: {
+    fontSize: 14,
     fontWeight: "500",
     color: colors.primary,
+  },
+  onSaleBadge: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(232, 170, 106, 0.15)",
+  },
+  onSaleText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.accent,
   },
   goingButton: {
     flex: 1,
@@ -708,7 +616,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -719,7 +627,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   goingButtonText: {
-    ...typography.sm,
+    fontSize: 14,
     fontWeight: "500",
     color: colors.foreground,
   },

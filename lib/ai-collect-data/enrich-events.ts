@@ -9,14 +9,12 @@
  * - Supports --model gpt-5.4-mini | gpt-5.4 | gemini-2.5-flash | gemini-2.5-pro
  */
 
-import OpenAI from 'openai';
-import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { NameListEntry } from './collect-names';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 const OUTPUT_DIR       = join(__dirname, 'output');
 const NAME_LIST_PATH   = join(OUTPUT_DIR, 'ai_new_events_name_list.json');
@@ -66,7 +64,7 @@ Event fields
 source_id (string, required) — Format: ai-{slug}-{YYYY-MM}. Example: "ai-jazz-festival-2026-05"
 title (string, required) — Event name as listed on the official source.
 category (string, required) — One of: art, live_music, comedy, food, outdoors, nightlife, popups, fitness, theater, workshops
-description (string, required) — 1–3 sentences.
+description (string, required) — Write this like The Infatuation or Eater would. 1-2 sentences that make a 27-year-old NYC professional want to go. Be specific about what makes this worth their time — the chef's pedigree, the venue's reputation, the lineup, the one-night-only factor, the brand. No generic hype. No "don't miss this!" or "exciting event!" — just tell them why it's good.
 start_date (string, required) — YYYY-MM-DD
 end_date (string, optional) — YYYY-MM-DD, only if multi-day
 venue_name (string, optional)
@@ -90,6 +88,9 @@ Rules
 - is_free: true only if entirely free
 - sessions: use instead of splitting into multiple event objects
 - Omit any field you cannot confirm
+- price_min/price_max: ONLY use prices from the official ticket/event page. If price is not clearly listed, set price_min: 0 and is_free: false (unknown price, not confirmed free).
+- start_date: MUST match the official event page exactly. Do not guess or infer dates.
+- If the official event page is down, inaccessible, or information cannot be confirmed, return [] rather than guessing.
 
 Return ONLY a valid JSON array, no markdown, no explanation.`;
 }
@@ -97,33 +98,22 @@ Return ONLY a valid JSON array, no markdown, no explanation.`;
 // ── Model call ────────────────────────────────────────────────────────
 
 async function callModel(model: string, prompt: string): Promise<string> {
-  if (model.startsWith('gemini')) {
-    const response = await gemini.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        systemInstruction: 'You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation.',
-      },
-    });
-    return response.text ?? '[]';
-  }
-
-  // OpenAI Responses API
-  const useReasoning = model === 'gpt-5.4';
-  const response = await (openai as any).responses.create({
+  const response = await anthropic.messages.create({
     model,
-    ...(useReasoning ? { reasoning: { effort: 'medium' } } : {}),
-    tools: [{ type: 'web_search' }],
-    instructions: 'You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation.',
-    input: prompt,
+    max_tokens: 4096,
+    system: 'You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation.',
+    tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
+    messages: [{ role: 'user', content: prompt }],
   });
-  return response.output_text ?? '[]';
+
+  // Extract text from response blocks (may include tool_use/tool_result blocks from web search)
+  const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
+  return textBlocks.map(b => b.text).join('\n') || '[]';
 }
 
 // ── Main export ───────────────────────────────────────────────────────
 
-export async function enrichEvents(model = 'gpt-5.4'): Promise<void> {
+export async function enrichEvents(model = 'claude-sonnet-4-6'): Promise<void> {
   const nameList = loadNameList();
   const allEvents = loadEvents();
 

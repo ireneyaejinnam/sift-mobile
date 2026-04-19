@@ -11,15 +11,13 @@
  * Fields: id, name, source_url, processed
  */
 
-import OpenAI from 'openai';
-import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { EVENTBRITE_SEED_ORGS } from '../ingest/config';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export const DEFAULT_MAX_PER_SOURCE = 20;
 
@@ -43,20 +41,13 @@ export interface NameListEntry {
 // ── Unified model caller (OpenAI or Gemini) ───────────────────────────
 
 async function callCollectModel(model: string, prompt: string): Promise<string> {
-  if (model.startsWith('gemini')) {
-    const res = await gemini.models.generateContent({
-      model,
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    });
-    return res.text ?? '';
-  }
-  const res = await openai.chat.completions.create({
+  const res = await anthropic.messages.create({
     model,
+    max_tokens: 10,
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0,
-    max_tokens: 5,
   });
-  return res.choices[0].message.content ?? '';
+  const block = res.content[0];
+  return block.type === 'text' ? block.text : '';
 }
 
 // ── LLM cancellation check ────────────────────────────────────────────
@@ -578,9 +569,162 @@ async function* genFever(): AsyncGenerator<Candidate> {
   }
 }
 
+// ── Partiful Discover ────────────────────────────────────────────────
+
+async function* genPartiful(): AsyncGenerator<Candidate> {
+  try {
+    const res = await fetch('https://www.partiful.com/discover', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+    });
+    if (!res.ok) return;
+    const html = await res.text();
+    const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) return;
+    const data = JSON.parse(m[1]);
+    const events = data?.props?.pageProps?.events ?? data?.props?.pageProps?.discoverEvents ?? [];
+    for (const e of events) {
+      const name = (e.title ?? e.name ?? '').trim();
+      const slug = e.slug ?? e.id ?? null;
+      const url = e.url ?? (slug ? `https://partiful.com/e/${slug}` : null);
+      if (name && url) yield { name, source_url: url };
+    }
+  } catch (err) { console.error('[collect] Partiful error:', (err as Error).message); }
+}
+
+// ── Film Forum (JSON-LD ScreeningEvent) ─────────────────────────────
+
+async function* genFilmForum(): AsyncGenerator<Candidate> {
+  try {
+    const res = await fetch('https://filmforum.org/now-playing', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!res.ok) return;
+    const html = await res.text();
+    const candidates = extractJsonLdEvents(html);
+    for (const c of candidates) yield c;
+    // Fallback: scrape film titles from page if no JSON-LD
+    if (candidates.length === 0) {
+      for (const m of html.matchAll(/<a\s+href="(\/film\/[^"]+)"[^>]*>[\s\S]*?<h\d[^>]*>\s*([\s\S]*?)\s*<\/h\d>/gi)) {
+        const name = m[2].replace(/<[^>]+>/g, '').trim();
+        if (name) yield { name, source_url: `https://filmforum.org${m[1]}` };
+      }
+    }
+  } catch (err) { console.error('[collect] FilmForum error:', (err as Error).message); }
+}
+
+// ── DICE API ─────────────────────────────────────────────────────────
+
+async function* genDiceAPI(): AsyncGenerator<Candidate> {
+  try {
+    const res = await fetch(
+      'https://events-api.dice.fm/v1/events?page[size]=50&filter[venues][]=New+York&filter[dates][from]=' + TOMORROW,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+    );
+    if (!res.ok) {
+      // Fallback: try the public browse endpoint
+      return;
+    }
+    const json = await res.json();
+    const events = json.data ?? json.events ?? [];
+    for (const e of events) {
+      const name = (e.name ?? e.attributes?.name ?? '').trim();
+      const url = e.url ?? e.attributes?.url ?? e.links?.self ?? null;
+      if (name) yield { name, source_url: url };
+    }
+  } catch (err) { console.error('[collect] DICE API error:', (err as Error).message); }
+}
+
+// ── Shotgun (House of Yes + other nightlife venues) ─────────────────
+
+async function* genShotgun(): AsyncGenerator<Candidate> {
+  const ORG_IDS = [207392]; // House of Yes
+  for (const orgId of ORG_IDS) {
+    try {
+      const res = await fetch(
+        `https://shotgun.live/api/v1/organizations/${orgId}/events?status=upcoming`,
+        { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const events = json.data ?? json.events ?? json ?? [];
+      const items = Array.isArray(events) ? events : [];
+      for (const e of items) {
+        const name = (e.name ?? e.title ?? '').trim();
+        const slug = e.slug ?? e.id ?? null;
+        const url = e.url ?? (slug ? `https://shotgun.live/events/${slug}` : null);
+        if (name) yield { name, source_url: url };
+      }
+    } catch (err) { console.error(`[collect] Shotgun org ${orgId} error:`, (err as Error).message); }
+  }
+}
+
+// ── AI-Powered Event Discovery ──────────────────────────────────────
+
+async function* genAIDiscover(): AsyncGenerator<Candidate> {
+  const queries = [
+    // Shopping & brands
+    'NYC sample sales this week Stussy Kith ALD Aritzia COS',
+    'NYC pop-up shops opening this week SoHo Williamsburg',
+    // Food & drink
+    'new restaurant openings NYC this month Infatuation Eater',
+    'food festivals NYC this month Smorgasburg pop-up',
+    'wine tasting events NYC natural wine bars',
+    // Music & nightlife
+    "concerts NYC this week Baby's All Right Elsewhere Brooklyn Steel",
+    'DJ sets NYC this weekend Good Room Public Records House of Yes',
+    // Culture & arts
+    'art exhibitions opening NYC this week gallery Chelsea',
+    'film screenings NYC Metrograph Film Forum Nitehawk',
+    'comedy shows NYC Comedy Cellar Caveat Gotham',
+    // Fitness & wellness
+    'run club events NYC Bandit Tracksmith Flyers',
+    'fitness events NYC pop-up classes this week',
+    // General discovery
+    'things to do NYC this weekend Infatuation Secret NYC',
+    'best events NYC this week TimeOut',
+    'NYC pop-ups immersive experiences this month',
+    'Brooklyn Flea Chelsea Flea Artists Fleas this weekend',
+  ];
+
+  for (const query of queries) {
+    try {
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
+        messages: [{ role: 'user', content: `Search for: "${query}"
+
+Find specific upcoming events in NYC. Return a JSON array of up to 10 events:
+[{"name": "exact event title", "source_url": "https://direct-link-to-event"}]
+
+Rules:
+- Only real, upcoming events with specific dates
+- Only NYC (five boroughs)
+- Must have a real source URL (event page, not a listicle)
+- No past events, no recurring classes, no webinars
+- Return [] if nothing found` }],
+      });
+
+      const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
+      const text = textBlocks.map(b => b.text).join('\n');
+      const match = text.match(/\[[\s\S]*\]/);
+      if (!match) continue;
+
+      const events = JSON.parse(match[0]) as Array<{ name: string; source_url: string }>;
+      for (const e of events) {
+        const name = (e.name ?? '').trim();
+        const url = (e.source_url ?? '').trim();
+        if (name && url && url.startsWith('http')) yield { name, source_url: url };
+      }
+    } catch (err) {
+      console.error(`[collect] AI discover error for "${query}":`, (err as Error).message);
+    }
+  }
+}
+
 // ── Main export ───────────────────────────────────────────────────────
 
-export async function collectAllNames(maxPerSource = DEFAULT_MAX_PER_SOURCE, sourceFilter?: string, collectModel = 'gpt-4o-mini'): Promise<NameListEntry[]> {
+export async function collectAllNames(maxPerSource = DEFAULT_MAX_PER_SOURCE, sourceFilter?: string, collectModel = 'claude-haiku-4-5-20251001'): Promise<NameListEntry[]> {
   // Load existing local list
   const existing = loadNameList();
   const existingUrls = new Set(existing.map(e => e.source_url).filter(Boolean) as string[]);
@@ -612,6 +756,11 @@ export async function collectAllNames(maxPerSource = DEFAULT_MAX_PER_SOURCE, sou
     { name: 'dice',           generate: genDice },
     { name: 'nyctourism',     generate: genNYCTourism },
     { name: 'nycgov',         generate: genNYCGov },
+    { name: 'partiful',       generate: genPartiful },
+    { name: 'filmforum',      generate: genFilmForum },
+    { name: 'dice_api',       generate: genDiceAPI },
+    { name: 'shotgun',        generate: genShotgun },
+    { name: 'ai_discover',    generate: genAIDiscover },
   ];
 
   const activeSources = sourceFilter
