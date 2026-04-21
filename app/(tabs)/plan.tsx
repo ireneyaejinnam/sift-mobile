@@ -191,9 +191,10 @@ export default function PlanScreen() {
           <Text style={s.stickyHeading}>Plan</Text>
         </View>
         <View style={s.centered}>
-          <Text style={s.emptyHeading}>Nothing here yet.</Text>
+          <Text style={s.emptyHeading}>No events saved yet</Text>
           <Text style={s.emptySub}>
-            Swipe right on events you like, then come back to build your weekend.
+            Browse events on the Discover tab, save the ones you like, then come
+            back here to plan your weekend.
           </Text>
           <Pressable
             onPress={() => router.push("/(tabs)/discover")}
@@ -664,7 +665,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.primary,
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
   },
   primaryButtonText: {
     ...typography.body,
@@ -676,7 +677,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
     marginTop: 10,
@@ -722,7 +723,7 @@ const s = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.primary,
     width: "100%",
