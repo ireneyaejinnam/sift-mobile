@@ -1,11 +1,14 @@
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet, Image } from "react-native";
 import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { setGuestFlag } from "@/lib/storage";
 import { track } from "@/lib/track";
-import { colors, spacing, radius, typography } from "@/lib/theme";
+import { colors, radius, typography } from "@/lib/theme";
 
 export default function AuthGate() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const handleContinueAsGuest = () => {
     track("guest_started");
@@ -18,98 +21,108 @@ export default function AuthGate() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.heading}>Welcome to Sift</Text>
-        <Text style={styles.subtitle}>
-          Find events in NYC that match what you care about. Sign in to save
-          your taste and get personalized recommendations.
+    <LinearGradient
+      colors={["#B8CEDE", "#D4E2EE", "#EBF0F6", "#F5F7FA"]}
+      start={{ x: 0.15, y: 0 }}
+      end={{ x: 0.85, y: 1 }}
+      style={styles.container}
+    >
+      {/* Hero — logo bleeds off the right edge, slightly tilted */}
+      <View style={[styles.heroArea, { paddingTop: insets.top }]}>
+        <Image
+          source={require("../../assets/sift-logo-v3.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
+
+      {/* Bottom content */}
+      <View style={[styles.contentArea, { paddingBottom: insets.bottom + 36 }]}>
+        <Text style={styles.heading}>
+          Find events in{" "}
+          <Text style={styles.headingAccent}>NYC</Text>
+          {"\n"}that match{" "}
+          <Text style={styles.headingAccent}>your vibe.</Text>
         </Text>
+
         <View style={styles.buttons}>
           <Pressable
             onPress={handleSignIn}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.primaryButtonPressed,
-            ]}
+            style={({ pressed }) => [styles.primaryButton, pressed && { opacity: 0.92 }]}
           >
-            <Text style={styles.primaryButtonText}>
-              Sign in to save your taste
-            </Text>
+            <Text style={styles.primaryButtonText}>Sign in to save your taste</Text>
           </Pressable>
           <Pressable
             onPress={handleContinueAsGuest}
-            style={({ pressed }) => [
-              styles.ghostButton,
-              pressed && styles.ghostButtonPressed,
-            ]}
+            style={({ pressed }) => [styles.ghostButton, pressed && { opacity: 0.5 }]}
           >
-            <Text style={styles.ghostButtonText}>
-              Continue without signing in
-            </Text>
+            <Text style={styles.ghostButtonText}>Continue without signing in</Text>
           </Pressable>
         </View>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+
+  // ── Hero area ──────────────────────────────────────
+  heroArea: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: spacing.page,
-    backgroundColor: colors.background,
   },
-  content: {
-    maxWidth: 400,
-    width: "100%",
-    alignItems: "center",
+  logo: {
+    width: 340,
+    height: 340,
+  },
+
+  // ── Content area ───────────────────────────────────
+  contentArea: {
+    paddingHorizontal: 28,
+    gap: 28,
   },
   heading: {
-    ...typography.heroHeading,
-    fontSize: 26,
-    textAlign: "center",
-    marginBottom: 12,
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#4B5563",
+    lineHeight: 38,
+    letterSpacing: -0.5,
   },
-  subtitle: {
-    ...typography.sm,
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 32,
-    color: colors.textSecondary,
+  headingAccent: {
+    color: "#6B93C4",
   },
+
+  // ── Buttons ────────────────────────────────────────
   buttons: {
-    width: "100%",
-    gap: 12,
+    gap: 10,
   },
   primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    paddingVertical: 15,
+    borderRadius: radius.full,
     alignItems: "center",
-  },
-  primaryButtonPressed: {
-    opacity: 0.85,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    elevation: 5,
   },
   primaryButtonText: {
-    ...typography.body,
+    fontSize: 15,
     fontWeight: "600",
-    color: colors.white,
+    color: colors.foreground,
+    letterSpacing: -0.2,
   },
   ghostButton: {
     paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: radius.md,
     alignItems: "center",
   },
-  ghostButtonPressed: {
-    opacity: 0.6,
-  },
   ghostButtonText: {
-    ...typography.body,
+    ...typography.sm,
     color: colors.textSecondary,
   },
 });
