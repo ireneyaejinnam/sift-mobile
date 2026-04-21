@@ -115,7 +115,7 @@ const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
 interface Slot {
   event: SiftEvent | null;
   key: string;
-  type: 'event' | 'end-card' | 'divider';
+  type: 'event' | 'end-card' | 'done' | 'divider';
   meta?: { quizCategories?: string[] };
 }
 
@@ -406,11 +406,13 @@ export default function DiscoverScreen() {
 
     // Data is ready — populate state before switching screens so no skeleton flash
     expandedToInterestsRef.current = false;
-    const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
-      event: e,
-      key: `${e.id}-${Date.now()}-${Math.random()}`,
-      type: 'event' as const,
-    }));
+    const initial: Slot[] = resultEvents.length > 0
+      ? resultEvents.slice(0, 3).map((e) => ({
+          event: e,
+          key: `${e.id}-${Date.now()}-${Math.random()}`,
+          type: 'event' as const,
+        }))
+      : [{ event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
     setResultPool(resultEvents);
     setSlots(initial);
     setDismissedIds([]);
@@ -541,12 +543,18 @@ export default function DiscoverScreen() {
       .map((i) => INTEREST_TO_CATEGORY[i])
       .filter((c): c is EventCategory => !!c && !(filters.categories ?? []).includes(c));
 
-    if (!interestCats.length) return;
+    if (!interestCats.length) {
+      setSlots([{ event: null, key: `done-${Date.now()}`, type: 'done' }]);
+      return;
+    }
 
     const events = await fetchAllUpcoming(200, interestCats, tasteProfile?.categoryWeights);
     const alreadyUsed = new Set([...dismissedIds, ...resultPool.map((e) => e.id)]);
     const fresh = events.filter((e) => !alreadyUsed.has(e.id));
-    if (!fresh.length) return;
+    if (!fresh.length) {
+      setSlots([{ event: null, key: `done-${Date.now()}`, type: 'done' }]);
+      return;
+    }
 
     setResultPool((prev) => [...prev, ...fresh]);
     setSlots(
@@ -828,9 +836,7 @@ export default function DiscoverScreen() {
         <View style={s.resultsHeaderRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.resultsHeading}>
-              {loading ? "Sorting picks..." : (resultPool.length > 0
-                ? (userProfile ? "Your Top Picks" : "Here's what we found")
-                : "Nothing matched")}
+              {loading ? "Sorting picks..." : (userProfile ? "Your Top Picks" : "Here's what we found")}
             </Text>
             {resultPool.length > 0 && (
               <Text style={s.eventCountLabel}>
@@ -922,10 +928,27 @@ export default function DiscoverScreen() {
                   {quizLabels ? `That's the good stuff for ${quizLabels}.` : "You've seen it all."}
                 </Text>
                 <Text style={s.endCardSub}>
-                  {quizLabels ? "Here's what else fits your taste —" : "More events based on your interests —"}
+                  {quizLabels ? "Here's what else fits your taste" : "More events based on your interests"}
                 </Text>
                 <Pressable onPress={expandToInterests} style={s.endCardButton}>
                   <Text style={s.endCardButtonText}>Keep exploring</Text>
+                </Pressable>
+              </View>
+            );
+          }
+          if (item.type === 'done') {
+            return (
+              <View style={s.endCard}>
+                <Text style={s.endCardTitle}>You've seen it all.</Text>
+                <Text style={s.endCardSub}>No more events match your picks right now.</Text>
+                <Pressable
+                  onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
+                  style={s.endCardButton}
+                >
+                  <Text style={s.endCardButtonText}>Broaden search</Text>
+                </Pressable>
+                <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
+                  <Text style={s.browseLinkText}>Start over</Text>
                 </Pressable>
               </View>
             );
@@ -959,23 +982,7 @@ export default function DiscoverScreen() {
               <SkeletonCard />
               <SkeletonCard />
             </View>
-          ) : (
-            <View style={{ paddingVertical: 48, alignItems: "center" }}>
-              <Text style={s.heading}>Nothing here.</Text>
-              <Text style={[s.sub, { textAlign: "center", maxWidth: 260 }]}>
-                Try a wider date range or a different category.
-              </Text>
-              <Pressable
-                onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
-                style={s.primaryButton}
-              >
-                <Text style={s.primaryButtonText}>Broaden search</Text>
-              </Pressable>
-              <Pressable onPress={reset} style={s.browseLinkButton}>
-                <Text style={s.browseLinkText}>Start over</Text>
-              </Pressable>
-            </View>
-          )
+          ) : null
         }
         ListFooterComponent={
           planCount > 0 && slots.length > 0 ? (
