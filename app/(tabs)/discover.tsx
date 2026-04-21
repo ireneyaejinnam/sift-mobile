@@ -22,9 +22,24 @@ import Animated, {
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ArrowLeft, CalendarCheck } from "lucide-react-native";
+import {
+  ArrowLeft,
+  CalendarCheck,
+  Drama,
+  Dumbbell,
+  Laugh,
+  MapPin,
+  Moon,
+  Music,
+  Palette,
+  ShoppingBag,
+  Sparkles,
+  Trees,
+  Utensils,
+  Wrench,
+  Zap,
+} from "lucide-react-native";
 import ProgressBar from "@/components/layout/ProgressBar";
-import OptionCard from "@/components/quiz/OptionCard";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
@@ -77,23 +92,24 @@ function buildResultsHeader(
   };
 }
 
-const categories: { value: EventCategory; label: string; emoji: string }[] = [
-  { value: "arts", label: "Arts & Culture", emoji: "🎨" },
-  { value: "music", label: "Live Music", emoji: "🎵" },
-  { value: "outdoors", label: "Outdoors", emoji: "🌿" },
-  { value: "fitness", label: "Fitness", emoji: "🏃" },
-  { value: "comedy", label: "Comedy", emoji: "😂" },
-  { value: "food", label: "Food & Drink", emoji: "🍷" },
-  { value: "nightlife", label: "Nightlife", emoji: "🌙" },
-  { value: "theater", label: "Theater", emoji: "🎭" },
-  { value: "workshops", label: "Workshops", emoji: "🛠️" },
-  { value: "popups", label: "Pop-ups & Sales", emoji: "🛍️" },
+type CatIcon = React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+
+const categories: { value: EventCategory; label: string; emoji: string; Icon: CatIcon; chipBg: string; chipFg: string }[] = [
+  { value: "arts",      label: "Arts & Culture",  emoji: "🎨", Icon: Palette,     chipBg: "#F5EEE3", chipFg: "#9A7244" },
+  { value: "music",     label: "Live Music",       emoji: "🎵", Icon: Music,       chipBg: "#E8EEF7", chipFg: "#3B5A84" },
+  { value: "outdoors",  label: "Outdoors",         emoji: "🌿", Icon: Trees,       chipBg: "#E8F0EA", chipFg: "#3A6F50" },
+  { value: "fitness",   label: "Fitness",          emoji: "🏃", Icon: Dumbbell,    chipBg: "#F4E6E4", chipFg: "#8A3E38" },
+  { value: "comedy",    label: "Comedy",           emoji: "😂", Icon: Laugh,       chipBg: "#F2EFDC", chipFg: "#7A6B28" },
+  { value: "food",      label: "Food & Drink",     emoji: "🍷", Icon: Utensils,    chipBg: "#F5E8D6", chipFg: "#8A541A" },
+  { value: "nightlife", label: "Nightlife",        emoji: "🌙", Icon: Moon,        chipBg: "#ECE6F3", chipFg: "#4A3070" },
+  { value: "theater",   label: "Theater",          emoji: "🎭", Icon: Drama,       chipBg: "#E3ECF4", chipFg: "#2F4E70" },
+  { value: "workshops", label: "Workshops",        emoji: "🛠️", Icon: Wrench,      chipBg: "#E8EFDC", chipFg: "#3E5A2B" },
+  { value: "popups",    label: "Pop-ups & Sales",  emoji: "🛍️", Icon: ShoppingBag, chipBg: "#F2E4D8", chipFg: "#7A4028" },
 ];
 
-const distances: { value: EventDistance; label: string; desc: string }[] = [
-  { value: "neighborhood", label: "Keep it close", desc: "Manhattan" },
-  { value: "borough", label: "I'll travel a bit", desc: "Manhattan + Brooklyn" },
-  { value: "anywhere", label: "Anywhere in NYC", desc: "All boroughs" },
+const distances: { value: EventDistance; label: string }[] = [
+  { value: "neighborhood", label: "Keep it close" },
+  { value: "borough", label: "I'll travel a bit" },
 ];
 
 const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
@@ -594,34 +610,42 @@ export default function DiscoverScreen() {
 
   if (step === "category" || step === "date" || step === "distance") {
     return (
-      <View style={s.container}>
+      <View style={s.catPageContainer}>
         <ProgressBar step={step} />
         <ScrollView
-          contentContainerStyle={[s.quizScroll, { paddingTop: insets.top + 28 }]}
+          contentContainerStyle={[s.dateScroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           <Animated.View style={quizAnimStyle}>
-          {step !== "category" && (
-            <Pressable onPress={handleBack} style={s.backButton}>
-              <ArrowLeft size={16} color={colors.foreground} strokeWidth={1.5} />
-              <Text style={s.backText}>Back</Text>
-            </Pressable>
-          )}
+            {/* Nav row — back button or spacer */}
+            <View style={s.catNav}>
+              {step !== "category" ? (
+                <Pressable onPress={handleBack} style={s.quizBackButton}>
+                  <ArrowLeft size={16} color={colors.foreground} strokeWidth={1.5} />
+                  <Text style={s.quizBackText}>Back</Text>
+                </Pressable>
+              ) : (
+                <View style={s.catNavSpacer} />
+              )}
+            </View>
 
-          {step === "category" && (
-            <View>
-              <Text style={s.heading}>What are you in the mood for?</Text>
-              <Text style={s.sub}>Select up to 3.</Text>
-              <View style={s.catGrid}>
-                {categories.map((c) => {
-                  const cats = filters.categories ?? [];
-                  const isSelected = cats.includes(c.value);
-                  const atLimit = cats.length >= 3 && !isSelected;
-                  return (
-                    <View key={c.value} style={s.catCell}>
-                      <OptionCard
-                        selected={isSelected}
+            {/* ── Category step ── */}
+            {step === "category" && (
+              <View>
+                <View style={s.catHeader}>
+                  <Text style={s.catHeading}>What are you{"\n"}in the mood for?</Text>
+                  <Text style={s.catSub}>Select up to 3.</Text>
+                </View>
+                <View style={s.catGrid}>
+                  {categories.map((c) => {
+                    const cats = filters.categories ?? [];
+                    const isSelected = cats.includes(c.value);
+                    const atLimit = cats.length >= 3 && !isSelected;
+                    return (
+                      <Pressable
+                        key={c.value}
+                        style={[s.catTile, isSelected && s.catTileSelected, atLimit && { opacity: 0.4 }]}
                         onPress={() => {
                           if (atLimit) return;
                           const next = isSelected
@@ -633,110 +657,152 @@ export default function DiscoverScreen() {
                           }));
                         }}
                       >
-                        <Text style={{ fontSize: 24, marginBottom: 4 }}>{c.emoji}</Text>
-                        <Text style={s.catLabel}>{c.label}</Text>
-                      </OptionCard>
+                        <View style={[s.catIconWrap, { backgroundColor: isSelected ? "rgba(255,255,255,0.25)" : c.chipBg }]}>
+                          <c.Icon size={16} color={isSelected ? colors.white : c.chipFg} strokeWidth={1.5} />
+                        </View>
+                        <Text style={[s.catLabel, isSelected && s.catLabelSelected]} numberOfLines={1}>
+                          {c.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                  {/* Surprise me tile */}
+                  <Pressable
+                    style={s.catTile}
+                    onPress={() => { setFilters((f) => ({ ...f, categories: undefined })); setStep("date"); }}
+                  >
+                    <LinearGradient
+                      colors={["#C8DCF0", "#D8E9F6", "#E8F2FB"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[StyleSheet.absoluteFillObject, { borderRadius: radius.full }]}
+                    />
+                    <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
+                      <Sparkles size={16} color="#3A6EA5" strokeWidth={1.5} />
                     </View>
-                  );
-                })}
+                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Surprise me</Text>
+                  </Pressable>
+                </View>
+                <View style={[s.catButtons, { marginTop: 28 }]}>
+                  <Pressable
+                    onPress={() => setStep("date")}
+                    disabled={!filters.categories?.length}
+                    style={[s.catContinueButton, !filters.categories?.length && { opacity: 0.4 }]}
+                  >
+                    <Text style={s.catContinueText}>Continue</Text>
+                  </Pressable>
+                  <Pressable onPress={() => goToResults({})} style={{ alignItems: "center", paddingVertical: 8 }}>
+                    <Text style={s.browseLinkText}>Browse everything →</Text>
+                  </Pressable>
+                </View>
               </View>
-              <View style={{ marginTop: 20, gap: 12, alignItems: "center" }}>
-                <Pressable
-                  onPress={() => setStep("date")}
-                  disabled={!filters.categories?.length}
-                  style={[
-                    s.primaryButton,
-                    { minWidth: 160 },
-                    !filters.categories?.length && { opacity: 0.5 },
-                  ]}
-                >
-                  <Text style={s.primaryButtonText}>Continue</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setFilters((f) => ({ ...f, categories: undefined }));
-                    setStep("date");
-                  }}
-                  style={s.browseLinkButton}
-                >
-                  <Text style={s.browseLinkText}>Surprise me</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => goToResults({})}
-                  style={s.browseLinkButton}
-                >
-                  <Text style={s.browseLinkText}>Browse everything →</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
+            )}
 
-          {step === "date" && (
-            <View>
-              <Text style={s.heading}>When are you free?</Text>
-              <Text style={s.sub}>Pick a date range and we'll narrow things down.</Text>
-              <DateRangePicker
-                dateFrom={filters.dateFrom}
-                dateTo={filters.dateTo}
-                onChange={(from, to) =>
-                  setFilters((f) => ({ ...f, dateFrom: from, dateTo: to }))
-                }
-              />
-              <View style={{ marginTop: 20, gap: 12, alignItems: "center" }}>
-                <Pressable
-                  onPress={() => {
-                    // If only a start date is picked, treat it as a single-day range
-                    if (filters.dateFrom && !filters.dateTo) {
-                      setFilters((f) => ({ ...f, dateTo: f.dateFrom }));
+            {/* ── Date step ── */}
+            {step === "date" && (
+              <View>
+                <View style={s.catHeader}>
+                  <Text style={s.catHeading}>When are you free?</Text>
+                  <Text style={s.catSub}>Pick a date range and we'll narrow things down.</Text>
+                </View>
+                <View style={s.datePickerWrap}>
+                  <DateRangePicker
+                    dateFrom={filters.dateFrom}
+                    dateTo={filters.dateTo}
+                    onChange={(from, to) =>
+                      setFilters((f) => ({ ...f, dateFrom: from, dateTo: to }))
                     }
-                    setStep("distance");
-                  }}
-                  disabled={!filters.dateFrom}
-                  style={[
-                    s.primaryButton,
-                    { minWidth: 160 },
-                    !filters.dateFrom && { opacity: 0.5 },
-                  ]}
-                >
-                  <Text style={s.primaryButtonText}>Continue</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setFilters((f) => ({ ...f, dateFrom: undefined, dateTo: undefined }));
-                    setStep("distance");
-                  }}
-                  style={s.browseLinkButton}
-                >
-                  <Text style={s.browseLinkText}>Just browsing — no specific date</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          {step === "distance" && (
-            <View>
-              <Text style={s.heading}>How far will you go?</Text>
-              <Text style={s.sub}>We'll keep it relevant.</Text>
-              <View style={{ gap: 12 }}>
-                {distances.map((d) => (
-                  <OptionCard
-                    key={d.value}
-                    selected={filters.distance === d.value}
+                  />
+                </View>
+                <View style={[s.catButtons, { marginTop: 28 }]}>
+                  <View style={{ alignItems: "center" }}>
+                    <Pressable
+                      style={s.catTile}
+                      onPress={() => {
+                        setFilters((f) => ({ ...f, dateFrom: undefined, dateTo: undefined }));
+                        setStep("distance");
+                      }}
+                    >
+                      <LinearGradient
+                        colors={["#C8DCF0", "#D8E9F6", "#E8F2FB"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={[StyleSheet.absoluteFillObject, { borderRadius: radius.full }]}
+                      />
+                      <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
+                        <Zap size={16} color="#3A6EA5" strokeWidth={1.5} />
+                      </View>
+                      <Text style={[s.catLabel, { color: "#3A6EA5" }]}>I'm spontaneous</Text>
+                    </Pressable>
+                  </View>
+                  <Pressable
                     onPress={() => {
-                      const f = { ...filters, distance: d.value };
+                      if (filters.dateFrom && !filters.dateTo) {
+                        setFilters((f) => ({ ...f, dateTo: f.dateFrom }));
+                      }
+                      setStep("distance");
+                    }}
+                    disabled={!filters.dateFrom}
+                    style={[s.catContinueButton, { marginTop: 12 }, !filters.dateFrom && { opacity: 0.4 }]}
+                  >
+                    <Text style={s.catContinueText}>Continue</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* ── Distance step ── */}
+            {step === "distance" && (
+              <View>
+                <View style={[s.catHeader, { marginTop: 60 }]}>
+                  <Text style={s.catHeading}>How far will you go?</Text>
+                  <Text style={s.catSub}>We'll keep it relevant.</Text>
+                </View>
+                <View style={s.catGrid}>
+                  {distances.map((d) => {
+                    const selected = filters.distance === d.value;
+                    return (
+                      <Pressable
+                        key={d.value}
+                        style={[s.catTile, selected && s.catTileSelected]}
+                        onPress={() => {
+                          const f = { ...filters, distance: d.value };
+                          setFilters(f);
+                          setTimeout(() => goToResults(f), 200);
+                        }}
+                      >
+                        <View style={[s.catIconWrap, { backgroundColor: selected ? "rgba(255,255,255,0.25)" : "#E8EEF7" }]}>
+                          <MapPin size={16} color={selected ? colors.white : "#3B5A84"} strokeWidth={1.5} />
+                        </View>
+                        <Text style={[s.catLabel, selected && s.catLabelSelected]} numberOfLines={1}>
+                          {d.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                  {/* Anywhere tile */}
+                  <Pressable
+                    style={s.catTile}
+                    onPress={() => {
+                      const f = { ...filters, distance: "anywhere" as EventDistance };
                       setFilters(f);
                       setTimeout(() => goToResults(f), 200);
                     }}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "baseline" }}>
-                      <Text style={s.catLabel}>{d.label}</Text>
-                      <Text style={s.distDesc}> — {d.desc}</Text>
+                    <LinearGradient
+                      colors={["#C8DCF0", "#D8E9F6", "#E8F2FB"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[StyleSheet.absoluteFillObject, { borderRadius: radius.full }]}
+                    />
+                    <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
+                      <Sparkles size={16} color="#3A6EA5" strokeWidth={1.5} />
                     </View>
-                  </OptionCard>
-                ))}
+                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Anywhere in NYC</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-          )}
+            )}
           </Animated.View>
         </ScrollView>
       </View>
@@ -1038,18 +1104,107 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   primaryButtonText: { ...typography.body, fontWeight: "600", color: colors.white },
-  quizScroll: {
-    paddingHorizontal: spacing.page,
-    paddingBottom: 40,
-  },
-  backButton: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 28 },
-  backText: { ...typography.sm, color: colors.foreground },
   heading: { ...typography.sectionHeading, marginBottom: 8 },
   sub: { ...typography.sm, color: colors.textSecondary, lineHeight: 22, marginBottom: 24 },
-  catGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  catCell: { width: "47%" },
-  catLabel: { ...typography.body, fontWeight: "500", color: colors.foreground },
-  distDesc: { ...typography.sm, color: colors.textSecondary, lineHeight: 22 },
+  // ── Quiz step styles ─────────────────────────────────
+  catPageContainer: {
+    flex: 1,
+    backgroundColor: colors.white,
+  },
+  dateScroll: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.page,
+  },
+  catNav: {
+    paddingBottom: 8,
+  },
+  catNavSpacer: { height: 20 },
+  quizBackButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  quizBackText: { ...typography.sm, color: colors.foreground },
+  catHeader: {
+    alignItems: "center",
+    marginTop: 28,
+    marginBottom: 28,
+  },
+  catHeading: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: colors.foreground,
+    textAlign: "center",
+    lineHeight: 34,
+    letterSpacing: -0.4,
+    marginBottom: 8,
+  },
+  catSub: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  catGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 10,
+  },
+  catTile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 1,
+    overflow: "hidden",
+  },
+  catTileSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  catIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  catLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: colors.foreground,
+  },
+  catLabelSelected: { color: colors.white },
+  catButtons: {
+    paddingHorizontal: 0,
+    gap: 10,
+  },
+  catContinueButton: {
+    paddingVertical: 15,
+    borderRadius: radius.full,
+    alignItems: "center",
+    backgroundColor: colors.primary,
+  },
+  catContinueText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  datePickerWrap: {
+    alignItems: "center",
+    marginTop: 8,
+  },
   stickyHeader: {
     paddingHorizontal: spacing.page,
     paddingBottom: 8,
