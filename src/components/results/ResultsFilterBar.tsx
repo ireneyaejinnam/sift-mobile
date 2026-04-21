@@ -149,7 +149,7 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
   const cats = filters.categories ?? [];
   const categoryLabel =
     cats.length === 0
-      ? "All Mood"
+      ? "All Moods"
       : cats.length === 1
       ? CATEGORIES.find((c) => c.value === cats[0])?.label ?? cats[0]
       : `${cats.length} moods`;
@@ -163,7 +163,7 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
   const selectedBoroughs = filters.boroughs ?? [];
   const distLabel =
     selectedBoroughs.length === 0
-      ? "All Borough"
+      ? "All Boroughs"
       : selectedBoroughs.length === 1
       ? selectedBoroughs[0]
       : `${selectedBoroughs.length} boroughs`;
