@@ -83,7 +83,9 @@ function toSiftEvent(raw: any): SiftEvent {
     daysLeft: daysLeft > 0 ? daysLeft : undefined,
     sessions: [session],
     locationsVary: false,
-    vibeScore: undefined,
+    vibeScore: raw.vibe_score ?? undefined,
+    socialSignal: raw.social_signal ?? undefined,
+    hookText: raw.hook_text ?? undefined,
   };
 }
 

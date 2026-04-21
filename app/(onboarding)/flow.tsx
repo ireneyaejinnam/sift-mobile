@@ -12,11 +12,6 @@ import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { setOnboardingDoneFlag } from "@/lib/storage";
 import { track } from "@/lib/track";
-import {
-  BOROUGHS,
-  BOROUGHS_NEIGHBORHOODS,
-  TRAVEL_RANGES,
-} from "@/data/locations";
 import type { UserProfile } from "@/types/user";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 
@@ -33,19 +28,6 @@ const INTEREST_OPTIONS = [
   { value: "nightlife", label: "Nightlife & bars" },
   { value: "theater", label: "Theater & performances" },
   { value: "workshops", label: "Workshops & classes" },
-];
-
-const VIBE_OPTIONS = [
-  { value: "hidden_gems", label: "Show me the hidden gems" },
-  { value: "popular_spots", label: "I like popular spots" },
-  { value: "surprise_me", label: "Surprise me" },
-];
-
-const BUDGET_OPTIONS = [
-  { value: "free", label: "Free only" },
-  { value: "under_20", label: "Under $20" },
-  { value: "under_50", label: "Under $50" },
-  { value: "no_limit", label: "No limit" },
 ];
 
 const DAYS = [
@@ -82,34 +64,6 @@ function Pill({
       style={[styles.pill, selected && styles.pillSelected]}
     >
       <Text style={[styles.pillText, selected && styles.pillTextSelected]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-// ── Option card ─────────────────────────────────────────────
-
-function OptionRow({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.optionRow, selected && styles.optionRowSelected]}
-    >
-      <Text
-        style={[
-          styles.optionRowText,
-          selected && styles.optionRowTextSelected,
-        ]}
-      >
         {label}
       </Text>
     </Pressable>
@@ -163,10 +117,6 @@ export default function OnboardingFlow() {
     setInitialized(true);
   }, [userProfile, initialized]);
 
-  const neighborhoods = profile.borough
-    ? BOROUGHS_NEIGHBORHOODS[profile.borough] ?? []
-    : [];
-
   const toggleArray = useCallback(
     (key: "interests" | "freeDays" | "freeTime", value: string) => {
       setProfile((p) => {
@@ -184,17 +134,18 @@ export default function OnboardingFlow() {
   const handleFinish = useCallback(() => {
     const full: UserProfile = {
       interests: profile.interests ?? [],
-      borough: profile.borough ?? "",
-      neighborhood: profile.neighborhood ?? "",
-      travelRange: profile.travelRange ?? "",
-      vibe: profile.vibe ?? "",
-      budget: profile.budget ?? "",
+      // Preserve existing location/vibe/budget — not collected in condensed flow
+      borough: userProfile?.borough ?? "",
+      neighborhood: userProfile?.neighborhood ?? "",
+      travelRange: userProfile?.travelRange ?? "",
+      vibe: userProfile?.vibe ?? "",
+      budget: userProfile?.budget ?? "",
       freeDays: profile.freeDays ?? [],
       freeTime: profile.freeTime ?? [],
     };
     setUserProfile(full);
     setOnboardingDoneFlag();
-    track("onboarding_step_4_complete", {
+    track("onboarding_step_2_complete", {
       free_days: full.freeDays,
       free_times: full.freeTime,
     });
@@ -204,7 +155,7 @@ export default function OnboardingFlow() {
       budget: full.budget,
     });
     setShowConfirmation(true);
-  }, [profile, setUserProfile]);
+  }, [profile, userProfile, setUserProfile]);
 
   const handleBack = () => {
     if (step === 1) {
@@ -240,7 +191,7 @@ export default function OnboardingFlow() {
 
   // ── Progress bar ──────────────────────────────────────────
 
-  const progressPct = (step / 4) * 100;
+  const progressPct = (step / 2) * 100;
 
   return (
     <View style={styles.container}>
@@ -301,133 +252,10 @@ export default function OnboardingFlow() {
           </View>
         )}
 
-        {/* ── Step 2: Location ──────────────────────── */}
+        {/* ── Step 2: Your week ─────────────────────── */}
         {step === 2 && (
           <View>
-            <Text style={styles.heading}>Where in NYC are you?</Text>
-            <Text style={styles.subtitle}>Borough</Text>
-            <View style={styles.pillGrid}>
-              {BOROUGHS.map((b) => (
-                <Pill
-                  key={b}
-                  label={b}
-                  selected={profile.borough === b}
-                  onPress={() =>
-                    setProfile((p) => ({
-                      ...p,
-                      borough: b,
-                      neighborhood: "",
-                    }))
-                  }
-                />
-              ))}
-            </View>
-
-            {profile.borough ? (
-              <>
-                <Text style={[styles.subtitle, { marginTop: 24 }]}>
-                  Neighborhood
-                </Text>
-                <View style={styles.pillGrid}>
-                  {neighborhoods.map((n) => (
-                    <Pill
-                      key={n}
-                      label={n}
-                      selected={profile.neighborhood === n}
-                      onPress={() =>
-                        setProfile((p) => ({ ...p, neighborhood: n }))
-                      }
-                    />
-                  ))}
-                </View>
-              </>
-            ) : null}
-
-            <Text style={[styles.subtitle, { marginTop: 24 }]}>
-              How far will you travel?
-            </Text>
-            <View style={styles.pillGrid}>
-              {TRAVEL_RANGES.map((r) => (
-                <Pill
-                  key={r.value}
-                  label={r.label}
-                  selected={profile.travelRange === r.value}
-                  onPress={() =>
-                    setProfile((p) => ({ ...p, travelRange: r.value }))
-                  }
-                />
-              ))}
-            </View>
-
-            <Pressable
-              onPress={() => {
-                track("onboarding_step_2_complete", {
-                  borough: profile.borough,
-                  neighborhood: profile.neighborhood,
-                  travel_range: profile.travelRange,
-                });
-                setStep(3);
-              }}
-              style={[styles.primaryButton, styles.fullWidth, { marginTop: 32 }]}
-            >
-              <Text style={styles.primaryButtonText}>Next</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* ── Step 3: Vibe + Budget ─────────────────── */}
-        {step === 3 && (
-          <View>
-            <Text style={styles.heading}>What's your vibe?</Text>
-            <Text style={styles.subtitle}>Pick the one that fits best.</Text>
-            <View style={styles.optionList}>
-              {VIBE_OPTIONS.map((opt) => (
-                <OptionRow
-                  key={opt.value}
-                  label={opt.label}
-                  selected={profile.vibe === opt.value}
-                  onPress={() =>
-                    setProfile((p) => ({ ...p, vibe: opt.value }))
-                  }
-                />
-              ))}
-            </View>
-
-            <Text style={[styles.subtitle, { marginTop: 24 }]}>
-              Budget preference
-            </Text>
-            <View style={styles.pillGrid}>
-              {BUDGET_OPTIONS.map((opt) => (
-                <Pill
-                  key={opt.value}
-                  label={opt.label}
-                  selected={profile.budget === opt.value}
-                  onPress={() =>
-                    setProfile((p) => ({ ...p, budget: opt.value }))
-                  }
-                />
-              ))}
-            </View>
-
-            <Pressable
-              onPress={() => {
-                track("onboarding_step_3_complete", {
-                  vibe: profile.vibe,
-                  budget: profile.budget,
-                });
-                setStep(4);
-              }}
-              style={[styles.primaryButton, styles.fullWidth, { marginTop: 32 }]}
-            >
-              <Text style={styles.primaryButtonText}>Next</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* ── Step 4: Your week ─────────────────────── */}
-        {step === 4 && (
-          <View>
-            <Text style={styles.heading}>Your week</Text>
+            <Text style={styles.heading}>When are you free?</Text>
             <Text style={styles.subtitle}>
               Which days are you typically free?
             </Text>
@@ -464,6 +292,7 @@ export default function OnboardingFlow() {
             </Pressable>
           </View>
         )}
+
       </ScrollView>
     </View>
   );
@@ -536,29 +365,6 @@ const styles = StyleSheet.create({
   pillTextSelected: {
     color: colors.primary,
     fontWeight: "500",
-  },
-  optionList: {
-    gap: 12,
-  },
-  optionRow: {
-    padding: 16,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-  },
-  optionRowSelected: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryLight,
-  },
-  optionRowText: {
-    ...typography.body,
-    fontWeight: "500",
-    color: colors.foreground,
-  },
-  optionRowTextSelected: {
-    color: colors.primary,
   },
   primaryButton: {
     backgroundColor: colors.primary,

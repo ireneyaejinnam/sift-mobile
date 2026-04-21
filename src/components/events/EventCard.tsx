@@ -22,8 +22,10 @@ import {
   Bookmark,
   Check,
   ExternalLink,
+  Flame,
   MapPin,
   Share2,
+  Star,
   Ticket,
   X,
 } from "lucide-react-native";
@@ -34,6 +36,7 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import type { SiftEvent } from "@/types/event";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
+import { recordLike, recordDislike } from "@/lib/tasteProfile";
 import { colors, radius, shadows } from "@/lib/theme";
 import { formatNYCDate } from "@/lib/time";
 
@@ -102,6 +105,7 @@ export default function EventCard({
   } = useUser();
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [fallbackImage, setFallbackImage] = useState<string | null>(null);
+  const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
 
   useEffect(() => {
     if (!event.imageUrl) {
@@ -141,7 +145,6 @@ export default function EventCard({
       eventDate: event.startDate,
     });
     track("event_going", { event_id: event.id });
-    showToast("Marked as going");
   };
 
   // ── Swipe gesture ────────────────────────────────────────
@@ -213,6 +216,15 @@ export default function EventCard({
     }
   };
 
+  const isSiftPick = (event.vibeScore ?? 0) >= 8;
+  const isTrending = (event.socialSignal ?? 0) >= 2;
+  const showMatchReason =
+    isLoggedIn &&
+    !!event.matchReason &&
+    event.matchReason !== "Picked for you" &&
+    event.matchReason !== "More to explore" &&
+    event.matchReason !== "It's free";
+
   // Compact meta line: "venue · date · price"
   const metaLine = [
     event.location,
@@ -224,7 +236,7 @@ export default function EventCard({
     <View style={styles.wrapper}>
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.card, animatedCardStyle]}>
-          <Pressable onPress={onPress} style={styles.cardInner}>
+          <Pressable onPress={onPress} onLongPress={() => setFeedbackSheetOpen(true)} style={styles.cardInner}>
             {/* ── Image hero ─────────────────────────────── */}
             <View style={styles.heroContainer}>
               {event.imageUrl || fallbackImage ? (
@@ -271,6 +283,18 @@ export default function EventCard({
                     <Text style={[styles.pillGlassText, styles.pillFreeText]}>Free</Text>
                   </View>
                 )}
+                {isSiftPick && (
+                  <View style={[styles.pillGlass, styles.pillSiftPick]}>
+                    <Star size={9} color="#F5C842" fill="#F5C842" strokeWidth={0} />
+                    <Text style={[styles.pillGlassText, styles.pillSiftPickText]}>Sift Pick</Text>
+                  </View>
+                )}
+                {isTrending && (
+                  <View style={[styles.pillGlass, styles.pillTrending]}>
+                    <Flame size={9} color="#FF6B35" fill="#FF6B35" strokeWidth={0} />
+                    <Text style={[styles.pillGlassText, styles.pillTrendingText]}>Trending</Text>
+                  </View>
+                )}
               </View>
 
               {/* Actions — overlaid top-right */}
@@ -307,10 +331,17 @@ export default function EventCard({
 
             {/* ── Body: description hook + CTA ───────────── */}
             <View style={styles.body}>
-              {event.description && event.description.length > 30 && (
+              {(event.hookText || (event.description && event.description.length > 30)) && (
                 <Text style={styles.hookText}>
-                  {event.description}
+                  {event.hookText ?? event.description}
                 </Text>
+              )}
+              {showMatchReason && (
+                <View style={styles.matchChip}>
+                  <Text style={styles.matchChipText}>
+                    ✦ {event.matchReason}
+                  </Text>
+                </View>
               )}
 
               <View style={styles.footer}>
@@ -355,6 +386,34 @@ export default function EventCard({
           </Pressable>
         </Animated.View>
       </GestureDetector>
+      <BottomSheet
+        open={feedbackSheetOpen}
+        onClose={() => setFeedbackSheetOpen(false)}
+        title="Tune your taste"
+      >
+        <View style={styles.feedbackSheet}>
+          <Pressable
+            onPress={() => {
+              recordLike(event.id, event.category).catch(() => {});
+              setFeedbackSheetOpen(false);
+              showToast("Got it — more like this");
+            }}
+            style={styles.feedbackOption}
+          >
+            <Text style={styles.feedbackOptionText}>More like this</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              recordDislike(event.id, event.category).catch(() => {});
+              setFeedbackSheetOpen(false);
+              showToast("Got it — less of this");
+            }}
+            style={[styles.feedbackOption, styles.feedbackOptionNeg]}
+          >
+            <Text style={[styles.feedbackOptionText, styles.feedbackOptionTextNeg]}>Not my thing</Text>
+          </Pressable>
+        </View>
+      </BottomSheet>
       <BottomSheet
         open={goingSheetOpen}
         onClose={() => setGoingSheetOpen(false)}
@@ -468,8 +527,10 @@ const styles = StyleSheet.create({
     top: 14,
     left: 14,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
     zIndex: 2,
+    maxWidth: "68%",
   },
   pillGlass: {
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -495,6 +556,24 @@ const styles = StyleSheet.create({
   },
   pillFreeText: {
     color: "#fff",
+  },
+  pillSiftPick: {
+    backgroundColor: "rgba(245,200,66,0.25)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  pillSiftPickText: {
+    color: "#F5C842",
+  },
+  pillTrending: {
+    backgroundColor: "rgba(255,107,53,0.25)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  pillTrendingText: {
+    color: "#FF8C5A",
   },
 
   // ── Action icons overlaid top-right ─────────────────────
@@ -557,7 +636,42 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: colors.foreground,
-    marginBottom: 14,
+    marginBottom: 10,
+  },
+  matchChip: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primaryLight,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    marginBottom: 12,
+  },
+  matchChipText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.primary,
+    lineHeight: 16,
+  },
+  feedbackSheet: {
+    padding: 16,
+    gap: 10,
+  },
+  feedbackOption: {
+    backgroundColor: colors.primaryLight,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: "center",
+  },
+  feedbackOptionNeg: {
+    backgroundColor: colors.muted,
+  },
+  feedbackOptionText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  feedbackOptionTextNeg: {
+    color: colors.textSecondary,
   },
 
   // ── Footer CTA ─────────────────────────────────────────

@@ -191,10 +191,9 @@ export default function PlanScreen() {
           <Text style={s.stickyHeading}>Plan</Text>
         </View>
         <View style={s.centered}>
-          <Text style={s.emptyHeading}>No events saved yet</Text>
+          <Text style={s.emptyHeading}>Nothing here yet.</Text>
           <Text style={s.emptySub}>
-            Browse events on the Discover tab, save the ones you like, then come
-            back here to plan your weekend.
+            Swipe right on events you like, then come back to build your weekend.
           </Text>
           <Pressable
             onPress={() => router.push("/(tabs)/discover")}

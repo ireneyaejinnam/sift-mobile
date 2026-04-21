@@ -108,6 +108,7 @@ interface EventRow {
   category: string;
   image_url?: string | null;
   description?: string | null;
+  hook_text?: string | null;
   venue_name?: string | null;
   address?: string | null;
   borough?: string | null;
@@ -121,6 +122,7 @@ interface EventRow {
   on_sale_date?: string | null;
   tags?: string[] | null;
   vibe_score?: number | null;
+  social_signal?: number | null;
 }
 
 /** Map a DB row + its matched sessions into a frontend SiftEvent. */
@@ -199,6 +201,8 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
     sessions: sessions.length > 0 ? sessions : undefined,
     locationsVary,
     vibeScore: row.vibe_score ?? undefined,
+    socialSignal: row.social_signal ?? undefined,
+    hookText: row.hook_text ?? undefined,
   };
 }
 

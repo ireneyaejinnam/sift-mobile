@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, TextInput, Pressable, ScrollView, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { User, Pencil, Check } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
+import { loadTasteProfile } from "@/lib/tasteProfile";
+import type { TasteProfile } from "@/lib/tasteProfile";
 import { events } from "@/data/events";
 import CalendarSection from "@/components/profile/CalendarSection";
 import SavedListsSection from "@/components/profile/SavedListsSection";
@@ -20,6 +22,19 @@ const BUDGET_LABELS: Record<string, string> = {
   under_50: "Under $50",
   no_limit: "No limit",
 };
+const CATEGORY_LABELS: Record<string, string> = {
+  music: "Live music",
+  arts: "Art & culture",
+  comedy: "Comedy",
+  food: "Food & drink",
+  outdoors: "Outdoors",
+  nightlife: "Nightlife",
+  fitness: "Fitness",
+  theater: "Theater",
+  workshops: "Workshops",
+  popups: "Pop-ups",
+};
+
 const INTEREST_LABELS: Record<string, string> = {
   live_music: "Live music & concerts",
   art_exhibitions: "Art exhibitions & galleries",
@@ -51,6 +66,25 @@ export default function ProfileTab() {
   const insets = useSafeAreaInsets();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(userDisplayName || "");
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
+
+  useEffect(() => {
+    if (isLoggedIn) loadTasteProfile().then(setTasteProfile);
+  }, [isLoggedIn]);
+
+  const topCategory = tasteProfile
+    ? Object.entries(tasteProfile.categoryWeights).sort(([, a], [, b]) => b - a)[0]
+    : null;
+
+  const now = new Date();
+  const goingThisMonth = goingEvents.filter((e) => {
+    const d = new Date(e.eventDate);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
+
+  const totalSwiped = tasteProfile
+    ? tasteProfile.likedIds.length + tasteProfile.dislikedIds.length
+    : 0;
 
   const displayLabel = userDisplayName || userEmail || "Guest";
   const avatarLetter =
@@ -115,8 +149,8 @@ export default function ProfileTab() {
           <View style={[st.avatar, st.avatarGuest]}>
             <User size={28} strokeWidth={1.5} color={colors.textSecondary} />
           </View>
-          <Text style={st.guestTitle}>You're browsing as a guest</Text>
-          <Text style={st.guestSub}>Sign in to save events, build lists, and plan your weekend.</Text>
+          <Text style={st.guestTitle}>You're exploring as a guest</Text>
+          <Text style={st.guestSub}>Sign in and Sift starts learning your taste.</Text>
           <Pressable
             onPress={() => router.push("/(auth)/signin")}
             style={st.signInButton}
@@ -241,6 +275,38 @@ export default function ProfileTab() {
               Member since {new Date(createdAt).toLocaleDateString("en-US")}
             </Text>
           )}
+        </View>
+      )}
+
+      {/* Sift knows you — logged-in only */}
+      {isLoggedIn && tasteProfile && (
+        <View style={st.section}>
+          <Text style={st.h3}>Sift knows you</Text>
+          <View style={st.card}>
+            {topCategory && (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Most explored: </Text>
+                {CATEGORY_LABELS[topCategory[0]] ?? topCategory[0]}
+              </Text>
+            )}
+            {goingThisMonth > 0 && (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Going this month: </Text>
+                {goingThisMonth} event{goingThisMonth !== 1 ? "s" : ""}
+              </Text>
+            )}
+            {totalSwiped > 0 ? (
+              <Text style={st.prefLine}>
+                <Text style={st.prefLabel}>Events seen: </Text>
+                {totalSwiped}
+                {totalSwiped < 20 ? " — keep swiping to sharpen your picks" : ""}
+              </Text>
+            ) : (
+              <Text style={[st.prefLine, { color: colors.textSecondary }]}>
+                Start swiping — Sift builds your taste as you go.
+              </Text>
+            )}
+          </View>
         </View>
       )}
 

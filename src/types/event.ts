@@ -50,4 +50,6 @@ export interface SiftEvent {
   sessions?: EventSession[];    // all upcoming sessions; undefined = treat as single session
   locationsVary?: boolean;      // true if sessions have different venues/addresses
   vibeScore?: number;           // 1–10 from Claude vibe check, undefined = not yet checked
+  socialSignal?: number;        // count of linked TikTok/Instagram posts
+  hookText?: string;            // AI-generated 2-sentence pitch, falls back to description
 }

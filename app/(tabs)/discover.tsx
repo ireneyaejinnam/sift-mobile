@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -15,8 +15,11 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withRepeat,
+  Easing,
   runOnJS,
 } from "react-native-reanimated";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft, CalendarCheck } from "lucide-react-native";
@@ -44,6 +47,35 @@ import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
+
+const TRANSITION_MSGS = [
+  "Finding your picks...",
+  "Checking what's on this weekend...",
+  "Tailoring for you...",
+];
+
+const PICK_GRADIENTS: Partial<Record<EventCategory, [string, string]>> = {
+  arts:      ["#C9A882", "#8B5E3C"],
+  music:     ["#5B8DB8", "#2C4F70"],
+  outdoors:  ["#5A9E6F", "#2D6644"],
+  fitness:   ["#C0554A", "#7A2E28"],
+  comedy:    ["#B8A840", "#6E6020"],
+  food:      ["#C47830", "#7A4810"],
+  nightlife: ["#6B4E9E", "#3A2060"],
+  theater:   ["#4A7A9E", "#1E4060"],
+  workshops: ["#6A9E50", "#304E20"],
+  popups:    ["#B87050", "#6A3820"],
+};
+
+function buildResultsHeader(
+  count: number,
+): { headline: string; subline: string } {
+  if (count === 0) return { headline: "Nothing matched", subline: "Try a broader search" };
+  return {
+    headline: "Your picks",
+    subline: `${count} event${count === 1 ? "" : "s"} · sorted for you`,
+  };
+}
 
 const categories: { value: EventCategory; label: string; emoji: string }[] = [
   { value: "arts", label: "Arts & Culture", emoji: "🎨" },
@@ -115,6 +147,46 @@ export default function DiscoverScreen() {
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
 
+  const weekendPicks = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() + 4);
+    return resultPool
+      .filter((e) => {
+        const d = new Date(e.startDate + "T12:00:00");
+        return d >= today && d < cutoff && (e.vibeScore ?? 0) >= 7;
+      })
+      .slice(0, 7);
+  }, [resultPool]);
+
+  // Quiz step slide-in animation
+  const quizEntrance = useSharedValue(1);
+  const quizTranslateX = useSharedValue(0);
+  const quizDirectionRef = useRef<1 | -1>(1);
+  const quizAnimStyle = useAnimatedStyle(() => ({
+    opacity: quizEntrance.value,
+    transform: [{ translateX: quizTranslateX.value }],
+  }));
+
+  useEffect(() => {
+    if (step === "results" || isTransitioning) return;
+    const dir = quizDirectionRef.current;
+    quizDirectionRef.current = 1;
+    quizEntrance.value = 0;
+    quizTranslateX.value = dir * 28;
+    quizEntrance.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) });
+    quizTranslateX.value = withTiming(0, { duration: 260, easing: Easing.out(Easing.quad) });
+  }, [step]);
+
+  // Transition animation between quiz and results
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionMsgIdx, setTransitionMsgIdx] = useState(0);
+  const transitionRotate = useSharedValue(0);
+  const transitionIconStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${transitionRotate.value}deg` }],
+  }));
+
   // EventDetail slide animation — transparent modal + Reanimated worklet, no bridge overhead
   const [eventDetailVisible, setEventDetailVisible] = useState(false);
   const eventSlideY = useSharedValue(900);
@@ -172,6 +244,7 @@ export default function DiscoverScreen() {
   );
 
   const reset = useCallback(() => {
+    setIsTransitioning(false);
     setStep("category");
     setFilters({});
     setSlots([]);
@@ -183,16 +256,38 @@ export default function DiscoverScreen() {
   const handleBack = useCallback(() => {
     const flow: Step[] = ["category", "date", "distance", "results"];
     const idx = flow.indexOf(step);
-    if (idx > 0) setStep(flow[idx - 1]);
+    if (idx > 0) {
+      quizDirectionRef.current = -1;
+      setStep(flow[idx - 1]);
+    }
   }, [step]);
 
-  const goToResults = useCallback(async (f: Filters) => {
+  const goToResults = useCallback(async (f: Filters, opts?: { skipTransition?: boolean }) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    setLoading(true);
-    setStep("results");
 
-    let resultEvents: SiftEvent[];
+    let msgTimer1: ReturnType<typeof setTimeout> | undefined;
+    let msgTimer2: ReturnType<typeof setTimeout> | undefined;
+    let minDelay: Promise<void>;
+
+    if (!opts?.skipTransition) {
+      // Show transition screen while fetching — minimum 1500ms, waits for fetch if slower
+      setIsTransitioning(true);
+      setTransitionMsgIdx(0);
+      transitionRotate.value = 0;
+      transitionRotate.value = withRepeat(
+        withTiming(360, { duration: 1200, easing: Easing.linear }),
+        -1,
+        false
+      );
+      msgTimer1 = setTimeout(() => setTransitionMsgIdx(1), 500);
+      msgTimer2 = setTimeout(() => setTransitionMsgIdx(2), 1000);
+      minDelay = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+    } else {
+      setLoading(true);
+      setStep("results");
+      minDelay = Promise.resolve();
+    }
 
     // Priority ordering:
     //   Tier 1: Quiz categories (what user just picked)
@@ -274,33 +369,45 @@ export default function DiscoverScreen() {
       ];
     };
 
-    try {
-      // Fetch all upcoming events, pre-sorted by composite score with taste weights
-      const categoryWeights = tasteProfile?.categoryWeights;
-      const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
-      if (allEvents.length > 0) {
-        resultEvents = tieredSort(allEvents).filter(
-          (e) => !sessionDismissedRef.current.has(e.id)
-        );
-      } else {
-        // Supabase returned nothing — fall back to local data
-        resultEvents = getAllCandidates(f, [], userProfile);
+    const fetchAndSort = async (): Promise<SiftEvent[]> => {
+      try {
+        const categoryWeights = tasteProfile?.categoryWeights;
+        const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
+        if (allEvents.length > 0) {
+          return tieredSort(allEvents).filter(
+            (e) => !sessionDismissedRef.current.has(e.id)
+          );
+        }
+        return getAllCandidates(f, [], userProfile);
+      } catch {
+        showToast("Couldn't connect — showing cached results");
+        return getAllCandidates(f, [], userProfile);
       }
-    } catch {
-      showToast("Couldn't connect — showing cached results");
-      resultEvents = getAllCandidates(f, [], userProfile);
-    }
+    };
 
-    setResultPool(resultEvents);
+    // Run fetch and minimum transition delay in parallel
+    const [resultEvents] = await Promise.all([fetchAndSort(), minDelay]);
+
+    clearTimeout(msgTimer1);
+    clearTimeout(msgTimer2);
+
+    // Data is ready — populate state before switching screens so no skeleton flash
     expandedToInterestsRef.current = false;
     const initial: Slot[] = resultEvents.slice(0, 3).map((e) => ({
       event: e,
       key: `${e.id}-${Date.now()}-${Math.random()}`,
       type: 'event' as const,
     }));
+    setResultPool(resultEvents);
     setSlots(initial);
     setDismissedIds([]);
-    setLoading(false);
+
+    if (!opts?.skipTransition) {
+      setIsTransitioning(false);
+      setStep("results");
+    } else {
+      setLoading(false);
+    }
     loadingRef.current = false;
     track("recommendations_viewed", {
       count: initial.length,
@@ -315,13 +422,12 @@ export default function DiscoverScreen() {
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
-    // Re-use goToResults which already handles Supabase + fallback
-    await goToResults(newFilters);
+    await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
-    goToResults(filters);
+    goToResults(filters, { skipTransition: true });
     setTimeout(() => setRefreshing(false), 600);
   }, [filters, goToResults]);
 
@@ -471,7 +577,18 @@ export default function DiscoverScreen() {
     [isLoggedIn, toggleGoing, advanceGoingSlot, showToast]
   );
 
-  // ── Welcome ────────────────────────────────────────────
+  // ── Transition screen (must come before quiz check) ────
+
+  if (isTransitioning) {
+    return (
+      <View style={s.centered}>
+        <Animated.View style={[transitionIconStyle, { marginBottom: 24 }]}>
+          <Text style={s.transitionIcon}>✦</Text>
+        </Animated.View>
+        <Text style={s.transitionMsg}>{TRANSITION_MSGS[transitionMsgIdx]}</Text>
+      </View>
+    );
+  }
 
   // ── Quiz steps ─────────────────────────────────────────
 
@@ -484,6 +601,7 @@ export default function DiscoverScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          <Animated.View style={quizAnimStyle}>
           {step !== "category" && (
             <Pressable onPress={handleBack} style={s.backButton}>
               <ArrowLeft size={16} color={colors.foreground} strokeWidth={1.5} />
@@ -542,6 +660,12 @@ export default function DiscoverScreen() {
                   style={s.browseLinkButton}
                 >
                   <Text style={s.browseLinkText}>Surprise me</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => goToResults({})}
+                  style={s.browseLinkButton}
+                >
+                  <Text style={s.browseLinkText}>Browse everything →</Text>
                 </Pressable>
               </View>
             </View>
@@ -613,6 +737,7 @@ export default function DiscoverScreen() {
               </View>
             </View>
           )}
+          </Animated.View>
         </ScrollView>
       </View>
     );
@@ -624,16 +749,22 @@ export default function DiscoverScreen() {
     <View style={s.container}>
       {/* Sticky header — stays put while list scrolls */}
       <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
-        <View style={s.resultsHeaderRow}>
-          <Text style={s.resultsHeading}>
-            {loading || slots.length > 0
-              ? userProfile ? "Your Top Picks" : "Here's what we found"
-              : "Hmm, nothing matched"}
-          </Text>
-          <Pressable onPress={reset} hitSlop={8}>
-            <Text style={s.startOverText}>Start over</Text>
-          </Pressable>
-        </View>
+        {(() => {
+          const { headline, subline } = buildResultsHeader(resultPool.length);
+          return (
+            <View style={s.resultsHeaderRow}>
+              <View style={s.resultsHeaderTextBlock}>
+                <Text style={s.resultsHeading}>{loading ? "Sorting picks..." : headline}</Text>
+                {!loading && resultPool.length > 0 && (
+                  <Text style={s.resultsSubline}>{subline}</Text>
+                )}
+              </View>
+              <Pressable onPress={reset} hitSlop={8}>
+                <Text style={s.startOverText}>Start over</Text>
+              </Pressable>
+            </View>
+          );
+        })()}
       </View>
 
       <FlatList
@@ -650,26 +781,39 @@ export default function DiscoverScreen() {
         }
         ListHeaderComponent={
           <View style={{ marginBottom: 20 }}>
-            {resultPool.length > 0 && (
-              <Text style={s.eventCountLabel}>
-                {resultPool.length} event{resultPool.length !== 1 ? "s" : ""} · swipe right to go, left to skip
-              </Text>
-            )}
-            {userProfile && (
-              <Text style={s.personalizeHint}>
-                {userProfile.neighborhood || "NYC"} ·{" "}
-                {(userProfile.interests ?? [])
-                  .slice(0, 2)
-                  .map((i) =>
-                    i.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                  )
-                  .join(", ")}
-              </Text>
-            )}
-            {!userProfile && (
-              <Pressable onPress={() => router.push("/(auth)/signin")}>
-                <Text style={s.personalizeLink}>Personalize your results →</Text>
-              </Pressable>
+            {weekendPicks.length >= 2 && (
+              <View style={s.weekendSection}>
+                <Text style={s.weekendHeading}>Top picks this week</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
+                >
+                  {weekendPicks.map((pick) => (
+                    <LinearGradient
+                      key={pick.id}
+                      colors={PICK_GRADIENTS[pick.category] ?? ["#6B7280", "#374151"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={s.weekendCard}
+                    >
+                      <LinearGradient
+                        colors={["transparent", "rgba(0,0,0,0.72)"]}
+                        style={s.weekendCardOverlay}
+                      >
+                        <Text
+                          style={s.weekendCardTitle}
+                          numberOfLines={2}
+                          onPress={() => openEventDetail(pick)}
+                        >
+                          {pick.title}
+                        </Text>
+                        <Text style={s.weekendCardCategory}>{pick.category}</Text>
+                      </LinearGradient>
+                    </LinearGradient>
+                  ))}
+                </ScrollView>
+              </View>
             )}
             <GestureTutorial
               visible={showGestureTip}
@@ -678,39 +822,7 @@ export default function DiscoverScreen() {
                 setGestureTipSeen();
               }}
             />
-            <View style={{ marginTop: 12 }}>
-              <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginTop: 10 }}
-              contentContainerStyle={{ gap: 8 }}
-            >
-              {categories.map((c) => {
-                const isActive = filters.categories?.includes(c.value);
-                return (
-                  <Pressable
-                    key={c.value}
-                    onPress={() => {
-                      const current = filters.categories ?? [];
-                      const next = isActive
-                        ? current.filter((x) => x !== c.value)
-                        : [...current, c.value];
-                      handleFiltersChange({
-                        ...filters,
-                        categories: next.length > 0 ? next : undefined,
-                      });
-                    }}
-                    style={[s.categoryPill, isActive && s.categoryPillActive]}
-                  >
-                    <Text style={[s.categoryPillText, isActive && s.categoryPillTextActive]}>
-                      {c.emoji} {c.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
           </View>
         }
         renderItem={({ item }) => {
@@ -730,13 +842,13 @@ export default function DiscoverScreen() {
             return (
               <View style={s.endCard}>
                 <Text style={s.endCardTitle}>
-                  {quizLabels ? `That's all for\n${quizLabels}` : "You've seen everything"}
+                  {quizLabels ? `That's the good stuff for ${quizLabels}.` : "You've seen it all."}
                 </Text>
                 <Text style={s.endCardSub}>
-                  We found more events based on your interests
+                  {quizLabels ? "Here's what else fits your taste —" : "More events based on your interests —"}
                 </Text>
                 <Pressable onPress={expandToInterests} style={s.endCardButton}>
-                  <Text style={s.endCardButtonText}>Keep exploring →</Text>
+                  <Text style={s.endCardButtonText}>Keep exploring</Text>
                 </Pressable>
               </View>
             );
@@ -772,12 +884,18 @@ export default function DiscoverScreen() {
             </View>
           ) : (
             <View style={{ paddingVertical: 48, alignItems: "center" }}>
-              <Text style={s.heading}>No events matched</Text>
+              <Text style={s.heading}>Nothing here.</Text>
               <Text style={[s.sub, { textAlign: "center", maxWidth: 260 }]}>
-                Try broadening your filters or explore a different category.
+                Try a wider date range or a different category.
               </Text>
-              <Pressable onPress={reset} style={s.primaryButton}>
-                <Text style={s.primaryButtonText}>Start over</Text>
+              <Pressable
+                onPress={() => goToResults({ ...filters, dateFrom: undefined, dateTo: undefined, distance: "anywhere" }, { skipTransition: true })}
+                style={s.primaryButton}
+              >
+                <Text style={s.primaryButtonText}>Broaden search</Text>
+              </Pressable>
+              <Pressable onPress={reset} style={s.browseLinkButton}>
+                <Text style={s.browseLinkText}>Start over</Text>
               </Pressable>
             </View>
           )
@@ -939,27 +1057,25 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  resultsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  resultsHeaderTextBlock: {
+    flex: 1,
+    paddingRight: 12,
+  },
   startOverText: {
     ...typography.sm,
-    color: colors.primary,
-    fontWeight: "600",
+    color: colors.textSecondary,
+    textDecorationLine: "underline",
+    paddingTop: 3,
   },
   resultsScroll: {
     paddingTop: 16,
     paddingHorizontal: spacing.page,
     paddingBottom: 40,
-  },
-  eventCountLabel: {
-    ...typography.sm,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  personalizeHint: { ...typography.xs, color: colors.textMuted, marginBottom: 12 },
-  personalizeLink: {
-    ...typography.sm,
-    color: colors.primary,
-    textDecorationLine: "underline",
-    marginBottom: 12,
   },
   browseLinkButton: {
     paddingVertical: 8,
@@ -969,33 +1085,13 @@ const s = StyleSheet.create({
     color: colors.primary,
     textDecorationLine: "underline",
   },
-  categoryPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-  },
-  categoryPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  categoryPillText: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    fontWeight: "500",
-  },
-  categoryPillTextActive: {
-    color: colors.white,
-  },
-  resultsHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
   resultsHeading: {
     ...typography.sectionHeading,
+  },
+  resultsSubline: {
+    ...typography.xs,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   planCta: {
     flexDirection: "row",
@@ -1073,6 +1169,46 @@ const s = StyleSheet.create({
   dividerLabel: {
     ...typography.xs,
     color: colors.textSecondary,
+    fontWeight: "500",
+  },
+  transitionIcon: {
+    fontSize: 36,
+    color: colors.primary,
+  },
+  transitionMsg: {
+    ...typography.sectionHeading,
+    textAlign: "center",
+    color: colors.foreground,
+  },
+  weekendSection: {
+    marginBottom: 16,
+  },
+  weekendHeading: {
+    ...typography.h3,
+    marginBottom: 10,
+  },
+  weekendCard: {
+    width: 140,
+    height: 160,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+  weekendCardOverlay: {
+    padding: 12,
+    paddingTop: 48,
+  },
+  weekendCardTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#fff",
+    lineHeight: 18,
+    marginBottom: 3,
+  },
+  weekendCardCategory: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.75)",
+    textTransform: "capitalize",
     fontWeight: "500",
   },
 });
