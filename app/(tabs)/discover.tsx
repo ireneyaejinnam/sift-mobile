@@ -156,6 +156,7 @@ export default function DiscoverScreen() {
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
+  const expandedInterestCatsRef = useRef<EventCategory[]>([]);
 
   const weekendPicks = useMemo(() => {
     const today = new Date();
@@ -254,6 +255,10 @@ export default function DiscoverScreen() {
   );
 
   const reset = useCallback(() => {
+    loadingRef.current = false;
+    expandedToInterestsRef.current = false;
+    expandedInterestCatsRef.current = [];
+    sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
     setStep("category");
     setFilters({});
@@ -280,159 +285,161 @@ export default function DiscoverScreen() {
     let msgTimer2: ReturnType<typeof setTimeout> | undefined;
     let minDelay: Promise<void>;
 
-    if (!opts?.skipTransition) {
-      // Show transition screen while fetching — minimum 1500ms, waits for fetch if slower
-      setIsTransitioning(true);
-      setTransitionMsgIdx(0);
-      transitionRotate.value = 0;
-      transitionRotate.value = withRepeat(
-        withTiming(360, { duration: 1200, easing: Easing.linear }),
-        -1,
-        false
-      );
-      msgTimer1 = setTimeout(() => setTransitionMsgIdx(1), 500);
-      msgTimer2 = setTimeout(() => setTransitionMsgIdx(2), 1000);
-      minDelay = new Promise<void>((resolve) => setTimeout(resolve, 1500));
-    } else {
-      setLoading(true);
-      setStep("results");
-      minDelay = Promise.resolve();
-    }
+    try {
+      if (!opts?.skipTransition) {
+        // Show transition screen while fetching — minimum 1500ms, waits for fetch if slower
+        setIsTransitioning(true);
+        setTransitionMsgIdx(0);
+        transitionRotate.value = 0;
+        transitionRotate.value = withRepeat(
+          withTiming(360, { duration: 1200, easing: Easing.linear }),
+          -1,
+          false
+        );
+        msgTimer1 = setTimeout(() => setTransitionMsgIdx(1), 500);
+        msgTimer2 = setTimeout(() => setTransitionMsgIdx(2), 1000);
+        minDelay = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+      } else {
+        setLoading(true);
+        setStep("results");
+        minDelay = Promise.resolve();
+      }
 
-    // Priority ordering:
-    //   Tier 1: Quiz categories (what user just picked)
-    //   Tier 2: Onboarding interests (logged-in only, skip for guest)
-    //   Tier 3: Everything else in the date range
+      // Priority ordering:
+      //   Tier 1: Quiz categories (what user just picked)
+      //   Tier 2: Onboarding interests (logged-in only, skip for guest)
+      //   Tier 3: Everything else in the date range
 
-    const applyDistanceFilter = (list: SiftEvent[]) =>
-      list.filter((e) => {
-        if (f.boroughs && f.boroughs.length > 0) {
-          return f.boroughs.includes(e.borough as BoroughName);
-        }
-        if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-        if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-        return true;
-      });
-
-
-    // Re-rank within a tier by composite score × taste weight.
-    const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
-      if (Object.keys(weights).length === 0) return tier;
-      return [...tier].sort((a, b) => {
-        const wa = weights[a.category] ?? 1.0;
-        const wb = weights[b.category] ?? 1.0;
-        return computeEventScore(b, wb) - computeEventScore(a, wa);
-      });
-    };
-
-    // Events arrive pre-sorted by composite score (vibe + timeliness + completeness).
-    // tieredSort groups them into tiers while preserving that order within each tier.
-    const tieredSort = (all: SiftEvent[]) => {
-      let pool = applyDistanceFilter(all);
-
-      // Apply date range filter if user picked dates
-      if (f.dateFrom && f.dateTo) {
-        const from = new Date(f.dateFrom);
-        const to = new Date(f.dateTo);
-        from.setDate(from.getDate() - 1); // ±1 day padding
-        to.setDate(to.getDate() + 1);
-        pool = pool.filter((e) => {
-          const start = new Date(e.startDate);
-          const end = new Date(e.endDate ?? e.startDate);
-          return start <= to && end >= from;
+      const applyDistanceFilter = (list: SiftEvent[]) =>
+        list.filter((e) => {
+          if (f.boroughs && f.boroughs.length > 0) {
+            return f.boroughs.includes(e.borough as BoroughName);
+          }
+          if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+          if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+          return true;
         });
-      }
 
-      const quizCats = f.categories ?? [];
+      // Re-rank within a tier by composite score × taste weight.
+      const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
+        if (Object.keys(weights).length === 0) return tier;
+        return [...tier].sort((a, b) => {
+          const wa = weights[a.category] ?? 1.0;
+          const wb = weights[b.category] ?? 1.0;
+          return computeEventScore(b, wb) - computeEventScore(a, wa);
+        });
+      };
 
-      // Tier 1: matches quiz categories
-      const tier1 = quizCats.length > 0
-        ? pool.filter((e) => quizCats.includes(e.category))
-            .map((e) => ({ ...e, matchReason: "Matches your mood" }))
-        : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
+      // Events arrive pre-sorted by composite score (vibe + timeliness + completeness).
+      // tieredSort groups them into tiers while preserving that order within each tier.
+      const tieredSort = (all: SiftEvent[]) => {
+        let pool = applyDistanceFilter(all);
 
-      if (quizCats.length === 0) return tier1;
-
-      const tier1Ids = new Set(tier1.map((e) => e.id));
-
-      // Tier 2: matches onboarding interests (logged-in only)
-      let tier2: SiftEvent[] = [];
-      if (userProfile?.interests?.length) {
-        const interestCats = userProfile.interests
-          .map((i) => INTEREST_TO_CATEGORY[i])
-          .filter(Boolean);
-        tier2 = pool
-          .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
-          .map((e) => ({ ...e, matchReason: "Based on your interests" }));
-      }
-
-      const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
-
-      // Tier 3: everything else
-      const tier3 = pool
-        .filter((e) => !usedIds.has(e.id))
-        .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
-
-      // Re-rank within each tier by composite score × learned category weights
-      const weights = tasteProfile?.categoryWeights ?? {};
-      return [
-        ...applyPrefs(tier1, weights),
-        ...applyPrefs(tier2, weights),
-        ...applyPrefs(tier3, weights),
-      ];
-    };
-
-    const fetchAndSort = async (): Promise<SiftEvent[]> => {
-      try {
-        const categoryWeights = tasteProfile?.categoryWeights;
-        const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
-        if (allEvents.length > 0) {
-          return tieredSort(allEvents).filter(
-            (e) => !sessionDismissedRef.current.has(e.id)
-          );
+        // Apply date range filter if user picked dates
+        if (f.dateFrom && f.dateTo) {
+          const from = new Date(f.dateFrom);
+          const to = new Date(f.dateTo);
+          from.setDate(from.getDate() - 1); // ±1 day padding
+          to.setDate(to.getDate() + 1);
+          pool = pool.filter((e) => {
+            const start = new Date(e.startDate);
+            const end = new Date(e.endDate ?? e.startDate);
+            return start <= to && end >= from;
+          });
         }
-        return getAllCandidates(f, [], userProfile);
-      } catch {
-        showToast("Couldn't connect — showing cached results");
-        return getAllCandidates(f, [], userProfile);
+
+        const quizCats = f.categories ?? [];
+
+        // Tier 1: matches quiz categories
+        const tier1 = quizCats.length > 0
+          ? pool.filter((e) => quizCats.includes(e.category))
+              .map((e) => ({ ...e, matchReason: "Matches your mood" }))
+          : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
+
+        if (quizCats.length === 0) return tier1;
+
+        const tier1Ids = new Set(tier1.map((e) => e.id));
+
+        // Tier 2: matches onboarding interests (logged-in only)
+        let tier2: SiftEvent[] = [];
+        if (userProfile?.interests?.length) {
+          const interestCats = userProfile.interests
+            .map((i) => INTEREST_TO_CATEGORY[i])
+            .filter(Boolean);
+          tier2 = pool
+            .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
+            .map((e) => ({ ...e, matchReason: "Based on your interests" }));
+        }
+
+        const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
+
+        // Tier 3: everything else
+        const tier3 = pool
+          .filter((e) => !usedIds.has(e.id))
+          .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
+
+        // Re-rank within each tier by composite score × learned category weights
+        const weights = tasteProfile?.categoryWeights ?? {};
+        return [
+          ...applyPrefs(tier1, weights),
+          ...applyPrefs(tier2, weights),
+          ...applyPrefs(tier3, weights),
+        ];
+      };
+
+      const fetchAndSort = async (): Promise<SiftEvent[]> => {
+        try {
+          const categoryWeights = tasteProfile?.categoryWeights;
+          const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
+          if (allEvents.length > 0) {
+            return tieredSort(allEvents).filter(
+              (e) => !sessionDismissedRef.current.has(e.id)
+            );
+          }
+          return getAllCandidates(f, [], userProfile);
+        } catch {
+          showToast("Couldn't connect — showing cached results");
+          return getAllCandidates(f, [], userProfile);
+        }
+      };
+
+      // Run fetch and minimum transition delay in parallel
+      const [resultEvents] = await Promise.all([fetchAndSort(), minDelay]);
+
+      clearTimeout(msgTimer1);
+      clearTimeout(msgTimer2);
+
+      // Data is ready — populate state before switching screens so no skeleton flash
+      expandedToInterestsRef.current = false;
+      const initial: Slot[] = resultEvents.length > 0
+        ? resultEvents.slice(0, 3).map((e) => ({
+            event: e,
+            key: `${e.id}-${Date.now()}-${Math.random()}`,
+            type: 'event' as const,
+          }))
+        : [{ event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
+      setResultPool(resultEvents);
+      setSlots(initial);
+      setDismissedIds([]);
+
+      if (!opts?.skipTransition) {
+        setIsTransitioning(false);
+        setStep("results");
+      } else {
+        setLoading(false);
       }
-    };
+      track("recommendations_viewed", {
+        count: initial.length,
+        categories: f.categories,
+      });
 
-    // Run fetch and minimum transition delay in parallel
-    const [resultEvents] = await Promise.all([fetchAndSort(), minDelay]);
-
-    clearTimeout(msgTimer1);
-    clearTimeout(msgTimer2);
-
-    // Data is ready — populate state before switching screens so no skeleton flash
-    expandedToInterestsRef.current = false;
-    const initial: Slot[] = resultEvents.length > 0
-      ? resultEvents.slice(0, 3).map((e) => ({
-          event: e,
-          key: `${e.id}-${Date.now()}-${Math.random()}`,
-          type: 'event' as const,
-        }))
-      : [{ event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
-    setResultPool(resultEvents);
-    setSlots(initial);
-    setDismissedIds([]);
-
-    if (!opts?.skipTransition) {
-      setIsTransitioning(false);
-      setStep("results");
-    } else {
-      setLoading(false);
+      // Show gesture tutorial on first ever results view
+      hasGestureTipSeen().then((seen) => {
+        if (!seen) setShowGestureTip(true);
+      });
+    } finally {
+      loadingRef.current = false;
     }
-    loadingRef.current = false;
-    track("recommendations_viewed", {
-      count: initial.length,
-      categories: f.categories,
-    });
-
-    // Show gesture tutorial on first ever results view
-    hasGestureTipSeen().then((seen) => {
-      if (!seen) setShowGestureTip(true);
-    });
   }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
@@ -440,10 +447,18 @@ export default function DiscoverScreen() {
     await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    goToResults(filters, { skipTransition: true });
-    setTimeout(() => setRefreshing(false), 600);
+    sessionDismissedRef.current = new Set();
+    const wasExpanded = expandedToInterestsRef.current;
+    expandedToInterestsRef.current = false;
+    // If user had already expanded to interests, include those categories in the refresh
+    // so they don't land back at the end card with only the original quiz filters
+    const refreshCats = wasExpanded && expandedInterestCatsRef.current.length > 0
+      ? [...(filters.categories ?? []), ...expandedInterestCatsRef.current]
+      : filters.categories;
+    await goToResults({ ...filters, categories: refreshCats?.length ? refreshCats : undefined }, { skipTransition: true });
+    setRefreshing(false);
   }, [filters, goToResults]);
 
   // Returns the next slot update — end card if pool exhausted, otherwise next event
@@ -486,7 +501,8 @@ export default function DiscoverScreen() {
       }];
     }
 
-    return prev.filter((_, i) => i !== idx);
+    // All events exhausted (including post-expand batch) — show done card
+    return [{ event: null, key: `done-${Date.now()}`, type: 'done' as const }];
   };
 
   const handleDismissEvent = useCallback(
@@ -556,6 +572,7 @@ export default function DiscoverScreen() {
       return;
     }
 
+    expandedInterestCatsRef.current = interestCats;
     setResultPool((prev) => [...prev, ...fresh]);
     setSlots(
       fresh.slice(0, 3).map((e) => ({
