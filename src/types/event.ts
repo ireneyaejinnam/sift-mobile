@@ -14,6 +14,13 @@ export type EventDistance = "neighborhood" | "borough" | "anywhere";
 
 export type PriceRange = "free" | "under-20" | "under-50" | "any";
 
+export type BoroughName =
+  | "Manhattan"
+  | "Brooklyn"
+  | "Queens"
+  | "Bronx"
+  | "Staten Island";
+
 export interface EventSession {
   startDate: string;    // YYYY-MM-DD
   time?: string;        // e.g. "7:00 PM"
@@ -33,7 +40,7 @@ export interface SiftEvent {
   description: string;
   location: string;      // primary venue (first session, or "Multiple venues")
   address: string;       // primary address
-  borough: "Manhattan" | "Brooklyn" | "Queens" | "Bronx" | "Staten Island";
+  borough: BoroughName;
   startDate: string;     // earliest upcoming session date
   endDate?: string;      // latest session date (undefined = single session)
   time: string;          // primary session time

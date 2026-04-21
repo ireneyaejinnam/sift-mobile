@@ -60,7 +60,7 @@ import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedE
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
-import type { EventCategory, EventDistance, SiftEvent } from "@/types/event";
+import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
 
 const TRANSITION_MSGS = [
@@ -82,15 +82,6 @@ const PICK_GRADIENTS: Partial<Record<EventCategory, [string, string]>> = {
   popups:    ["#B87050", "#6A3820"],
 };
 
-function buildResultsHeader(
-  count: number,
-): { headline: string; subline: string } {
-  if (count === 0) return { headline: "Nothing matched", subline: "Try a broader search" };
-  return {
-    headline: "Your picks",
-    subline: `${count} event${count === 1 ? "" : "s"} · sorted for you`,
-  };
-}
 
 type CatIcon = React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
 
@@ -107,9 +98,12 @@ const categories: { value: EventCategory; label: string; emoji: string; Icon: Ca
   { value: "popups",    label: "Pop-ups & Sales",  emoji: "🛍️", Icon: ShoppingBag, chipBg: "#F2E4D8", chipFg: "#7A4028" },
 ];
 
-const distances: { value: EventDistance; label: string }[] = [
-  { value: "neighborhood", label: "Keep it close" },
-  { value: "borough", label: "I'll travel a bit" },
+const boroughOptions: { value: BoroughName; chipBg: string; chipFg: string }[] = [
+  { value: "Manhattan",    chipBg: "#E8EDF5", chipFg: "#3A5FA0" },
+  { value: "Brooklyn",     chipBg: "#F5EDE8", chipFg: "#A0593A" },
+  { value: "Queens",       chipBg: "#EDE8F5", chipFg: "#6B3AA0" },
+  { value: "Bronx",        chipBg: "#E8F5ED", chipFg: "#3AA05F" },
+  { value: "Staten Island",chipBg: "#E8F4F5", chipFg: "#3A8FA0" },
 ];
 
 const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
@@ -312,6 +306,9 @@ export default function DiscoverScreen() {
 
     const applyDistanceFilter = (list: SiftEvent[]) =>
       list.filter((e) => {
+        if (f.boroughs && f.boroughs.length > 0) {
+          return f.boroughs.includes(e.borough as BoroughName);
+        }
         if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
         if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
         return true;
@@ -751,42 +748,46 @@ export default function DiscoverScreen() {
               </View>
             )}
 
-            {/* ── Distance step ── */}
+            {/* ── Distance / Borough step ── */}
             {step === "distance" && (
               <View>
                 <View style={[s.catHeader, { marginTop: 60 }]}>
-                  <Text style={s.catHeading}>How far will you go?</Text>
-                  <Text style={s.catSub}>We'll keep it relevant.</Text>
+                  <Text style={s.catHeading}>Where in NYC?</Text>
+                  <Text style={s.catSub}>Pick one or more neighborhoods.</Text>
                 </View>
                 <View style={s.catGrid}>
-                  {distances.map((d) => {
-                    const selected = filters.distance === d.value;
+                  {boroughOptions.map((b) => {
+                    const selected = (filters.boroughs ?? []).includes(b.value);
                     return (
                       <Pressable
-                        key={d.value}
+                        key={b.value}
                         style={[s.catTile, selected && s.catTileSelected]}
                         onPress={() => {
-                          const f = { ...filters, distance: d.value };
-                          setFilters(f);
-                          setTimeout(() => goToResults(f), 200);
+                          const cur = filters.boroughs ?? [];
+                          const next = selected
+                            ? cur.filter((x) => x !== b.value)
+                            : [...cur, b.value];
+                          setFilters((f) => ({ ...f, boroughs: next.length > 0 ? next : undefined }));
                         }}
                       >
-                        <View style={[s.catIconWrap, { backgroundColor: selected ? "rgba(255,255,255,0.25)" : "#E8EEF7" }]}>
-                          <MapPin size={16} color={selected ? colors.white : "#3B5A84"} strokeWidth={1.5} />
+                        <View style={[s.catIconWrap, { backgroundColor: selected ? "rgba(255,255,255,0.25)" : b.chipBg }]}>
+                          <MapPin size={16} color={selected ? colors.white : b.chipFg} strokeWidth={1.5} />
                         </View>
                         <Text style={[s.catLabel, selected && s.catLabelSelected]} numberOfLines={1}>
-                          {d.label}
+                          {b.value}
                         </Text>
                       </Pressable>
                     );
                   })}
-                  {/* Anywhere tile */}
+                </View>
+                {/* Anywhere — own centered row */}
+                <View style={{ alignItems: "center", marginTop: 20 }}>
                   <Pressable
                     style={s.catTile}
                     onPress={() => {
-                      const f = { ...filters, distance: "anywhere" as EventDistance };
+                      const f = { ...filters, boroughs: undefined };
                       setFilters(f);
-                      setTimeout(() => goToResults(f), 200);
+                      goToResults(f);
                     }}
                   >
                     <LinearGradient
@@ -798,7 +799,16 @@ export default function DiscoverScreen() {
                     <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
                       <Sparkles size={16} color="#3A6EA5" strokeWidth={1.5} />
                     </View>
-                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Anywhere in NYC</Text>
+                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Anywhere</Text>
+                  </Pressable>
+                </View>
+                <View style={[s.catButtons, { marginTop: 28 }]}>
+                  <Pressable
+                    onPress={() => goToResults(filters)}
+                    disabled={!(filters.boroughs?.length)}
+                    style={[s.catContinueButton, !(filters.boroughs?.length) && { opacity: 0.4 }]}
+                  >
+                    <Text style={s.catContinueText}>Let's explore!</Text>
                   </Pressable>
                 </View>
               </View>
@@ -814,23 +824,24 @@ export default function DiscoverScreen() {
   return (
     <View style={s.container}>
       {/* Sticky header — stays put while list scrolls */}
-      <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
-        {(() => {
-          const { headline, subline } = buildResultsHeader(resultPool.length);
-          return (
-            <View style={s.resultsHeaderRow}>
-              <View style={s.resultsHeaderTextBlock}>
-                <Text style={s.resultsHeading}>{loading ? "Sorting picks..." : headline}</Text>
-                {!loading && resultPool.length > 0 && (
-                  <Text style={s.resultsSubline}>{subline}</Text>
-                )}
-              </View>
-              <Pressable onPress={reset} hitSlop={8}>
-                <Text style={s.startOverText}>Start over</Text>
-              </Pressable>
-            </View>
-          );
-        })()}
+      <View style={[s.stickyHeader, { paddingTop: insets.top + 14 }]}>
+        <View style={s.resultsHeaderRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.resultsHeading}>
+              {loading ? "Sorting picks..." : (resultPool.length > 0
+                ? (userProfile ? "Your Top Picks" : "Here's what we found")
+                : "Nothing matched")}
+            </Text>
+            {resultPool.length > 0 && (
+              <Text style={s.eventCountLabel}>
+                {resultPool.length} event{resultPool.length !== 1 ? "s" : ""} · swipe to save or skip
+              </Text>
+            )}
+          </View>
+          <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
+            <Text style={s.startOverText}>Start over</Text>
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -1207,25 +1218,29 @@ const s = StyleSheet.create({
   },
   stickyHeader: {
     paddingHorizontal: spacing.page,
-    paddingBottom: 8,
-    backgroundColor: colors.background,
+    paddingBottom: 12,
+    backgroundColor: colors.white,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   resultsHeaderRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
   },
-  resultsHeaderTextBlock: {
-    flex: 1,
-    paddingRight: 12,
+  startOverButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
   },
   startOverText: {
-    ...typography.sm,
+    ...typography.xs,
     color: colors.textSecondary,
-    textDecorationLine: "underline",
-    paddingTop: 3,
+    fontWeight: "500",
   },
   resultsScroll: {
     paddingTop: 16,
@@ -1241,12 +1256,15 @@ const s = StyleSheet.create({
     textDecorationLine: "underline",
   },
   resultsHeading: {
-    ...typography.sectionHeading,
+    fontSize: 20,
+    fontWeight: "700",
+    color: colors.foreground,
+    letterSpacing: -0.3,
   },
-  resultsSubline: {
+  eventCountLabel: {
     ...typography.xs,
     color: colors.textMuted,
-    marginTop: 2,
+    marginTop: 3,
   },
   planCta: {
     flexDirection: "row",
