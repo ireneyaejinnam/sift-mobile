@@ -966,7 +966,7 @@ export default function DiscoverScreen() {
                 Try a wider date range or a different category.
               </Text>
               <Pressable
-                onPress={() => goToResults({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined }, { skipTransition: true })}
+                onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
                 style={s.primaryButton}
               >
                 <Text style={s.primaryButtonText}>Broaden search</Text>
