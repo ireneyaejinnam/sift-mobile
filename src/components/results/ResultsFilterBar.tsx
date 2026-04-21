@@ -6,31 +6,44 @@ import {
   ScrollView,
   StyleSheet,
 } from "react-native";
-import { Check, ChevronDown, X } from "lucide-react-native";
+import DateRangePicker from "@/components/quiz/DateRangePicker";
+import {
+  Check,
+  ChevronDown,
+  Drama,
+  Dumbbell,
+  Laugh,
+  Moon,
+  Music,
+  Palette,
+  ShoppingBag,
+  Trees,
+  Utensils,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react-native";
 import BottomSheet from "@/components/ui/BottomSheet";
 import type { Filters, Vibe } from "@/types/quiz";
-import type { EventCategory, EventDistance, PriceRange } from "@/types/event";
+import type { BoroughName, EventCategory, PriceRange } from "@/types/event";
 import { colors, radius, typography, spacing } from "@/lib/theme";
 
 // ── Option data ────────────────────────────────────────────
 
-const CATEGORIES: { value: EventCategory; label: string; emoji: string }[] = [
-  { value: "arts", label: "Arts & Culture", emoji: "🎨" },
-  { value: "music", label: "Live Music", emoji: "🎵" },
-  { value: "outdoors", label: "Outdoors", emoji: "🌿" },
-  { value: "fitness", label: "Fitness", emoji: "🏃" },
-  { value: "comedy", label: "Comedy", emoji: "😂" },
-  { value: "food", label: "Food & Drink", emoji: "🍷" },
-  { value: "nightlife", label: "Nightlife", emoji: "🌙" },
-  { value: "theater", label: "Theater", emoji: "🎭" },
-  { value: "workshops", label: "Workshops", emoji: "🛠️" },
-  { value: "popups", label: "Pop-ups", emoji: "🛍️" },
+const CATEGORIES: { value: EventCategory; label: string; Icon: LucideIcon; chipBg: string; chipFg: string }[] = [
+  { value: "arts",      label: "Arts & Culture", Icon: Palette,     chipBg: "#F5EDE8", chipFg: "#8B5E3C" },
+  { value: "music",     label: "Live Music",     Icon: Music,        chipBg: "#E8EFF5", chipFg: "#2C4F70" },
+  { value: "outdoors",  label: "Outdoors",       Icon: Trees,        chipBg: "#E8F2EC", chipFg: "#2D6644" },
+  { value: "fitness",   label: "Fitness",        Icon: Dumbbell,     chipBg: "#F5ECEB", chipFg: "#7A2E28" },
+  { value: "comedy",    label: "Comedy",         Icon: Laugh,        chipBg: "#F5F2E8", chipFg: "#6E6020" },
+  { value: "food",      label: "Food & Drink",   Icon: Utensils,     chipBg: "#F5F0E8", chipFg: "#7A4810" },
+  { value: "nightlife", label: "Nightlife",      Icon: Moon,         chipBg: "#EEEAF5", chipFg: "#3A2060" },
+  { value: "theater",   label: "Theater",        Icon: Drama,        chipBg: "#E8EFF5", chipFg: "#1E4060" },
+  { value: "workshops", label: "Workshops",      Icon: Wrench,       chipBg: "#ECF2E8", chipFg: "#304E20" },
+  { value: "popups",    label: "Pop-ups",        Icon: ShoppingBag,  chipBg: "#F5EDEA", chipFg: "#6A3820" },
 ];
 
-const DISTANCES: { value: EventDistance; label: string }[] = [
-  { value: "neighborhood", label: "Keep it close" },
-  { value: "borough", label: "I'll travel a bit" },
-  { value: "anywhere", label: "Anywhere in NYC" },
+const BOROUGHS: BoroughName[] = [
+  "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island",
 ];
 
 const BUDGETS: { value: PriceRange; label: string }[] = [
@@ -62,38 +75,25 @@ function Chip({
   label,
   active,
   onPress,
-  onClear,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
-  onClear?: () => void;
 }) {
   return (
-    <View style={styles.chipRow}>
-      <Pressable
-        onPress={onPress}
-        style={[styles.chip, active && styles.chipActive]}
-      >
-        <Text style={[styles.chipText, active && styles.chipTextActive]}>
-          {label}
-        </Text>
-        <ChevronDown
-          size={11}
-          strokeWidth={2}
-          color={active ? colors.primary : colors.textSecondary}
-        />
-      </Pressable>
-      {onClear && (
-        <Pressable
-          onPress={onClear}
-          style={styles.chipClear}
-          hitSlop={6}
-        >
-          <X size={10} strokeWidth={2.5} color={colors.primary} />
-        </Pressable>
-      )}
-    </View>
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, active && styles.chipActive]}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {label}
+      </Text>
+      <ChevronDown
+        size={11}
+        strokeWidth={2}
+        color={active ? colors.primary : colors.textSecondary}
+      />
+    </Pressable>
   );
 }
 
@@ -101,13 +101,17 @@ function Chip({
 
 function SheetOption({
   label,
-  emoji,
+  Icon,
+  iconBg,
+  iconFg,
   selected,
   multi,
   onPress,
 }: {
   label: string;
-  emoji?: string;
+  Icon?: LucideIcon;
+  iconBg?: string;
+  iconFg?: string;
   selected: boolean;
   multi?: boolean;
   onPress: () => void;
@@ -123,7 +127,11 @@ function SheetOption({
       >
         {selected && <Check size={9} color={colors.white} strokeWidth={3} />}
       </View>
-      {emoji && <Text style={styles.optionEmoji}>{emoji}</Text>}
+      {Icon && (
+        <View style={[styles.optionIconWrap, { backgroundColor: iconBg ?? colors.border }]}>
+          <Icon size={14} color={iconFg ?? colors.textSecondary} strokeWidth={1.5} />
+        </View>
+      )}
       <Text
         style={[
           styles.sheetOptionText,
@@ -138,7 +146,7 @@ function SheetOption({
 
 // ── Main ───────────────────────────────────────────────────
 
-type OpenSheet = "categories" | "distance" | "more" | null;
+type OpenSheet = "categories" | "date" | "distance" | "more" | null;
 
 interface Props {
   filters: Filters;
@@ -151,93 +159,91 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
   const cats = filters.categories ?? [];
   const categoryLabel =
     cats.length === 0
-      ? "Category"
+      ? "All Mood"
       : cats.length === 1
       ? CATEGORIES.find((c) => c.value === cats[0])?.label ?? cats[0]
-      : `${cats.length} selected`;
+      : `${cats.length} moods`;
 
   const dateLabel = filters.dateFrom
     ? filters.dateTo && filters.dateTo !== filters.dateFrom
       ? `${formatDate(filters.dateFrom)} – ${formatDate(filters.dateTo)}`
       : formatDate(filters.dateFrom)
-    : "Any date";
+    : "Flexible";
 
+  const selectedBoroughs = filters.boroughs ?? [];
   const distLabel =
-    DISTANCES.find((d) => d.value === filters.distance)?.label ?? "Any distance";
+    selectedBoroughs.length === 0
+      ? "All Borough"
+      : selectedBoroughs.length === 1
+      ? selectedBoroughs[0]
+      : `${selectedBoroughs.length} boroughs`;
 
   const moreCount = (filters.price ? 1 : 0) + (filters.vibe ? 1 : 0);
 
   return (
     <View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipBar}
-      >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
         <Chip
           label={categoryLabel}
           active={cats.length > 0}
           onPress={() => setOpenSheet("categories")}
-          onClear={
-            cats.length > 0
-              ? () => onChange({ ...filters, categories: undefined })
-              : undefined
-          }
+        />
+        <Chip
+          label={dateLabel}
+          active={!!filters.dateFrom}
+          onPress={() => setOpenSheet("date")}
         />
         <Chip
           label={distLabel}
-          active={!!filters.distance}
+          active={selectedBoroughs.length > 0}
           onPress={() => setOpenSheet("distance")}
-          onClear={
-            filters.distance
-              ? () => onChange({ ...filters, distance: undefined })
-              : undefined
-          }
         />
         <Chip
           label={moreCount > 0 ? `More (${moreCount})` : "More"}
           active={moreCount > 0}
           onPress={() => setOpenSheet("more")}
-          onClear={
-            moreCount > 0
-              ? () =>
-                  onChange({
-                    ...filters,
-                    price: undefined,
-                    vibe: undefined,
-                  })
-              : undefined
-          }
         />
       </ScrollView>
 
-      {/* Category sheet */}
+      {/* Mood sheet */}
       <BottomSheet
         open={openSheet === "categories"}
         onClose={() => setOpenSheet(null)}
-        title="Category"
+        title="Mood"
       >
         <View style={styles.sheetContent}>
-          <Text style={styles.sheetSectionLabel}>SELECT UP TO 3</Text>
+          {/* Select All */}
+          <SheetOption
+            label="Select All"
+            selected={cats.length === 0}
+            multi
+            onPress={() => onChange({ ...filters, categories: undefined })}
+          />
+          <View style={styles.sheetDivider} />
           {CATEGORIES.map((c) => {
-            const isSelected = cats.includes(c.value);
-            const atLimit = cats.length >= 3 && !isSelected;
+            // Visually checked when all selected (cats empty) or explicitly selected
+            const isSelected = cats.length === 0 || cats.includes(c.value);
+            const atLimit = cats.length >= 3 && !cats.includes(c.value);
             return (
               <SheetOption
                 key={c.value}
                 label={c.label}
-                emoji={c.emoji}
+                Icon={c.Icon}
+                iconBg={c.chipBg}
+                iconFg={c.chipFg}
                 selected={isSelected}
                 multi
                 onPress={() => {
                   if (atLimit) return;
-                  const next = isSelected
-                    ? cats.filter((x) => x !== c.value)
-                    : [...cats, c.value];
-                  onChange({
-                    ...filters,
-                    categories: next.length > 0 ? next : undefined,
-                  });
+                  if (cats.length === 0) {
+                    // Deselect from "all" — select only this one
+                    onChange({ ...filters, categories: [c.value] });
+                  } else {
+                    const next = cats.includes(c.value)
+                      ? cats.filter((x) => x !== c.value)
+                      : [...cats, c.value];
+                    onChange({ ...filters, categories: next.length > 0 ? next : undefined });
+                  }
                 }}
               />
             );
@@ -245,24 +251,66 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
         </View>
       </BottomSheet>
 
-      {/* Distance sheet */}
+      {/* Date sheet */}
+      <BottomSheet
+        open={openSheet === "date"}
+        onClose={() => setOpenSheet(null)}
+        title="Date"
+      >
+        <View style={styles.sheetContent}>
+          <SheetOption
+            label="Flexible"
+            selected={!filters.dateFrom}
+            multi
+            onPress={() => onChange({ ...filters, dateFrom: undefined, dateTo: undefined })}
+          />
+          <View style={styles.sheetDivider} />
+          <View style={{ marginTop: 4 }}>
+            <DateRangePicker
+              dateFrom={filters.dateFrom}
+              dateTo={filters.dateTo}
+              onChange={(from, to) => onChange({ ...filters, dateFrom: from, dateTo: to })}
+            />
+          </View>
+        </View>
+      </BottomSheet>
+
+      {/* Borough sheet */}
       <BottomSheet
         open={openSheet === "distance"}
         onClose={() => setOpenSheet(null)}
-        title="Distance"
+        title="Borough"
       >
         <View style={styles.sheetContent}>
-          {DISTANCES.map((d) => (
-            <SheetOption
-              key={d.value}
-              label={d.label}
-              selected={filters.distance === d.value}
-              onPress={() => {
-                onChange({ ...filters, distance: d.value });
-                setOpenSheet(null);
-              }}
-            />
-          ))}
+          {/* Select All */}
+          <SheetOption
+            label="Select All"
+            selected={selectedBoroughs.length === 0}
+            multi
+            onPress={() => onChange({ ...filters, boroughs: undefined })}
+          />
+          <View style={styles.sheetDivider} />
+          {BOROUGHS.map((b) => {
+            const isSelected = selectedBoroughs.length === 0 || selectedBoroughs.includes(b);
+            return (
+              <SheetOption
+                key={b}
+                label={b}
+                selected={isSelected}
+                multi
+                onPress={() => {
+                  if (selectedBoroughs.length === 0) {
+                    onChange({ ...filters, boroughs: [b] });
+                  } else {
+                    const next = selectedBoroughs.includes(b)
+                      ? selectedBoroughs.filter((x) => x !== b)
+                      : [...selectedBoroughs, b];
+                    onChange({ ...filters, boroughs: next.length > 0 ? next : undefined });
+                  }
+                }}
+              />
+            );
+          })}
         </View>
       </BottomSheet>
 
@@ -314,17 +362,13 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 4,
   },
-  chipRow: {
-    flexDirection: "row",
-    alignItems: "stretch",
-  },
   chip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingVertical: 7,
     paddingHorizontal: 12,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,
@@ -340,16 +384,6 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.primary,
     fontWeight: "600",
-  },
-  chipClear: {
-    paddingHorizontal: 8,
-    justifyContent: "center",
-    borderWidth: 1,
-    borderLeftWidth: 0,
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryLight,
-    borderTopRightRadius: radius.sm,
-    borderBottomRightRadius: radius.sm,
   },
   sheetContent: {
     gap: 4,
@@ -378,8 +412,12 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.primary,
   },
-  optionEmoji: {
-    fontSize: 16,
+  optionIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sheetOptionText: {
     ...typography.body,

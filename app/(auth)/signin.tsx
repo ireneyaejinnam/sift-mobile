@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
     paddingVertical: 13,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: colors.primary,
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: "center",
   },
   primaryButtonDisabled: {

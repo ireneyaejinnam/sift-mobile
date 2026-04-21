@@ -542,13 +542,13 @@ const styles = StyleSheet.create({
   },
   optionRow: {
     padding: 16,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
   optionRowSelected: {
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.primaryLight,
   },
@@ -564,7 +564,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: "center",
   },
   primaryButtonPressed: {

@@ -5,7 +5,7 @@ import { useUser } from "@/context/UserContext";
 import { fetchEventById } from "@/lib/getEvents";
 import { events } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
-import { colors, radius, typography, spacing } from "@/lib/theme";
+import { colors, radius, typography, spacing, shadows } from "@/lib/theme";
 
 export default function SavedListsSection() {
   const router = useRouter();
@@ -121,22 +121,21 @@ export default function SavedListsSection() {
 }
 
 const st = StyleSheet.create({
-  section: { marginBottom: 32 },
-  h3: { ...typography.h3, marginBottom: 16 },
+  section: { marginBottom: 28 },
+  h3: { fontSize: 15, fontWeight: "600", color: colors.foreground, marginBottom: 12 },
   card: {
     backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: radius.lg,
     padding: 16,
+    ...shadows.card,
   },
   listHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  listName: { ...typography.body, fontWeight: "600", color: colors.foreground },
-  listCount: { ...typography.sm, color: colors.textSecondary },
+  listName: { ...typography.sm, fontWeight: "600", color: colors.foreground },
+  listCount: { ...typography.xs, color: colors.textMuted },
   expanded: {
     marginTop: 12,
     paddingTop: 12,
@@ -149,30 +148,30 @@ const st = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
     padding: 10,
-    backgroundColor: colors.muted,
-    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
   },
   eventTitle: { ...typography.sm, fontWeight: "500", color: colors.foreground },
-  eventMeta: { ...typography.xs, color: colors.textSecondary, marginTop: 2 },
-  unsave: { ...typography.xs, color: colors.textSecondary },
-  newRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+  eventMeta: { ...typography.xs, color: colors.textMuted, marginTop: 2 },
+  unsave: { fontSize: 11, color: colors.textMuted },
+  newRow: { flexDirection: "row", gap: 8, marginTop: 12 },
   input: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    fontSize: 16,
+    fontSize: 15,
     color: colors.foreground,
     backgroundColor: colors.white,
   },
   addBtn: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     borderRadius: radius.md,
     justifyContent: "center",
   },
-  addBtnText: { ...typography.body, fontWeight: "600", color: colors.white },
-  createText: { ...typography.sm, color: colors.textSecondary },
+  addBtnText: { fontSize: 14, fontWeight: "600", color: colors.white },
+  createText: { fontSize: 13, color: colors.primary, fontWeight: "500", marginTop: 10 },
 });

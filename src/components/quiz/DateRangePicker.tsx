@@ -78,6 +78,7 @@ export default function DateRangePicker({
         markingType="period"
         markedDates={markedDates}
         minDate={today}
+        showSixWeeks
         theme={{
           backgroundColor: colors.white,
           calendarBackground: colors.white,

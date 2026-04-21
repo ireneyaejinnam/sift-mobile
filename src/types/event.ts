@@ -10,7 +10,8 @@ export type EventCategory =
   | "workshops"
   | "popups";
 
-export type EventDistance = "neighborhood" | "borough" | "anywhere";
+export type EventDistance = "neighborhood" | "borough" | "anywhere"; // legacy — prefer BoroughName[]
+export type BoroughName = "Manhattan" | "Brooklyn" | "Queens" | "Bronx" | "Staten Island";
 
 export type PriceRange = "free" | "under-20" | "under-50" | "any";
 

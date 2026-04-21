@@ -243,10 +243,8 @@ export async function fetchEvents(
     .gte("date", dateFrom);
 
   if (dateTo) sessionQuery = sessionQuery.lte("date", dateTo);
-  if (filters.distance === "neighborhood") {
-    sessionQuery = sessionQuery.eq("borough", "Manhattan");
-  } else if (filters.distance === "borough") {
-    sessionQuery = sessionQuery.in("borough", ["Manhattan", "Brooklyn"]);
+  if (filters.boroughs?.length) {
+    sessionQuery = sessionQuery.in("borough", filters.boroughs);
   }
   if (filters.price === "free") {
     sessionQuery = sessionQuery.eq("price_min", 0);
@@ -295,10 +293,8 @@ export async function fetchEvents(
     .order("date", { ascending: true });
 
   if (dateTo) matchedSessionsQuery = matchedSessionsQuery.lte("date", dateTo);
-  if (filters.distance === "neighborhood") {
-    matchedSessionsQuery = matchedSessionsQuery.eq("borough", "Manhattan");
-  } else if (filters.distance === "borough") {
-    matchedSessionsQuery = matchedSessionsQuery.in("borough", ["Manhattan", "Brooklyn"]);
+  if (filters.boroughs?.length) {
+    matchedSessionsQuery = matchedSessionsQuery.in("borough", filters.boroughs);
   }
   if (filters.price === "under-20") {
     matchedSessionsQuery = matchedSessionsQuery.lte("price_min", 20);
@@ -378,8 +374,7 @@ export async function fetchEventById(
   let orderedSessions = sessions ?? [];
   if (filters && orderedSessions.length > 1) {
     const isMatch = (s: any) => {
-      if (filters.distance === "neighborhood" && s.borough !== "Manhattan") return false;
-      if (filters.distance === "borough" && !["Manhattan", "Brooklyn"].includes(s.borough)) return false;
+      if (filters.boroughs?.length && !filters.boroughs.includes(s.borough)) return false;
       if (filters.price === "free" && s.price_min !== 0) return false;
       if (filters.price === "under-20" && s.price_min > 20) return false;
       if (filters.price === "under-50" && s.price_min > 50) return false;

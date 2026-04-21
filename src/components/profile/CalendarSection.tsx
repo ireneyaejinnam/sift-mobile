@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
-import type { GoingEvent, SavedEvent } from "@/types/user";
+import type { GoingEvent } from "@/types/user";
 import { useUser } from "@/context/UserContext";
-import { colors, radius, typography, spacing } from "@/lib/theme";
+import { colors, radius, typography, spacing, shadows } from "@/lib/theme";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -19,15 +19,13 @@ function getDaysInMonth(year: number, month: number) {
 
 interface CalendarSectionProps {
   goingEvents: GoingEvent[];
-  savedEvents: SavedEvent[];
 }
 
 export default function CalendarSection({
   goingEvents,
-  savedEvents,
 }: CalendarSectionProps) {
   const router = useRouter();
-  const { removeSavedEvent, toggleGoing } = useUser();
+  const { toggleGoing } = useUser();
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -40,22 +38,15 @@ export default function CalendarSection({
   const days = useMemo(() => getDaysInMonth(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-  const { dateToGoing, dateToSaved } = useMemo(() => {
+  const dateToGoing = useMemo(() => {
     const dg = new Map<string, GoingEvent[]>();
-    const ds = new Map<string, SavedEvent[]>();
     goingEvents.forEach((e) => {
       const list = dg.get(e.eventDate) ?? [];
       list.push(e);
       dg.set(e.eventDate, list);
     });
-    savedEvents.forEach((s) => {
-      if (!s.eventStartDate) return;
-      const list = ds.get(s.eventStartDate) ?? [];
-      list.push(s);
-      ds.set(s.eventStartDate, list);
-    });
-    return { dateToGoing: dg, dateToSaved: ds };
-  }, [goingEvents, savedEvents]);
+    return dg;
+  }, [goingEvents]);
 
   const toDateKey = (day: number) => {
     const m = String(viewMonth + 1).padStart(2, "0");
@@ -84,12 +75,11 @@ export default function CalendarSection({
   };
 
   const selGoing = selectedDate ? dateToGoing.get(selectedDate) ?? [] : [];
-  const selSaved = selectedDate ? dateToSaved.get(selectedDate) ?? [] : [];
 
   return (
     <View style={st.section}>
       <Text style={st.h3}>My Calendar</Text>
-
+      <View style={st.card}>
       {/* Month navigation */}
       <View style={st.monthNav}>
         <Pressable onPress={prevMonth} style={st.navButton} hitSlop={8}>
@@ -111,7 +101,6 @@ export default function CalendarSection({
           if (day === null) return <View key={`pad-${i}`} style={st.dayCell} />;
           const key = toDateKey(day);
           const hasGoing = (dateToGoing.get(key) ?? []).length > 0;
-          const hasSaved = (dateToSaved.get(key) ?? []).length > 0;
           const isSelected = selectedDate === key;
           const isToday = key === todayKey;
           return (
@@ -122,16 +111,12 @@ export default function CalendarSection({
                 st.dayCell,
                 st.dayButton,
                 hasGoing && st.dayGoing,
-                hasSaved && !hasGoing && st.daySaved,
                 isToday && st.dayToday,
                 isSelected && st.daySelected,
               ]}
             >
               <Text style={[st.dayText, isToday && st.dayTextToday]}>{day}</Text>
-              <View style={st.dots}>
-                {hasGoing && <View style={st.dotGoing} />}
-                {hasSaved && <View style={st.dotSaved} />}
-              </View>
+              {hasGoing && <View style={st.dotGoing} />}
             </Pressable>
           );
         })}
@@ -146,112 +131,87 @@ export default function CalendarSection({
               day: "numeric",
             })}
           </Text>
-          {selGoing.length > 0 && (
-            <View style={{ marginBottom: 8 }}>
-              <Text style={st.detailLabel}>Going:</Text>
-              {selGoing.map((e) => (
-                <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.detailItem}>{e.eventTitle}</Text>
-                    {e.eventEndDate && e.eventEndDate !== e.eventDate && (
-                      <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
-                    )}
-                  </View>
-                  <Pressable
-                    onPress={() => toggleGoing({ eventId: e.eventId, eventTitle: e.eventTitle, eventDate: e.eventDate })}
-                    hitSlop={8}
-                    style={st.removeBtn}
-                  >
-                    <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
-                  </Pressable>
-                </Pressable>
-              ))}
-            </View>
-          )}
-          {selSaved.length > 0 && (
-            <View>
-              <Text style={st.detailLabel}>Saved:</Text>
-              {selSaved.map((s) => (
-                <Pressable key={s.eventId} style={st.eventRow} onPress={() => router.push(`/event/${s.eventId}`)}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.detailItem}>{s.eventTitle}</Text>
-                    {s.eventEndDate && s.eventEndDate !== s.eventStartDate && (
-                      <Text style={st.detailSub}>runs through {s.eventEndDate}</Text>
-                    )}
-                  </View>
-                  <Pressable
-                    onPress={() => removeSavedEvent(s.eventId)}
-                    hitSlop={8}
-                    style={st.removeBtn}
-                  >
-                    <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
-                  </Pressable>
-                </Pressable>
-              ))}
-            </View>
-          )}
-          {selGoing.length === 0 && selSaved.length === 0 && (
+          {selGoing.length > 0 ? selGoing.map((e) => (
+            <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
+              <View style={{ flex: 1 }}>
+                <Text style={st.detailItem}>{e.eventTitle}</Text>
+                {e.eventEndDate && e.eventEndDate !== e.eventDate && (
+                  <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
+                )}
+              </View>
+              <Pressable
+                onPress={() => toggleGoing({ eventId: e.eventId, eventTitle: e.eventTitle, eventDate: e.eventDate })}
+                hitSlop={8}
+                style={st.removeBtn}
+              >
+                <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
+              </Pressable>
+            </Pressable>
+          )) : (
             <Text style={st.detailEmpty}>No events this day</Text>
           )}
         </View>
       )}
+      </View>
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  section: { marginBottom: 32 },
-  h3: { ...typography.h3, marginBottom: 12 },
+  section: { marginBottom: 28 },
+  h3: { fontSize: 15, fontWeight: "600", color: colors.foreground, marginBottom: 12 },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: 16,
+    ...shadows.card,
+  },
   monthNav: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
   },
-  navButton: {
-    padding: 4,
-  },
-  monthLabel: { ...typography.sm, color: colors.textSecondary, fontWeight: "600" },
+  navButton: { padding: 4 },
+  monthLabel: { fontSize: 14, fontWeight: "600", color: colors.foreground },
   grid: { flexDirection: "row", flexWrap: "wrap" },
-  weekdayCell: { width: "14.28%", alignItems: "center", marginBottom: 4 },
-  weekday: { ...typography.xs, fontWeight: "600", color: colors.textSecondary },
-  dayCell: { width: "14.28%", height: 44, alignItems: "center", justifyContent: "flex-start", paddingTop: 8 },
+  weekdayCell: { width: "14.28%", alignItems: "center", marginBottom: 6 },
+  weekday: { fontSize: 11, fontWeight: "600", color: colors.textMuted },
+  dayCell: { width: "14.28%", height: 40, alignItems: "center", justifyContent: "flex-start", paddingTop: 6 },
   dayButton: {
     borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   dayGoing: {
     backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
   },
   daySaved: {
-    backgroundColor: "rgba(232, 170, 106, 0.1)",
-    borderColor: colors.accent,
+    backgroundColor: "rgba(232, 170, 106, 0.12)",
   },
   dayToday: {
-    borderColor: colors.foreground,
     borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderRadius: radius.sm,
   },
   dayTextToday: {
     fontWeight: "700" as const,
+    color: colors.primary,
   },
   daySelected: {
-    borderColor: colors.foreground,
     backgroundColor: colors.muted,
+    borderRadius: radius.sm,
   },
-  dayText: { ...typography.sm, color: colors.foreground },
-  dots: { flexDirection: "row", gap: 2, marginTop: 2, height: 6 },
+  dayText: { fontSize: 13, color: colors.foreground },
+  dots: { flexDirection: "row", gap: 2, marginTop: 2, height: 5 },
   dotGoing: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.primary },
   dotSaved: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent },
   detail: {
     padding: 12,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.background,
     borderRadius: radius.md,
     marginTop: 12,
   },
-  detailDate: { ...typography.sm, fontWeight: "600", color: colors.foreground, marginBottom: 8 },
-  detailLabel: { ...typography.xs, color: colors.textSecondary },
+  detailDate: { fontSize: 13, fontWeight: "600", color: colors.foreground, marginBottom: 8 },
+  detailLabel: { ...typography.xs, color: colors.textSecondary, marginBottom: 2 },
   eventRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -259,9 +219,6 @@ const st = StyleSheet.create({
   },
   detailItem: { ...typography.sm },
   detailSub: { ...typography.xs, color: colors.textSecondary, marginTop: 1 },
-  removeBtn: {
-    padding: 2,
-    marginLeft: 8,
-  },
+  removeBtn: { padding: 2, marginLeft: 8 },
   detailEmpty: { ...typography.sm, color: colors.textSecondary },
 });

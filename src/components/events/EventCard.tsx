@@ -23,11 +23,21 @@ import {
   CalendarDays,
   Check,
   DollarSign,
+  Drama,
+  Dumbbell,
   ExternalLink,
+  Laugh,
   MapPin,
+  Moon,
+  Music,
+  Palette,
   Share2,
+  ShoppingBag,
   Sparkles,
   Ticket,
+  Trees,
+  Utensils,
+  Wrench,
   X,
 } from "lucide-react-native";
 import BottomSheet from "@/components/ui/BottomSheet";
@@ -42,17 +52,24 @@ import { formatNYCDate } from "@/lib/time";
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
 
-const CATEGORY_STYLE: Record<string, { colors: [string, string]; emoji: string }> = {
-  arts:      { colors: ["#C9A882", "#8B5E3C"], emoji: "🎨" },
-  music:     { colors: ["#5B8DB8", "#2C4F70"], emoji: "🎵" },
-  outdoors:  { colors: ["#5A9E6F", "#2D6644"], emoji: "🌿" },
-  fitness:   { colors: ["#C0554A", "#7A2E28"], emoji: "🏃" },
-  comedy:    { colors: ["#B8A840", "#6E6020"], emoji: "😂" },
-  food:      { colors: ["#C47830", "#7A4810"], emoji: "🍷" },
-  nightlife: { colors: ["#6B4E9E", "#3A2060"], emoji: "🌙" },
-  theater:   { colors: ["#4A7A9E", "#1E4060"], emoji: "🎭" },
-  workshops: { colors: ["#6A9E50", "#304E20"], emoji: "🛠️" },
-  popups:    { colors: ["#B87050", "#6A3820"], emoji: "🛍️" },
+type CategoryConfig = {
+  gradient: [string, string];
+  Icon: React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+  chipBg: string;
+  chipFg: string;
+};
+
+const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
+  arts:      { gradient: ["#C9A882", "#8B5E3C"], Icon: Palette,     chipBg: colors.catArtsBg,     chipFg: colors.catArtsFg },
+  music:     { gradient: ["#5B8DB8", "#2C4F70"], Icon: Music,        chipBg: colors.catMusicBg,    chipFg: colors.catMusicFg },
+  outdoors:  { gradient: ["#5A9E6F", "#2D6644"], Icon: Trees,        chipBg: colors.catOutdoorsBg, chipFg: colors.catOutdoorsFg },
+  fitness:   { gradient: ["#C0554A", "#7A2E28"], Icon: Dumbbell,     chipBg: colors.catFitnessBg,  chipFg: colors.catFitnessFg },
+  comedy:    { gradient: ["#B8A840", "#6E6020"], Icon: Laugh,        chipBg: colors.catComedyBg,   chipFg: colors.catComedyFg },
+  food:      { gradient: ["#C47830", "#7A4810"], Icon: Utensils,     chipBg: colors.catFoodBg,     chipFg: colors.catFoodFg },
+  nightlife: { gradient: ["#6B4E9E", "#3A2060"], Icon: Moon,         chipBg: colors.catNightlifeBg, chipFg: colors.catNightlifeFg },
+  theater:   { gradient: ["#4A7A9E", "#1E4060"], Icon: Drama,        chipBg: colors.catTheaterBg,  chipFg: colors.catTheaterFg },
+  workshops: { gradient: ["#6A9E50", "#304E20"], Icon: Wrench,       chipBg: colors.catWorkshopsBg, chipFg: colors.catWorkshopsFg },
+  popups:    { gradient: ["#B87050", "#6A3820"], Icon: ShoppingBag,  chipBg: colors.catPopupsBg,   chipFg: colors.catPopupsFg },
 };
 
 const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
@@ -124,8 +141,6 @@ export default function EventCard({
   const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
 
-  // ── Going handler ────────────────────────────────────────
-
   const isMultiDate = (event.sessions && event.sessions.length > 1) ||
     (!!event.endDate && event.endDate !== event.startDate);
 
@@ -156,17 +171,7 @@ export default function EventCard({
     showToast("Marked as going");
   };
 
-  // ── Swipe gesture ────────────────────────────────────────
-
   const translateX = useSharedValue(0);
-
-  const onSwipeComplete = () => {
-    onDismiss();
-  };
-
-  const onSwipeRightComplete = () => {
-    onGoing();
-  };
 
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
@@ -177,11 +182,11 @@ export default function EventCard({
     .onEnd((e) => {
       if (e.translationX < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-SCREEN_WIDTH, { duration: 250 }, () => {
-          runOnJS(onSwipeComplete)();
+          runOnJS(onDismiss)();
         });
       } else if (e.translationX > SWIPE_THRESHOLD) {
         translateX.value = withTiming(SCREEN_WIDTH, { duration: 250 }, () => {
-          runOnJS(onSwipeRightComplete)();
+          runOnJS(onGoing)();
         });
       } else {
         translateX.value = withTiming(0, { duration: 200 });
@@ -225,21 +230,25 @@ export default function EventCard({
     }
   };
 
+  const catConfig = CATEGORY_CONFIG[event.category];
+  const CategoryIcon = catConfig?.Icon;
+
   return (
     <View style={styles.wrapper}>
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.card, animatedCardStyle, event.endingSoon && styles.cardEndingSoon]}>
+        <Animated.View style={[styles.card, animatedCardStyle]}>
           <Pressable onPress={onPress} style={styles.cardInner}>
-            {/* Going overlay — fades in on right swipe */}
+            {/* Going overlay */}
             <Animated.View style={[styles.swipeOverlayLeft, goingOverlayStyle]}>
               <Text style={styles.swipeOverlayTextGoing}>GOING ✓</Text>
             </Animated.View>
 
-            {/* Skip overlay — fades in on left swipe */}
+            {/* Skip overlay */}
             <Animated.View style={[styles.swipeOverlayRight, skipOverlayStyle]}>
               <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
             </Animated.View>
-            {/* Image */}
+
+            {/* Hero image or gradient placeholder */}
             {event.imageUrl ? (
               <Image
                 source={{ uri: event.imageUrl }}
@@ -248,14 +257,16 @@ export default function EventCard({
               />
             ) : (
               <LinearGradient
-                colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
+                colors={catConfig?.gradient ?? ["#6B7280", "#374151"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.imagePlaceholder}
               >
-                <Text style={styles.placeholderEmoji}>
-                  {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
-                </Text>
+                {CategoryIcon && (
+                  <View style={styles.placeholderIconWrap}>
+                    <CategoryIcon size={32} color="rgba(255,255,255,0.9)" strokeWidth={1.5} />
+                  </View>
+                )}
                 <Text style={styles.placeholderTitle} numberOfLines={2}>
                   {event.title}
                 </Text>
@@ -264,11 +275,7 @@ export default function EventCard({
 
             {/* Action icons over image */}
             <View style={styles.imageActions}>
-              <Pressable
-                onPress={handleBookmarkPress}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
+              <Pressable onPress={handleBookmarkPress} style={styles.iconButton} hitSlop={8}>
                 <Bookmark
                   size={16}
                   strokeWidth={1.5}
@@ -276,27 +283,11 @@ export default function EventCard({
                   fill={savedList ? colors.primary : "none"}
                 />
               </Pressable>
-              <Pressable
-                onPress={onSharePress}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
-                <Share2
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.foreground}
-                />
+              <Pressable onPress={onSharePress} style={styles.iconButton} hitSlop={8}>
+                <Share2 size={16} strokeWidth={1.5} color={colors.foreground} />
               </Pressable>
-              <Pressable
-                onPress={onDismiss}
-                style={styles.iconButton}
-                hitSlop={8}
-              >
-                <X
-                  size={16}
-                  strokeWidth={2}
-                  color={colors.textSecondary}
-                />
+              <Pressable onPress={onDismiss} style={styles.iconButton} hitSlop={8}>
+                <X size={16} strokeWidth={2} color={colors.textSecondary} />
               </Pressable>
             </View>
 
@@ -335,27 +326,17 @@ export default function EventCard({
               {/* Meta */}
               <View style={styles.meta}>
                 <View style={styles.metaRow}>
-                  <MapPin size={13} strokeWidth={1.5} color={colors.textSecondary} />
+                  <MapPin size={13} strokeWidth={1.5} color={colors.textMuted} />
                   <Text style={styles.metaText} numberOfLines={1}>
                     {event.location}
                   </Text>
                 </View>
                 <View style={styles.metaRow}>
-                  <CalendarDays
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={styles.metaText}>
-                    {formatEventDate(event)}
-                  </Text>
+                  <CalendarDays size={13} strokeWidth={1.5} color={colors.textMuted} />
+                  <Text style={styles.metaText}>{formatEventDate(event)}</Text>
                 </View>
                 <View style={styles.metaRow}>
-                  <DollarSign
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
+                  <DollarSign size={13} strokeWidth={1.5} color={colors.textMuted} />
                   <Text style={styles.metaText}>{event.priceLabel}</Text>
                 </View>
               </View>
@@ -370,11 +351,7 @@ export default function EventCard({
               {/* Match reason */}
               {event.matchReason && (
                 <View style={styles.matchRow}>
-                  <Sparkles
-                    size={12}
-                    strokeWidth={1.5}
-                    color={colors.primary}
-                  />
+                  <Sparkles size={12} strokeWidth={1.5} color={colors.primary} />
                   <Text style={styles.matchText}>{event.matchReason}</Text>
                 </View>
               )}
@@ -410,20 +387,10 @@ export default function EventCard({
               ) : null}
               <Pressable
                 onPress={handleGoingPress}
-                style={[
-                  styles.goingButton,
-                  going && styles.goingButtonActive,
-                ]}
+                style={[styles.goingButton, going && styles.goingButtonActive]}
               >
-                {going && (
-                  <Check size={14} strokeWidth={2} color={colors.white} />
-                )}
-                <Text
-                  style={[
-                    styles.goingButtonText,
-                    going && styles.goingButtonTextActive,
-                  ]}
-                >
+                {going && <Check size={14} strokeWidth={2} color={colors.white} />}
+                <Text style={[styles.goingButtonText, going && styles.goingButtonTextActive]}>
                   Going
                 </Text>
               </Pressable>
@@ -431,11 +398,8 @@ export default function EventCard({
           </Pressable>
         </Animated.View>
       </GestureDetector>
-      <BottomSheet
-        open={goingSheetOpen}
-        onClose={() => setGoingSheetOpen(false)}
-        title="Pick a date"
-      >
+
+      <BottomSheet open={goingSheetOpen} onClose={() => setGoingSheetOpen(false)} title="Pick a date">
         <GoingDateSheet
           event={event}
           userProfile={userProfile}
@@ -508,10 +472,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     ...shadows.card,
   },
-  cardEndingSoon: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
-  },
   cardInner: {
     overflow: "hidden",
   },
@@ -524,12 +484,16 @@ const styles = StyleSheet.create({
     height: 200,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
     paddingHorizontal: 24,
   },
-  placeholderEmoji: {
-    fontSize: 40,
-    lineHeight: 48,
+  placeholderIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   placeholderTitle: {
     fontSize: 15,
@@ -537,12 +501,6 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.9)",
     textAlign: "center",
     lineHeight: 21,
-  },
-  descriptionSnippet: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    lineHeight: 18,
-    marginTop: 8,
   },
   imageActions: {
     position: "absolute",
@@ -553,17 +511,17 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   iconButton: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
     borderRadius: 9999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "rgba(255,255,255,0.92)",
     alignItems: "center",
     justifyContent: "center",
+    ...shadows.xs,
   },
   body: {
     padding: 16,
+    paddingBottom: 8,
   },
   pills: {
     flexDirection: "row",
@@ -572,40 +530,48 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   pillCategory: {
-    backgroundColor: colors.pillCategoryBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    backgroundColor: colors.pillBg,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.pillBorder,
   },
   pillCategoryText: {
     ...typography.pill,
-    color: colors.pillCategoryText,
+    color: colors.pillFg,
   },
   pillEnding: {
-    backgroundColor: colors.pillEndingBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    backgroundColor: colors.warnBg,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.warnBorder,
   },
   pillEndingText: {
     ...typography.pill,
-    color: colors.pillEndingText,
+    color: colors.warnFg,
   },
   pillFree: {
-    backgroundColor: colors.pillFreeBg,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    backgroundColor: colors.successBg,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
   },
   pillFreeText: {
     ...typography.pill,
-    color: colors.pillFreeText,
+    color: colors.successFg,
   },
   pillForYou: {
     backgroundColor: colors.primaryLight,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
@@ -613,6 +579,12 @@ const styles = StyleSheet.create({
   pillForYouText: {
     ...typography.pill,
     color: colors.primary,
+  },
+  descriptionSnippet: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 8,
   },
   title: {
     ...typography.h3,
@@ -645,9 +617,11 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   footer: {
+    flexDirection: "row",
     paddingHorizontal: 16,
     paddingBottom: 16,
-    gap: 10,
+    paddingTop: 12,
+    gap: 8,
   },
   ticketButton: {
     flex: 1,
@@ -655,8 +629,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.md,
+    paddingVertical: 11,
+    borderRadius: radius.full,
     backgroundColor: colors.primary,
   },
   ticketButtonText: {
@@ -668,9 +642,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(232, 170, 106, 0.15)",
+    paddingVertical: 11,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.accent,
   },
   onSaleText: {
     ...typography.xs,
@@ -683,8 +659,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.md,
+    paddingVertical: 11,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.card,
@@ -700,8 +676,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.md,
+    paddingVertical: 11,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,

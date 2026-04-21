@@ -8,11 +8,7 @@ interface OptionCardProps {
   children: ReactNode;
 }
 
-export default function OptionCard({
-  selected,
-  onPress,
-  children,
-}: OptionCardProps) {
+export default function OptionCard({ selected, onPress, children }: OptionCardProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -26,13 +22,13 @@ export default function OptionCard({
 const styles = StyleSheet.create({
   card: {
     padding: 16,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
   cardSelected: {
-    borderWidth: 2,
+    // Keep borderWidth: 1 so layout doesn't shift — only color changes
     borderColor: colors.primary,
     backgroundColor: colors.primaryLight,
   },

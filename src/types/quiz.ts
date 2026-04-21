@@ -1,6 +1,6 @@
 import type {
   EventCategory,
-  EventDistance,
+  BoroughName,
   PriceRange,
 } from "@/types/event";
 
@@ -18,6 +18,6 @@ export interface Filters {
   dateFrom?: string;
   dateTo?: string;
   price?: PriceRange;
-  distance?: EventDistance;
+  boroughs?: BoroughName[];
   vibe?: Vibe;
 }

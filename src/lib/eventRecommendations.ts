@@ -84,14 +84,8 @@ export function getEventCandidates(
     }
   }
 
-  if (filters.distance) {
-    if (filters.distance === "neighborhood") {
-      filtered = filtered.filter((e) => e.borough === "Manhattan");
-    } else if (filters.distance === "borough") {
-      filtered = filtered.filter(
-        (e) => e.borough === "Manhattan" || e.borough === "Brooklyn"
-      );
-    }
+  if (filters.boroughs?.length) {
+    filtered = filtered.filter((e) => filters.boroughs!.includes(e.borough));
   }
 
   if (filters.vibe === "hidden_gems") {

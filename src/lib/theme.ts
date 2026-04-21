@@ -1,47 +1,90 @@
 /**
- * Design tokens extracted from the web app's globals.css.
- * All colors, spacing, and typography in one place.
+ * Design tokens extracted from the Sift Design System.
+ * Clean light-grey canvas, dusty slate-blue primary, warm ochre accent.
  */
 
 export const colors = {
-  // Core palette (from CSS custom properties)
-  background: "#FAF9F7",       // hsl(40 20% 97%)
-  foreground: "#1A1F2B",       // hsl(222 22% 14%)
-  card: "#FFFFFF",             // hsl(0 0% 100%)
-  cardBorder: "#E8E6E3",      // hsl(30 8% 90%)
-  border: "#E8E6E3",          // hsl(30 8% 90%)
-  primary: "#5A7BAF",          // hsl(214 33% 49%)
-  primaryLight: "rgba(90, 123, 175, 0.1)", // hsl(214 33% 49% / 0.1)
-  secondary: "#6B6F76",        // hsl(222 5% 44%)
-  muted: "#F3F2F0",            // hsl(30 8% 95%)
-  accent: "#E8AA6A",           // hsl(30 72% 66%)
+  // Core neutrals
+  background: "#F3F4F6",        // app canvas (soft grey)
+  bgSubtle: "#F7F8FA",          // section backgrounds
+  card: "#FFFFFF",              // card surface
+  muted: "#F1F3F6",             // tags, inputs, filled chips
+  border: "#E5E7EB",            // hairline
+  borderStrong: "#D1D5DB",      // selected / focused border
+  overlay: "rgba(17, 24, 39, 0.45)",
 
-  // Semantic
-  textPrimary: "#1A1F2B",
-  textSecondary: "#6B6F76",
-  textMuted: "#8E9196",
+  // Text
+  foreground: "#111827",        // primary text
+  textPrimary: "#111827",
+  textSecondary: "#4B5563",     // meta, labels
+  textMuted: "#6B7280",         // placeholders, timestamps
+  textPlaceholder: "#9CA3AF",
 
-  // Pills
-  pillCategoryBg: "#F3F2F0",
-  pillCategoryText: "#6B6F76",
-  pillFreeBg: "rgba(34, 139, 34, 0.1)",
-  pillFreeText: "#228B22",
-  pillEndingBg: "rgba(200, 60, 60, 0.1)",
-  pillEndingText: "#C83C3C",
+  // Brand — low-sat slate blue
+  primary: "#5A7BAF",
+  primaryHover: "#4A6A9E",
+  primaryLight: "#EEF2F8",      // pale blue (selected bg)
+  primarySoft: "#DDE6F1",       // selected border
+  primaryFg: "#FFFFFF",
+
+  // Brand — deep charcoal-teal (app icon, splash)
+  ink: "#293132",
+  inkFg: "#EFEFF0",
+
+  // Accent — warm ochre (ending-soon, on-sale only)
+  accent: "#E8AA6A",
+  accentHover: "#D79550",
+  accentSoft: "rgba(232, 170, 106, 0.15)",
+
+  // Semantic chip colors
+  successFg: "#1F7A3A",
+  successBg: "#E8F4EC",
+  successBorder: "#CCE5D3",
+
+  warnFg: "#A86A24",
+  warnBg: "#FBF1E1",
+  warnBorder: "#F0DBB7",
+
+  dangerFg: "#B83A3A",
+  dangerBg: "#FBECEC",
+  dangerBorder: "#EFCFCF",
+
+  // Neutral pill (default category tag)
+  pillFg: "#4B5563",
+  pillBg: "#F1F3F6",
+  pillBorder: "#E5E7EB",
+
+  // Legacy aliases (still referenced in older components)
+  secondary: "#4B5563",
+  pillCategoryBg: "#F1F3F6",
+  pillCategoryText: "#4B5563",
+  pillFreeBg: "#E8F4EC",
+  pillFreeText: "#1F7A3A",
+  pillEndingBg: "#FBF1E1",
+  pillEndingText: "#A86A24",
+
+  // Category chip tokens — fg (icon color) + bg (tinted fill)
+  catArtsFg: "#9A7244",    catArtsBg: "#F5EEE3",
+  catMusicFg: "#3B5A84",   catMusicBg: "#E8EEF7",
+  catOutdoorsFg: "#3A6F50", catOutdoorsBg: "#E8F0EA",
+  catFitnessFg: "#8A3E38", catFitnessBg: "#F4E6E4",
+  catComedyFg: "#7A6B28",  catComedyBg: "#F2EFDC",
+  catFoodFg: "#8A541A",    catFoodBg: "#F5E8D6",
+  catNightlifeFg: "#4A3070", catNightlifeBg: "#ECE6F3",
+  catTheaterFg: "#2F4E70", catTheaterBg: "#E3ECF4",
+  catWorkshopsFg: "#3E5A2B", catWorkshopsBg: "#E8EFDC",
+  catPopupsFg: "#7A4028",  catPopupsBg: "#F2E4D8",
 
   // Surfaces
   white: "#FFFFFF",
   black: "#000000",
-  overlay: "rgba(0, 0, 0, 0.4)",
 };
 
 export const fonts = {
-  // Matching web: Inter for UI, Merriweather for headings
-  // On mobile we'll use system fonts initially, can add custom fonts later
-  regular: undefined as string | undefined,   // System default
+  regular: undefined as string | undefined,
   medium: undefined as string | undefined,
   semibold: undefined as string | undefined,
-  serif: undefined as string | undefined,      // For hero headings
+  serif: undefined as string | undefined,
 };
 
 export const spacing = {
@@ -52,14 +95,14 @@ export const spacing = {
   xl: 20,
   xxl: 24,
   xxxl: 32,
-  page: 20,       // Horizontal page padding
+  page: 20,
 };
 
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 16,
-  xl: 20,
+  sm: 8,     // tags, small chips
+  md: 12,    // inputs, row cards, option rows
+  lg: 20,    // cards, sheets, event cards
+  xl: 28,    // hero / featured
   full: 9999,
 };
 
@@ -108,18 +151,32 @@ export const typography = {
 };
 
 export const shadows = {
+  xs: {
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
   card: {
-    shadowColor: colors.black,
+    shadowColor: "#111827",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  float: {
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.07,
+    shadowRadius: 24,
+    elevation: 6,
   },
   sheet: {
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
     elevation: 10,
   },
 };
