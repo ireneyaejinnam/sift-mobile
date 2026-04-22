@@ -121,7 +121,7 @@ export default function DiscoverScreen() {
     getDismissedEvents().then(setDismissedHistory);
   }, []);
 
-  const [entryMode, setEntryMode] = useState<"chooser" | "browse" | "sift">("chooser");
+  const [entryMode, setEntryMode] = useState<"chooser" | "browse" | "sift">("sift");
   const [step, setStep] = useState<Step>("category");
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -214,7 +214,7 @@ export default function DiscoverScreen() {
     expandedInterestCatsRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
-    setEntryMode("chooser");
+    setEntryMode("sift");
     setStep("category");
     setFilters({});
     setSlots([]);
@@ -665,9 +665,7 @@ export default function DiscoverScreen() {
   if (entryMode === "sift" && (step === "category" || step === "date" || step === "distance")) {
     return (
       <View style={s.catPageContainer}>
-        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
-          <Text style={s.stickyHeading}>Discover</Text>
-        </View>
+        <View style={{ paddingTop: insets.top + 16 }} />
         <ProgressBar step={step} />
         <ScrollView
           contentContainerStyle={[s.dateScroll, { paddingTop: 24, paddingBottom: insets.bottom + 24 }]}

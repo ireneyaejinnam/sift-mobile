@@ -310,12 +310,6 @@ export default function EventCard({
                     <Text style={[styles.pillGlassText, styles.pillFreeText]}>Free</Text>
                   </View>
                 )}
-                {isSiftPick && (
-                  <View style={[styles.pillGlass, styles.pillSiftPick]}>
-                    <Star size={9} color="#F5C842" fill="#F5C842" strokeWidth={0} />
-                    <Text style={[styles.pillGlassText, styles.pillSiftPickText]}>Sift Pick</Text>
-                  </View>
-                )}
                 {isTrending && (
                   <View style={[styles.pillGlass, styles.pillTrending]}>
                     <Flame size={9} color="#FF6B35" fill="#FF6B35" strokeWidth={0} />
