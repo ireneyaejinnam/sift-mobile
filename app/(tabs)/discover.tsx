@@ -30,6 +30,7 @@ import {
   Moon,
   Music,
   Palette,
+  RotateCcw,
   ShoppingBag,
   Sparkles,
   Trees,
@@ -879,12 +880,9 @@ export default function DiscoverScreen() {
         <View style={s.resultsHeaderRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.stickyHeading}>Discover</Text>
-            <Text style={s.resultsHeading}>
-              {loading ? "Sorting picks..." : (userProfile ? "Your top picks" : "Here’s what we found")}
-            </Text>
           </View>
           <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
-            <Text style={s.startOverText}>Start over</Text>
+            <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
           </Pressable>
         </View>
       </View>
@@ -1255,17 +1253,14 @@ const s = StyleSheet.create({
     gap: 12,
   },
   startOverButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: radius.full,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
-  },
-  startOverText: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    fontWeight: "500",
+    alignItems: "center",
+    justifyContent: "center",
   },
   resultsStage: {
     flex: 1,
@@ -1290,12 +1285,6 @@ const s = StyleSheet.create({
     ...typography.sm,
     color: colors.primary,
     textDecorationLine: "underline",
-  },
-  resultsHeading: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.foreground,
-    letterSpacing: -0.3,
   },
   // End card — shown when result pool is exhausted
   endCard: {

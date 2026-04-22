@@ -69,6 +69,13 @@ interface UserContextValue extends SiftStorage {
 
 const UserContext = createContext<UserContextValue | null>(null);
 
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Invalid Refresh Token|Refresh Token Not Found/i.test(error.message)
+  );
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [storage, setStorage] = useState<SiftStorage>(initialStorage);
   const [ready, setReady] = useState(false);
@@ -76,13 +83,37 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Supabase user ID — used to key all remote data operations.
   const userIdRef = useRef<string | null>(null);
 
+  const clearLocalAuthState = useCallback(async () => {
+    userIdRef.current = null;
+    clearOnboardingDoneFlag();
+    try {
+      if (supabase) {
+        await supabase.auth.signOut({ scope: "local" });
+      }
+    } catch {}
+    const clean = { ...initialStorage };
+    setStorage(clean);
+    await saveStorage(clean);
+  }, []);
+
   // ── Startup: restore session + load data ─────────────────
 
   useEffect(() => {
     (async () => {
       try {
         if (supabase) {
-          const { data: sessionData } = await supabase.auth.getSession();
+          let sessionData;
+          try {
+            const result = await supabase.auth.getSession();
+            sessionData = result.data;
+          } catch (error) {
+            if (isInvalidRefreshTokenError(error)) {
+              await clearLocalAuthState();
+              setReady(true);
+              return;
+            }
+            throw error;
+          }
 
           if (sessionData.session?.user) {
             const user = sessionData.session.user;
@@ -134,10 +165,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             saveStorage(data);
           } else {
             // No session — guest always starts clean.
-            clearOnboardingDoneFlag();
-            const clean = { ...initialStorage };
-            setStorage(clean);
-            saveStorage(clean);
+            await clearLocalAuthState();
           }
         }
       } catch {
@@ -174,7 +202,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => listener.subscription.unsubscribe();
-  }, []);
+  }, [clearLocalAuthState]);
 
   // ── Local + cache persist ────────────────────────────────
 
@@ -451,13 +479,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    try {
-      if (supabase) await supabase.auth.signOut();
-    } catch {}
-    userIdRef.current = null;
-    clearOnboardingDoneFlag();
-    persist({ ...initialStorage });
-  }, [persist]);
+    await clearLocalAuthState();
+  }, [clearLocalAuthState]);
 
   // ── Context value ─────────────────────────────────────────
 

@@ -8,7 +8,6 @@ import { useUser } from "@/context/UserContext";
 import { loadTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { events } from "@/data/events";
-import CalendarSection from "@/components/profile/CalendarSection";
 import SavedListsSection from "@/components/profile/SavedListsSection";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
@@ -170,26 +169,6 @@ export default function ProfileTab() {
           </View>
         )}
 
-        {/* ── Stats ───────────────────────────── */}
-        {isLoggedIn && (
-          <View style={st.statsRow}>
-            <View style={st.statCard}>
-              <Text style={st.statNumber}>{savedEvents.length}</Text>
-              <Text style={st.statLabel}>Saved</Text>
-            </View>
-            <View style={st.statDivider} />
-            <View style={st.statCard}>
-              <Text style={st.statNumber}>{goingEvents.length}</Text>
-              <Text style={st.statLabel}>Going</Text>
-            </View>
-          </View>
-        )}
-
-        {/* ── Calendar ────────────────────────── */}
-        {isLoggedIn && (
-          <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
-        )}
-
         {/* ── Shared with you ─────────────────── */}
         {isLoggedIn && sharedWithYou.length > 0 && (
           <View style={st.section}>
@@ -296,6 +275,21 @@ export default function ProfileTab() {
                     : "Start swiping to build your taste"}
                 </Text>
               </View>
+            </View>
+          </View>
+        )}
+
+        {/* ── Stats ───────────────────────────── */}
+        {isLoggedIn && (
+          <View style={st.statsRow}>
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{savedEvents.length}</Text>
+              <Text style={st.statLabel}>Saved</Text>
+            </View>
+            <View style={st.statDivider} />
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{goingEvents.length}</Text>
+              <Text style={st.statLabel}>Going</Text>
             </View>
           </View>
         )}

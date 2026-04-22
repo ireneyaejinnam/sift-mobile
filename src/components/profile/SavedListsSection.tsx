@@ -110,7 +110,6 @@ export default function SavedListsSection() {
           enabled={!isActive}
         >
           <View style={[st.card, isActive && st.cardActive]}>
-            {/* List header row */}
             <View style={st.listHeader}>
               {isRenaming ? (
                 <View style={st.renameRow}>
@@ -152,7 +151,6 @@ export default function SavedListsSection() {
               </Pressable>
             </View>
 
-            {/* Expanded events */}
             {expandedList === listName && !isRenaming && (
               <View style={st.expanded}>
                 {savedItems.length === 0 ? (

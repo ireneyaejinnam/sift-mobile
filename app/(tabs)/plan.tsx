@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated as NativeAnimated,
   Image,
+  type LayoutChangeEvent,
   Modal,
   View,
   Text,
@@ -10,12 +12,14 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import EventDetail from "@/components/events/EventDetail";
+import CalendarSection from "@/components/profile/CalendarSection";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  CalendarDays,
   CalendarPlus,
   Check,
   ChevronRight,
-  Trash2,
+  List,
   Share2,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
@@ -28,58 +32,15 @@ import { supabase } from "@/lib/supabase";
 import { fetchPlanEventOrders, syncPlanEventOrder } from "@/lib/userDataService";
 import { events as allEvents } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
+import type { GoingEvent } from "@/types/user";
 import DraggableFlatList, {
-  ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import { getUnsplashFallback } from "@/lib/unsplashFallback";
+import EventPlanCard from "@/components/events/EventPlanCard";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
 type PlanStep = "shortlist" | "confirm" | "success";
-
-function EventPlanCard({
-  event,
-  onPress,
-  onRemove,
-  drag,
-  isActive,
-}: {
-  event: SiftEvent;
-  onPress: () => void;
-  onRemove?: () => void;
-  drag?: () => void;
-  isActive?: boolean;
-}) {
-  const [fallbackImage, setFallbackImage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!event.imageUrl) {
-      getUnsplashFallback(event.category).then(setFallbackImage);
-    }
-  }, [event.id, event.category, event.imageUrl]);
-
-  const imgSrc = event.imageUrl ?? fallbackImage;
-
-  return (
-    <ScaleDecorator>
-      <View style={[sc.card, isActive && sc.cardActive]}>
-        <Pressable style={sc.cardMain} onPress={onPress} onLongPress={drag} delayLongPress={200}>
-          {imgSrc ? (
-            <Image source={{ uri: imgSrc }} style={sc.thumb} />
-          ) : (
-            <View style={sc.thumbPlaceholder} />
-          )}
-          <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
-        </Pressable>
-        {onRemove && (
-          <Pressable onPress={onRemove} style={sc.removeBtn} hitSlop={8}>
-            <Trash2 size={16} strokeWidth={1.5} color={colors.textMuted} />
-          </Pressable>
-        )}
-      </View>
-    </ScaleDecorator>
-  );
-}
+type PlanViewMode = "calendar" | "list";
 
 function groupByDay(
   eventList: SiftEvent[]
@@ -121,7 +82,7 @@ export default function PlanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
-  const { isLoggedIn, goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
+  const { isLoggedIn, goingEvents, toggleGoing, removeSavedEvent } = useUser();
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [detailEvent, setDetailEvent] = useState<{ event: SiftEvent; goingDate: string } | null>(null);
@@ -130,16 +91,20 @@ export default function PlanScreen() {
   const [isDraggingList, setIsDraggingList] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [hasLoadedRemoteOrder, setHasLoadedRemoteOrder] = useState(false);
+  const [viewMode, setViewMode] = useState<PlanViewMode>("calendar");
+  const [renderedViewMode, setRenderedViewMode] = useState<PlanViewMode>("calendar");
+  const viewTranslateX = useRef(new NativeAnimated.Value(0)).current;
+  const viewOpacity = useRef(new NativeAnimated.Value(1)).current;
+  const selectorTranslateX = useRef(new NativeAnimated.Value(0)).current;
+  const [viewModeWidth, setViewModeWidth] = useState(0);
 
   // Get full event objects for saved + going events
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
   const [dbLoading, setDbLoading] = useState(false);
 
   const allIds = useMemo(() => {
-    const goingIds = goingEvents.map((e) => e.eventId);
-    const savedIds = savedEvents.map((e) => e.eventId);
-    return [...new Set([...goingIds, ...savedIds])];
-  }, [goingEvents, savedEvents]);
+    return goingEvents.map((e) => e.eventId);
+  }, [goingEvents]);
 
   useEffect(() => {
     if (!isLoggedIn || !supabase) {
@@ -246,6 +211,11 @@ export default function PlanScreen() {
     }),
   [dayGroups, dayOrder]);
 
+  const shortlistEventMap = useMemo(
+    () => Object.fromEntries(shortlistEvents.map((event) => [event.id, event])),
+    [shortlistEvents]
+  );
+
   const openDetail = useCallback(
     (event: SiftEvent) => {
       const goingEntry = goingEvents.find((g) => g.eventId === event.id);
@@ -311,6 +281,61 @@ export default function PlanScreen() {
     setRemovedIds([]);
     setPlanStep("shortlist");
   }, []);
+
+  const changeViewMode = useCallback(
+    (nextMode: PlanViewMode, direction?: 1 | -1) => {
+      if (nextMode === viewMode) return;
+      const resolvedDirection = direction ?? (nextMode === "calendar" ? 1 : -1);
+      const offset = 28 * resolvedDirection;
+      const selectorTarget = viewModeWidth > 0 ? (nextMode === "calendar" ? 0 : viewModeWidth / 2) : 0;
+
+      NativeAnimated.timing(selectorTranslateX, {
+        toValue: selectorTarget,
+        duration: 220,
+        useNativeDriver: true,
+      }).start();
+
+      NativeAnimated.parallel([
+        NativeAnimated.timing(viewTranslateX, {
+          toValue: offset,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+        NativeAnimated.timing(viewOpacity, {
+          toValue: 0,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setViewMode(nextMode);
+        setRenderedViewMode(nextMode);
+        viewTranslateX.setValue(-offset);
+        viewOpacity.setValue(0);
+        NativeAnimated.parallel([
+          NativeAnimated.timing(viewTranslateX, {
+            toValue: 0,
+            duration: 220,
+            useNativeDriver: true,
+          }),
+          NativeAnimated.timing(viewOpacity, {
+            toValue: 1,
+            duration: 220,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      });
+    },
+    [viewMode, viewModeWidth, selectorTranslateX, viewOpacity, viewTranslateX]
+  );
+
+  const handleViewModeLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const width = event.nativeEvent.layout.width;
+      setViewModeWidth(width);
+      selectorTranslateX.setValue(viewMode === "calendar" ? 0 : width / 2);
+    },
+    [selectorTranslateX, viewMode]
+  );
 
   const detailModal = (
     <Modal visible={!!detailEvent} animationType="slide" presentationStyle="pageSheet">
@@ -462,34 +487,130 @@ export default function PlanScreen() {
       showsVerticalScrollIndicator={false}
       scrollEnabled={!isDraggingList}
     >
-      {orderedDayGroups.map((group) => (
-        <View key={group.date} style={s.dayGroup}>
-          <Text style={s.dayLabel}>{group.label}</Text>
-          <DraggableFlatList
-            data={group.events}
-            keyExtractor={(e) => e.id}
-            onDragBegin={() => setIsDraggingList(true)}
-            onDragEnd={({ data }) => {
-              const nextOrder = data.map((e) => e.id);
-              setIsDraggingList(false);
-              setDayOrder((prev) => ({ ...prev, [group.date]: nextOrder }));
-              if (userId) void syncPlanEventOrder(userId, group.date, nextOrder);
-            }}
-            onRelease={() => setIsDraggingList(false)}
-            scrollEnabled={false}
-            activationDistance={12}
-            renderItem={({ item, drag, isActive }: RenderItemParams<SiftEvent>) => (
-              <EventPlanCard
-                event={item}
-                onPress={() => openDetail(item)}
-                onRemove={() => handleRemove(item.id)}
-                drag={drag}
-                isActive={isActive}
-              />
-            )}
+      <View style={s.viewModeWrap} onLayout={handleViewModeLayout}>
+        {viewModeWidth > 0 && (
+          <NativeAnimated.View
+            pointerEvents="none"
+            style={[
+              s.viewModeActiveBg,
+              {
+                width: viewModeWidth / 2 - 3,
+                transform: [{ translateX: selectorTranslateX }],
+              },
+            ]}
           />
-        </View>
-      ))}
+        )}
+        <Pressable
+          onPress={() => changeViewMode("calendar", 1)}
+          style={s.viewModeButton}
+        >
+          <CalendarDays
+            size={15}
+            strokeWidth={1.8}
+            color={viewMode === "calendar" ? colors.white : colors.textSecondary}
+          />
+          <Text style={[s.viewModeText, viewMode === "calendar" && s.viewModeTextActive]}>
+            Calendar
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => changeViewMode("list", -1)}
+          style={s.viewModeButton}
+        >
+          <List
+            size={15}
+            strokeWidth={1.8}
+            color={viewMode === "list" ? colors.white : colors.textSecondary}
+          />
+          <Text style={[s.viewModeText, viewMode === "list" && s.viewModeTextActive]}>
+            List
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={s.viewModeContent}>
+        <NativeAnimated.View
+          style={{
+            transform: [{ translateX: viewTranslateX }],
+            opacity: viewOpacity,
+          }}
+        >
+          {renderedViewMode === "calendar" ? (
+            <CalendarSection
+              goingEvents={goingEvents}
+              savedEvents={[]}
+              title={null}
+              showSavedDetails={false}
+              renderGoingEvents={(calEvents: GoingEvent[], date: string) => {
+                const order = dayOrder[date];
+                const eventObjs = calEvents
+                  .map((ge) => shortlistEventMap[ge.eventId])
+                  .filter(Boolean) as SiftEvent[];
+                const ordered = order
+                  ? [
+                      ...order.map((id) => eventObjs.find((e) => e.id === id)).filter(Boolean) as SiftEvent[],
+                      ...eventObjs.filter((e) => !order.includes(e.id)),
+                    ]
+                  : eventObjs;
+                return (
+                  <DraggableFlatList
+                    data={ordered}
+                    keyExtractor={(e) => e.id}
+                    scrollEnabled={false}
+                    activationDistance={12}
+                    onDragBegin={() => setIsDraggingList(true)}
+                    onDragEnd={({ data }) => {
+                      const nextOrder = data.map((e) => e.id);
+                      setIsDraggingList(false);
+                      setDayOrder((prev) => ({ ...prev, [date]: nextOrder }));
+                      if (userId) void syncPlanEventOrder(userId, date, nextOrder);
+                    }}
+                    onRelease={() => setIsDraggingList(false)}
+                    renderItem={({ item, drag, isActive }: RenderItemParams<SiftEvent>) => (
+                      <EventPlanCard
+                        event={item}
+                        onPress={() => openDetail(item)}
+                        onRemove={() => handleRemove(item.id)}
+                        drag={drag}
+                        isActive={isActive}
+                      />
+                    )}
+                  />
+                );
+              }}
+            />
+          ) : (
+            orderedDayGroups.map((group) => (
+              <View key={group.date} style={s.dayGroup}>
+                <Text style={s.dayLabel}>{group.label}</Text>
+                <DraggableFlatList
+                  data={group.events}
+                  keyExtractor={(e) => e.id}
+                  onDragBegin={() => setIsDraggingList(true)}
+                  onDragEnd={({ data }) => {
+                    const nextOrder = data.map((e) => e.id);
+                    setIsDraggingList(false);
+                    setDayOrder((prev) => ({ ...prev, [group.date]: nextOrder }));
+                    if (userId) void syncPlanEventOrder(userId, group.date, nextOrder);
+                  }}
+                  onRelease={() => setIsDraggingList(false)}
+                  scrollEnabled={false}
+                  activationDistance={12}
+                  renderItem={({ item, drag, isActive }: RenderItemParams<SiftEvent>) => (
+                    <EventPlanCard
+                      event={item}
+                      onPress={() => openDetail(item)}
+                      onRemove={() => handleRemove(item.id)}
+                      drag={drag}
+                      isActive={isActive}
+                    />
+                  )}
+                />
+              </View>
+            ))
+          )}
+        </NativeAnimated.View>
+      </View>
     </ScrollView>
     {detailModal}
     </View>
@@ -531,6 +652,47 @@ const s = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 22,
     marginBottom: 24,
+  },
+  viewModeWrap: {
+    flexDirection: "row",
+    position: "relative",
+    backgroundColor: colors.card,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 4,
+    marginBottom: 20,
+    width: 220,
+    ...shadows.card,
+  },
+  viewModeActiveBg: {
+    position: "absolute",
+    top: 4,
+    left: 4,
+    bottom: 4,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+  },
+  viewModeButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+  },
+  viewModeText: {
+    ...typography.sm,
+    color: colors.textSecondary,
+    fontWeight: "500",
+  },
+  viewModeTextActive: {
+    color: colors.white,
+  },
+  viewModeContent: {
+    minHeight: 240,
   },
 
   // Empty state
@@ -637,48 +799,5 @@ const s = StyleSheet.create({
     ...typography.sm,
     color: colors.textSecondary,
     textDecorationLine: "underline",
-  },
-});
-
-const sc = StyleSheet.create({
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 8,
-    overflow: "hidden",
-    ...shadows.card,
-  },
-  cardActive: {
-    opacity: 0.9,
-    borderColor: colors.primary,
-  },
-  cardMain: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  thumb: {
-    width: 64,
-    height: 64,
-  },
-  thumbPlaceholder: {
-    width: 64,
-    height: 64,
-    backgroundColor: colors.border,
-  },
-  cardTitle: {
-    ...typography.body,
-    fontWeight: "500",
-    color: colors.foreground,
-    flex: 1,
-    paddingRight: 8,
-  },
-  removeBtn: {
-    padding: 14,
   },
 });

@@ -251,11 +251,6 @@ export default function EventCard({
     immersive && immersiveHeight && immersiveHeight > 0
       ? immersiveHeight
       : undefined;
-  const heroHeight = immersive
-    ? resolvedImmersiveHeight
-      ? Math.max(220, Math.min(300, resolvedImmersiveHeight * 0.54))
-      : Math.min(SCREEN_HEIGHT * 0.34, 320)
-    : IMAGE_HEIGHT;
 
   return (
     <View style={[styles.wrapper, immersive && styles.wrapperImmersive]}>
@@ -270,11 +265,11 @@ export default function EventCard({
         >
           <Pressable onPress={onPress} onLongPress={() => setFeedbackSheetOpen(true)} style={styles.cardInner}>
             {/* ── Image hero ─────────────────────────────── */}
-            <View style={[styles.heroContainer, { height: heroHeight }]}>
+            <View style={[styles.heroContainer, immersive && styles.heroContainerImmersive]}>
               {event.imageUrl || fallbackImage ? (
                 <Image
                   source={{ uri: event.imageUrl ?? fallbackImage! }}
-                  style={[styles.image, { height: heroHeight }]}
+                  style={immersive ? styles.imageFill : styles.image}
                   resizeMode="cover"
                 />
               ) : (
@@ -282,7 +277,7 @@ export default function EventCard({
                   colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={[styles.imagePlaceholder, { height: heroHeight }]}
+                  style={immersive ? styles.imagePlaceholderFill : styles.imagePlaceholder}
                 >
                   <Text style={styles.placeholderEmoji}>
                     {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
@@ -507,13 +502,34 @@ const styles = StyleSheet.create({
     width: "100%",
     height: IMAGE_HEIGHT,
   },
+  heroContainerImmersive: {
+    height: undefined,
+    flex: 1,
+    minHeight: 180,
+  },
   image: {
     width: "100%",
     height: IMAGE_HEIGHT,
   },
+  imageFill: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   imagePlaceholder: {
     width: "100%",
     height: IMAGE_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  imagePlaceholderFill: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -674,8 +690,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   bodyImmersive: {
-    flex: 1,
-    justifyContent: "space-between",
+    flexShrink: 0,
   },
   hookText: {
     fontSize: 15,
