@@ -743,6 +743,9 @@ export default function DiscoverScreen() {
                   >
                     <Text style={s.catContinueText}>Continue</Text>
                   </Pressable>
+                  <Pressable onPress={startBrowsing} style={s.catBrowseButton}>
+                    <Text style={s.catBrowseText}>Browse all events</Text>
+                  </Pressable>
                 </View>
               </View>
             )}
@@ -1229,6 +1232,19 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: colors.white,
+  },
+  catBrowseButton: {
+    paddingVertical: 15,
+    borderRadius: radius.full,
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  catBrowseText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.primary,
   },
   datePickerWrap: {
     alignItems: "center",
