@@ -67,7 +67,7 @@ export default function SavedListsSection() {
     });
   }, [savedEvents]);
 
-  const listNames = getAllListNames();
+  const listNames = useMemo(() => getAllListNames(), [getAllListNames]);
 
   const listSheetItems = useMemo<SiftEvent[]>(() => {
     if (!listSheetName) return [];
@@ -78,10 +78,21 @@ export default function SavedListsSection() {
       .filter((e): e is SiftEvent => e != null);
   }, [listSheetName, savedEvents, dbEvents]);
 
-  const listItems: ListItem[] = listNames.map((listName) => ({
-    listName,
-    count: savedEvents.filter((s) => s.listName === listName).length,
-  }));
+  // Count by list, memoized so the NestableDraggableFlatList data reference
+  // is stable across unrelated re-renders (prevents drag from getting stuck
+  // when other state changes mid-reorder).
+  const countByList = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const s of savedEvents) {
+      m[s.listName] = (m[s.listName] ?? 0) + 1;
+    }
+    return m;
+  }, [savedEvents]);
+
+  const listItems: ListItem[] = useMemo(
+    () => listNames.map((listName) => ({ listName, count: countByList[listName] ?? 0 })),
+    [listNames, countByList]
+  );
 
   const handleCreateList = () => {
     const trimmed = newListName.trim();
@@ -198,7 +209,7 @@ export default function SavedListsSection() {
         keyExtractor={(item) => item.listName}
         onDragEnd={({ data }) => reorderCustomLists(data.map((d) => d.listName))}
         renderItem={renderItem}
-        activationDistance={12}
+        activationDistance={20}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
       />
 
