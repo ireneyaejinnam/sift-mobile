@@ -20,7 +20,7 @@ import Animated, {
   runOnJS,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ArrowLeft,
@@ -139,6 +139,8 @@ export default function DiscoverScreen() {
   useEffect(() => {
     getDismissedEvents().then(setDismissedHistory);
   }, []);
+
+  const { browse } = useLocalSearchParams<{ browse?: string }>();
 
   const [step, setStep] = useState<Step>("category");
   const [filters, setFilters] = useState<Filters>({});
@@ -442,6 +444,14 @@ export default function DiscoverScreen() {
     }
   }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
 
+  // Skip quiz when navigated here with ?browse=1
+  useEffect(() => {
+    if (browse === "1") {
+      router.setParams({ browse: undefined });
+      goToResults({});
+    }
+  }, [browse]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
     await goToResults(newFilters, { skipTransition: true });
@@ -712,9 +722,6 @@ export default function DiscoverScreen() {
                     style={[s.catContinueButton, !filters.categories?.length && { opacity: 0.4 }]}
                   >
                     <Text style={s.catContinueText}>Continue</Text>
-                  </Pressable>
-                  <Pressable onPress={() => goToResults({})} style={{ alignItems: "center", paddingVertical: 8 }}>
-                    <Text style={s.browseLinkText}>Browse everything →</Text>
                   </Pressable>
                 </View>
               </View>

@@ -1,28 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
+  Image,
+  Modal,
   View,
   Text,
   Pressable,
   ScrollView,
-  Linking,
   StyleSheet,
 } from "react-native";
 import { useRouter } from "expo-router";
+import EventDetail from "@/components/events/EventDetail";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   CalendarPlus,
   Check,
   ChevronRight,
-  Clock,
-  MapPin,
-  Ticket,
   Trash2,
   Share2,
-  DollarSign,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
-import * as WebBrowser from "expo-web-browser";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
@@ -30,9 +26,58 @@ import { generateGoogleCalendarUrl, shareICSFile } from "@/lib/calendar";
 import { fetchEventById } from "@/lib/getEvents";
 import { events as allEvents } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
+import DraggableFlatList, {
+  ScaleDecorator,
+  type RenderItemParams,
+} from "react-native-draggable-flatlist";
+import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
 type PlanStep = "shortlist" | "confirm" | "success";
+
+function EventPlanCard({
+  event,
+  onPress,
+  onRemove,
+  drag,
+  isActive,
+}: {
+  event: SiftEvent;
+  onPress: () => void;
+  onRemove?: () => void;
+  drag?: () => void;
+  isActive?: boolean;
+}) {
+  const [fallbackImage, setFallbackImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!event.imageUrl) {
+      getUnsplashFallback(event.category).then(setFallbackImage);
+    }
+  }, [event.id, event.category, event.imageUrl]);
+
+  const imgSrc = event.imageUrl ?? fallbackImage;
+
+  return (
+    <ScaleDecorator>
+      <View style={[sc.card, isActive && sc.cardActive]}>
+        <Pressable style={sc.cardMain} onPress={onPress} onLongPress={drag} delayLongPress={200}>
+          {imgSrc ? (
+            <Image source={{ uri: imgSrc }} style={sc.thumb} />
+          ) : (
+            <View style={sc.thumbPlaceholder} />
+          )}
+          <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
+        </Pressable>
+        {onRemove && (
+          <Pressable onPress={onRemove} style={sc.removeBtn} hitSlop={8}>
+            <Trash2 size={16} strokeWidth={1.5} color={colors.textMuted} />
+          </Pressable>
+        )}
+      </View>
+    </ScaleDecorator>
+  );
+}
 
 function groupByDay(
   eventList: SiftEvent[]
@@ -77,6 +122,10 @@ export default function PlanScreen() {
   const { goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
   const [removedIds, setRemovedIds] = useState<string[]>([]);
+  const [detailEvent, setDetailEvent] = useState<{ event: SiftEvent; goingDate: string } | null>(null);
+  // Manual order per day: date → ordered event IDs
+  const [dayOrder, setDayOrder] = useState<Record<string, string[]>>({});
+  const [isDraggingList, setIsDraggingList] = useState(false);
 
   // Get full event objects for saved + going events
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
@@ -124,6 +173,44 @@ export default function PlanScreen() {
   }, [allIds, dbEvents, removedIds, goingEvents]);
 
   const dayGroups = useMemo(() => groupByDay(shortlistEvents), [shortlistEvents]);
+
+  // Keep dayOrder in sync as events are added/removed
+  useEffect(() => {
+    setDayOrder((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const group of dayGroups) {
+        const ids = group.events.map((e) => e.id);
+        const existing = prev[group.date] ?? [];
+        // Preserve existing order, drop removed, append new
+        const ordered = [
+          ...existing.filter((id) => ids.includes(id)),
+          ...ids.filter((id) => !existing.includes(id)),
+        ];
+        next[group.date] = ordered;
+      }
+      return next;
+    });
+  }, [dayGroups]);
+
+  const orderedDayGroups = useMemo(() =>
+    dayGroups.map((group) => {
+      const order = dayOrder[group.date];
+      if (!order) return group;
+      const eventMap = Object.fromEntries(group.events.map((e) => [e.id, e]));
+      return {
+        ...group,
+        events: order.map((id) => eventMap[id]).filter(Boolean) as SiftEvent[],
+      };
+    }),
+  [dayGroups, dayOrder]);
+
+  const openDetail = useCallback(
+    (event: SiftEvent) => {
+      const goingEntry = goingEvents.find((g) => g.eventId === event.id);
+      setDetailEvent({ event, goingDate: goingEntry?.eventDate ?? event.startDate });
+    },
+    [goingEvents]
+  );
 
   const handleRemove = useCallback(
     (eventId: string) => {
@@ -183,6 +270,18 @@ export default function PlanScreen() {
     setPlanStep("shortlist");
   }, []);
 
+  const detailModal = (
+    <Modal visible={!!detailEvent} animationType="slide" presentationStyle="pageSheet">
+      {detailEvent && (
+        <EventDetail
+          event={detailEvent.event}
+          goingDate={detailEvent.goingDate}
+          onBack={() => setDetailEvent(null)}
+        />
+      )}
+    </Modal>
+  );
+
   // ── Empty state ──────────────────────────────────────
   if (shortlistEvents.length === 0 && !dbLoading && planStep === "shortlist") {
     return (
@@ -204,6 +303,7 @@ export default function PlanScreen() {
             <ChevronRight size={16} strokeWidth={2} color={colors.white} />
           </Pressable>
         </View>
+        {detailModal}
       </View>
     );
   }
@@ -234,87 +334,7 @@ export default function PlanScreen() {
           <View key={group.date} style={s.dayGroup}>
             <Text style={s.dayLabel}>{group.label}</Text>
             {group.events.map((event) => (
-              <View key={event.id} style={s.timelineCard}>
-                <View style={s.timelineRow}>
-                  <Clock
-                    size={14}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineTime}>
-                    {formatTimeShort(event.time)}
-                  </Text>
-                </View>
-                <Pressable onPress={() => router.push(`/event/${event.id}`)}>
-                  <Text style={s.timelineTitleLink}>{event.title}</Text>
-                </Pressable>
-                <View style={s.timelineRow}>
-                  <MapPin
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineMeta}>{event.location}</Text>
-                </View>
-                <View style={s.timelineRow}>
-                  <DollarSign
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineMeta}>
-                    {event.price === 0 ? "Free" : event.priceLabel}
-                  </Text>
-                </View>
-                <View style={s.timelineActions}>
-                  <Pressable
-                    onPress={() => {
-                      Alert.alert("Add to calendar", "Choose your calendar", [
-                        {
-                          text: "Google Calendar",
-                          onPress: () => {
-                            track("calendar_export", { event_id: event.id, method: "google" });
-                            Linking.openURL(generateGoogleCalendarUrl(event));
-                          },
-                        },
-                        {
-                          text: "Apple Calendar",
-                          onPress: async () => {
-                            track("calendar_export", { event_id: event.id, method: "ics" });
-                            const ok = await shareICSFile([event]);
-                            if (!ok) showToast("Couldn't open calendar");
-                          },
-                        },
-                        { text: "Cancel", style: "cancel" },
-                      ]);
-                    }}
-                    style={s.calendarLink}
-                  >
-                    <CalendarPlus
-                      size={14}
-                      strokeWidth={1.5}
-                      color={colors.primary}
-                    />
-                    <Text style={s.calendarLinkText}>Calendar</Text>
-                  </Pressable>
-                  {event.ticketUrl && (
-                    <Pressable
-                      onPress={() => {
-                        track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
-                        if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
-                      }}
-                      style={s.calendarLink}
-                    >
-                      <Ticket
-                        size={14}
-                        strokeWidth={1.5}
-                        color={colors.primary}
-                      />
-                      <Text style={s.calendarLinkText}>Tickets</Text>
-                    </Pressable>
-                  )}
-                </View>
-              </View>
+              <EventPlanCard key={event.id} event={event} onPress={() => openDetail(event)} />
             ))}
           </View>
         ))}
@@ -341,6 +361,7 @@ export default function PlanScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      {detailModal}
       </View>
     );
   }
@@ -365,54 +386,7 @@ export default function PlanScreen() {
           <View key={group.date} style={s.dayGroup}>
             <Text style={s.dayLabel}>{group.label}</Text>
             {group.events.map((event) => (
-              <View key={event.id} style={s.timelineCard}>
-                <View style={s.timelineRow}>
-                  <Clock
-                    size={14}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineTime}>
-                    {formatTimeShort(event.time)}
-                  </Text>
-                </View>
-                <Pressable onPress={() => router.push(`/event/${event.id}`)}>
-                  <Text style={s.timelineTitleLink}>{event.title}</Text>
-                </Pressable>
-                <View style={s.timelineRow}>
-                  <MapPin
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineMeta}>
-                    {event.location} · {event.borough}
-                  </Text>
-                </View>
-                <View style={s.timelineRow}>
-                  <DollarSign
-                    size={13}
-                    strokeWidth={1.5}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={s.timelineMeta}>
-                    {event.price === 0 ? "Free" : event.priceLabel}
-                  </Text>
-                </View>
-                {event.ticketUrl && (
-                  <Pressable
-                    onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
-                    style={[s.calendarLink, { marginTop: 8 }]}
-                  >
-                    <Ticket
-                      size={14}
-                      strokeWidth={1.5}
-                      color={colors.primary}
-                    />
-                    <Text style={s.calendarLinkText}>Tickets</Text>
-                  </Pressable>
-                )}
-              </View>
+              <EventPlanCard key={event.id} event={event} onPress={() => openDetail(event)} />
             ))}
           </View>
         ))}
@@ -430,6 +404,7 @@ export default function PlanScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      {detailModal}
       </View>
     );
   }
@@ -443,63 +418,38 @@ export default function PlanScreen() {
     <ScrollView
       contentContainerStyle={s.scroll}
       showsVerticalScrollIndicator={false}
+      scrollEnabled={!isDraggingList}
     >
-      <Text style={s.heading}>Your shortlist</Text>
-      <Text style={s.sub}>
-        {shortlistEvents.length} event{shortlistEvents.length !== 1 ? "s" : ""}{" "}
-        saved. Remove any you don't want, then build your plan.
-      </Text>
-
-      {dayGroups.map((group) => (
+      {orderedDayGroups.map((group) => (
         <View key={group.date} style={s.dayGroup}>
           <Text style={s.dayLabel}>{group.label}</Text>
-          {group.events.map((event) => (
-            <View key={event.id} style={s.shortlistCard}>
-              <View style={s.shortlistContent}>
-                <Text style={s.shortlistTitle} numberOfLines={2}>
-                  {event.title}
-                </Text>
-                <View style={s.shortlistMeta}>
-                  <Text style={s.shortlistMetaText}>
-                    {formatTimeShort(event.time)} · {event.location}
-                  </Text>
-                </View>
-                <Text style={s.shortlistPrice}>
-                  {event.price === 0 ? "Free" : event.priceLabel}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => handleRemove(event.id)}
-                style={s.removeButton}
-                hitSlop={8}
-              >
-                <Trash2
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-            </View>
-          ))}
+          <DraggableFlatList
+            data={group.events}
+            keyExtractor={(e) => e.id}
+            onDragBegin={() => setIsDraggingList(true)}
+            onDragEnd={({ data }) =>
+              {
+                setIsDraggingList(false);
+                setDayOrder((prev) => ({ ...prev, [group.date]: data.map((e) => e.id) }));
+              }
+            }
+            onRelease={() => setIsDraggingList(false)}
+            scrollEnabled={false}
+            activationDistance={12}
+            renderItem={({ item, drag, isActive }: RenderItemParams<SiftEvent>) => (
+              <EventPlanCard
+                event={item}
+                onPress={() => openDetail(item)}
+                onRemove={() => handleRemove(item.id)}
+                drag={drag}
+                isActive={isActive}
+              />
+            )}
+          />
         </View>
       ))}
-
-      <View style={{ marginTop: 24 }}>
-        <Pressable
-          onPress={() => setPlanStep("confirm")}
-          style={s.primaryButton}
-        >
-          <Text style={s.primaryButtonText}>Build my plan</Text>
-          <ChevronRight size={16} strokeWidth={2} color={colors.white} />
-        </Pressable>
-        <Pressable
-          onPress={() => router.push("/(tabs)/discover")}
-          style={{ marginTop: 12, alignItems: "center" }}
-        >
-          <Text style={s.addMoreText}>+ Add more events</Text>
-        </Pressable>
-      </View>
     </ScrollView>
+    {detailModal}
     </View>
   );
 }
@@ -562,98 +512,6 @@ const s = StyleSheet.create({
     ...typography.h3,
     color: colors.foreground,
     marginBottom: 10,
-  },
-
-  // Shortlist cards
-  shortlistCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 8,
-    ...shadows.card,
-  },
-  shortlistContent: { flex: 1 },
-  shortlistTitle: {
-    ...typography.body,
-    fontWeight: "500",
-    color: colors.foreground,
-    marginBottom: 4,
-  },
-  shortlistMeta: { marginBottom: 2 },
-  shortlistMetaText: {
-    ...typography.xs,
-    color: colors.textSecondary,
-  },
-  shortlistPrice: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    fontWeight: "500",
-  },
-  removeButton: {
-    padding: 8,
-    marginLeft: 8,
-  },
-
-  // Timeline cards (confirm + success)
-  timelineCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 8,
-    ...shadows.card,
-  },
-  timelineRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 4,
-  },
-  timelineTime: {
-    ...typography.sm,
-    fontWeight: "500",
-    color: colors.primary,
-  },
-  timelineTitle: {
-    ...typography.body,
-    fontWeight: "600",
-    color: colors.foreground,
-    marginBottom: 6,
-    marginTop: 2,
-  },
-  timelineTitleLink: {
-    ...typography.body,
-    fontWeight: "600",
-    color: colors.primary,
-    marginBottom: 6,
-    marginTop: 2,
-    textDecorationLine: "underline" as const,
-  },
-  timelineMeta: {
-    ...typography.xs,
-    color: colors.textSecondary,
-  },
-  timelineActions: {
-    flexDirection: "row",
-    gap: 16,
-    marginTop: 10,
-  },
-
-  // Calendar link
-  calendarLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  calendarLinkText: {
-    ...typography.xs,
-    color: colors.primary,
-    fontWeight: "500",
   },
 
   // Buttons
@@ -738,9 +596,47 @@ const s = StyleSheet.create({
     color: colors.textSecondary,
     textDecorationLine: "underline",
   },
-  addMoreText: {
-    ...typography.sm,
-    color: colors.primary,
+});
+
+const sc = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 8,
+    overflow: "hidden",
+    ...shadows.card,
+  },
+  cardActive: {
+    opacity: 0.9,
+    borderColor: colors.primary,
+  },
+  cardMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  thumb: {
+    width: 64,
+    height: 64,
+  },
+  thumbPlaceholder: {
+    width: 64,
+    height: 64,
+    backgroundColor: colors.border,
+  },
+  cardTitle: {
+    ...typography.body,
     fontWeight: "500",
+    color: colors.foreground,
+    flex: 1,
+    paddingRight: 8,
+  },
+  removeBtn: {
+    padding: 14,
   },
 });

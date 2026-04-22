@@ -68,7 +68,6 @@ export default function SignInScreen() {
         const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password: password.trim(),
-          options: { data: { display_name: displayName.trim() || undefined } },
         });
         if (error) {
           showToast(error.message);

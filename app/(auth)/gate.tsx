@@ -5,15 +5,25 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { setGuestFlag } from "@/lib/storage";
 import { track } from "@/lib/track";
 import { colors, radius, typography } from "@/lib/theme";
+import { useUser } from "@/context/UserContext";
 
 export default function AuthGate() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isLoggedIn, signOut } = useUser();
 
-  const handleContinueAsGuest = () => {
-    track("guest_started");
+  const handleFindMyVibe = async () => {
+    track("find_my_vibe_tapped");
+    if (!isLoggedIn) await signOut();
     setGuestFlag();
     router.replace("/(tabs)/discover");
+  };
+
+  const handleShowAnything = async () => {
+    track("show_anything_tapped");
+    if (!isLoggedIn) await signOut();
+    setGuestFlag();
+    router.replace({ pathname: "/(tabs)/discover", params: { browse: "1" } });
   };
 
   const handleSignIn = () => {
@@ -27,7 +37,6 @@ export default function AuthGate() {
       end={{ x: 0.85, y: 1 }}
       style={styles.container}
     >
-      {/* Hero — logo bleeds off the right edge, slightly tilted */}
       <View style={[styles.heroArea, { paddingTop: insets.top }]}>
         <Image
           source={require("../../assets/sift-logo-v3.png")}
@@ -36,7 +45,6 @@ export default function AuthGate() {
         />
       </View>
 
-      {/* Bottom content */}
       <View style={[styles.contentArea, { paddingBottom: insets.bottom + 36 }]}>
         <Text style={styles.heading}>
           Find events in{" "}
@@ -47,17 +55,25 @@ export default function AuthGate() {
 
         <View style={styles.buttons}>
           <Pressable
-            onPress={handleSignIn}
+            onPress={handleFindMyVibe}
             style={({ pressed }) => [styles.primaryButton, pressed && { opacity: 0.92 }]}
           >
-            <Text style={styles.primaryButtonText}>Sign in to save your taste</Text>
+            <Text style={styles.primaryButtonText}>Find my vibe</Text>
           </Pressable>
           <Pressable
-            onPress={handleContinueAsGuest}
-            style={({ pressed }) => [styles.ghostButton, pressed && { opacity: 0.5 }]}
+            onPress={handleShowAnything}
+            style={({ pressed }) => [styles.primaryButton, pressed && { opacity: 0.92 }]}
           >
-            <Text style={styles.ghostButtonText}>Continue without signing in</Text>
+            <Text style={styles.primaryButtonText}>Show anything</Text>
           </Pressable>
+          {!isLoggedIn && (
+            <Pressable
+              onPress={handleSignIn}
+              style={({ pressed }) => [styles.ghostButton, pressed && { opacity: 0.5 }]}
+            >
+              <Text style={styles.ghostButtonText}>Sign in to save your taste</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </LinearGradient>
@@ -69,7 +85,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // ── Hero area ──────────────────────────────────────
   heroArea: {
     flex: 1,
     alignItems: "center",
@@ -80,7 +95,6 @@ const styles = StyleSheet.create({
     height: 340,
   },
 
-  // ── Content area ───────────────────────────────────
   contentArea: {
     paddingHorizontal: 28,
     gap: 28,
@@ -96,7 +110,6 @@ const styles = StyleSheet.create({
     color: "#6B93C4",
   },
 
-  // ── Buttons ────────────────────────────────────────
   buttons: {
     gap: 10,
   },

@@ -22,16 +22,11 @@ export default function Index() {
     );
   }
 
-  // If logged in and onboarding done, go straight to tabs
-  if (isLoggedIn && hasOnboardingDoneFlag()) {
-    return <Redirect href="/(tabs)/discover" />;
-  }
-
-  // If guest flag set, go to tabs
+  // If already passed the gate this session, go straight to tabs
   if (hasGuestFlag()) {
     return <Redirect href="/(tabs)/discover" />;
   }
 
-  // Otherwise, auth gate
+  // Always show gate — logged-in users see "Start exploring"
   return <Redirect href="/(auth)/gate" />;
 }

@@ -27,7 +27,6 @@ import {
   Share2,
   Star,
   Ticket,
-  X,
 } from "lucide-react-native";
 import BottomSheet from "@/components/ui/BottomSheet";
 import GoingDateSheet from "@/components/events/GoingDateSheet";
@@ -309,9 +308,6 @@ export default function EventCard({
                 </Pressable>
                 <Pressable onPress={onSharePress} style={styles.iconButton} hitSlop={8}>
                   <Share2 size={16} strokeWidth={1.5} color="#fff" />
-                </Pressable>
-                <Pressable onPress={onDismiss} style={styles.iconButton} hitSlop={8}>
-                  <X size={16} strokeWidth={2} color="#fff" />
                 </Pressable>
               </View>
 

@@ -137,6 +137,22 @@ export async function syncCustomList(userId: string, name: string): Promise<void
   } catch {}
 }
 
+export async function renameCustomListDB(userId: string, oldName: string, newName: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.from("custom_lists").update({ name: newName }).eq("user_id", userId).eq("name", oldName);
+    await supabase.from("saved_events").update({ list_name: newName }).eq("user_id", userId).eq("list_name", oldName);
+  } catch {}
+}
+
+export async function deleteCustomListDB(userId: string, name: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.from("custom_lists").delete().eq("user_id", userId).eq("name", name);
+    await supabase.from("saved_events").delete().eq("user_id", userId).eq("list_name", name);
+  } catch {}
+}
+
 // ── Row mappers ──────────────────────────────────────────────
 
 function rowToProfile(row: Record<string, unknown>): UserProfile {

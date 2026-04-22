@@ -32,10 +32,7 @@ export interface SharedWithYouEvent {
 }
 
 export const DEFAULT_LISTS = [
-  "Want to go",
-  "Date ideas",
-  "Free stuff",
-  "With friends",
+  "Favorites",
 ] as const;
 
 export interface SiftStorage {

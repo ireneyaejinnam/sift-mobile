@@ -40,6 +40,7 @@ interface EventDetailProps {
   event: SiftEvent;
   onBack: () => void;
   onRequestSignIn?: () => void;
+  goingDate?: string; // when set: show only this session + "Cancel going" button
 }
 
 function formatShortDate(d: string): string {
@@ -64,6 +65,7 @@ export default function EventDetail({
   event,
   onBack,
   onRequestSignIn,
+  goingDate,
 }: EventDetailProps) {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
@@ -77,7 +79,9 @@ export default function EventDetail({
   } = useUser();
 
   // Score and sort sessions for display
-  const sessions = event.sessions ?? [];
+  const sessions = goingDate
+    ? (event.sessions ?? []).filter((s) => s.startDate === goingDate)
+    : (event.sessions ?? []);
   const scoredSessions = sessions.length > 1
     ? [...sessions]
         .map((s) => ({
@@ -440,7 +444,7 @@ export default function EventDetail({
                     going && styles.goingButtonTextActive,
                   ]}
                 >
-                  Going
+                  {goingDate && going ? "Cancel going" : "Going"}
                 </Text>
               </Pressable>
             </View>
