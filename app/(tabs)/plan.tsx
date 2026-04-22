@@ -24,6 +24,8 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import { generateGoogleCalendarUrl, shareICSFile } from "@/lib/calendar";
 import { fetchEventById } from "@/lib/getEvents";
+import { supabase } from "@/lib/supabase";
+import { fetchPlanEventOrders, syncPlanEventOrder } from "@/lib/userDataService";
 import { events as allEvents } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
 import DraggableFlatList, {
@@ -119,13 +121,15 @@ export default function PlanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
-  const { goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
+  const { isLoggedIn, goingEvents, savedEvents, toggleGoing, removeSavedEvent } = useUser();
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [detailEvent, setDetailEvent] = useState<{ event: SiftEvent; goingDate: string } | null>(null);
   // Manual order per day: date → ordered event IDs
   const [dayOrder, setDayOrder] = useState<Record<string, string[]>>({});
   const [isDraggingList, setIsDraggingList] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [hasLoadedRemoteOrder, setHasLoadedRemoteOrder] = useState(false);
 
   // Get full event objects for saved + going events
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
@@ -136,6 +140,18 @@ export default function PlanScreen() {
     const savedIds = savedEvents.map((e) => e.eventId);
     return [...new Set([...goingIds, ...savedIds])];
   }, [goingEvents, savedEvents]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !supabase) {
+      setUserId(null);
+      setHasLoadedRemoteOrder(false);
+      return;
+    }
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id ?? null);
+    });
+  }, [isLoggedIn]);
 
   // Fetch event details from Supabase for IDs not in hardcoded data
   useEffect(() => {
@@ -174,10 +190,28 @@ export default function PlanScreen() {
 
   const dayGroups = useMemo(() => groupByDay(shortlistEvents), [shortlistEvents]);
 
+  useEffect(() => {
+    if (!userId) {
+      setHasLoadedRemoteOrder(true);
+      return;
+    }
+
+    fetchPlanEventOrders(userId).then((rows) => {
+      const next: Record<string, string[]> = {};
+      for (const row of rows) {
+        if (!next[row.planDate]) next[row.planDate] = [];
+        next[row.planDate].push(row.eventId);
+      }
+      setDayOrder(next);
+      setHasLoadedRemoteOrder(true);
+    });
+  }, [userId]);
+
   // Keep dayOrder in sync as events are added/removed
   useEffect(() => {
     setDayOrder((prev) => {
       const next: Record<string, string[]> = {};
+      const changedDates: string[] = [];
       for (const group of dayGroups) {
         const ids = group.events.map((e) => e.id);
         const existing = prev[group.date] ?? [];
@@ -187,10 +221,18 @@ export default function PlanScreen() {
           ...ids.filter((id) => !existing.includes(id)),
         ];
         next[group.date] = ordered;
+        if (ordered.join("|") !== existing.join("|")) changedDates.push(group.date);
       }
+
+      if (userId && hasLoadedRemoteOrder && changedDates.length > 0) {
+        changedDates.forEach((date) => {
+          void syncPlanEventOrder(userId, date, next[date] ?? []);
+        });
+      }
+
       return next;
     });
-  }, [dayGroups]);
+  }, [dayGroups, userId, hasLoadedRemoteOrder]);
 
   const orderedDayGroups = useMemo(() =>
     dayGroups.map((group) => {
@@ -250,7 +292,7 @@ export default function PlanScreen() {
 
   const handleSharePlan = useCallback(async () => {
     const lines: string[] = ["My weekend plan (via Sift):\n"];
-    for (const group of dayGroups) {
+    for (const group of orderedDayGroups) {
       lines.push(group.label);
       for (const e of group.events) {
         const time = formatTimeShort(e.time);
@@ -263,7 +305,7 @@ export default function PlanScreen() {
     const text = lines.join("\n");
     await Clipboard.setStringAsync(text);
     showToast("Plan copied to clipboard");
-  }, [dayGroups, showToast]);
+  }, [orderedDayGroups, showToast]);
 
   const handleStartOver = useCallback(() => {
     setRemovedIds([]);
@@ -330,7 +372,7 @@ export default function PlanScreen() {
           </Text>
         </View>
 
-        {dayGroups.map((group) => (
+        {orderedDayGroups.map((group) => (
           <View key={group.date} style={s.dayGroup}>
             <Text style={s.dayLabel}>{group.label}</Text>
             {group.events.map((event) => (
@@ -382,7 +424,7 @@ export default function PlanScreen() {
           Here's your lineup. Hit "Looks good" to lock it in.
         </Text>
 
-        {dayGroups.map((group) => (
+        {orderedDayGroups.map((group) => (
           <View key={group.date} style={s.dayGroup}>
             <Text style={s.dayLabel}>{group.label}</Text>
             {group.events.map((event) => (
@@ -427,12 +469,12 @@ export default function PlanScreen() {
             data={group.events}
             keyExtractor={(e) => e.id}
             onDragBegin={() => setIsDraggingList(true)}
-            onDragEnd={({ data }) =>
-              {
-                setIsDraggingList(false);
-                setDayOrder((prev) => ({ ...prev, [group.date]: data.map((e) => e.id) }));
-              }
-            }
+            onDragEnd={({ data }) => {
+              const nextOrder = data.map((e) => e.id);
+              setIsDraggingList(false);
+              setDayOrder((prev) => ({ ...prev, [group.date]: nextOrder }));
+              if (userId) void syncPlanEventOrder(userId, group.date, nextOrder);
+            }}
             onRelease={() => setIsDraggingList(false)}
             scrollEnabled={false}
             activationDistance={12}

@@ -20,11 +20,10 @@ import Animated, {
   runOnJS,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ArrowLeft,
-  CalendarCheck,
   Drama,
   Dumbbell,
   Laugh,
@@ -59,7 +58,7 @@ import type { TasteProfile } from "@/lib/tasteProfile";
 import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
-import { colors, spacing, radius, typography } from "@/lib/theme";
+import { colors, spacing, radius, typography, shadows } from "@/lib/theme";
 import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
 
@@ -124,10 +123,6 @@ export default function DiscoverScreen() {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
-  const planCount = isLoggedIn ? new Set([
-    ...savedEvents.map((e) => e.eventId),
-    ...goingEvents.map((e) => e.eventId),
-  ]).size : 0;
 
   useEffect(() => {
     if (userEmail) {
@@ -140,8 +135,7 @@ export default function DiscoverScreen() {
     getDismissedEvents().then(setDismissedHistory);
   }, []);
 
-  const { browse } = useLocalSearchParams<{ browse?: string }>();
-
+  const [entryMode, setEntryMode] = useState<"chooser" | "browse" | "sift">("chooser");
   const [step, setStep] = useState<Step>("category");
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -241,27 +235,13 @@ export default function DiscoverScreen() {
   // Session-dismissed: never cleared by reset() — events stay gone for the whole session
   const sessionDismissedRef = useRef(new Set<string>());
 
-  // Intercept Android hardware back when mid-quiz to go back one step instead of exiting
-  useFocusEffect(
-    useCallback(() => {
-      const onBack = () => {
-        if (step !== "category") {
-          handleBack();
-          return true; // consume the event
-        }
-        return false;
-      };
-      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
-      return () => sub.remove();
-    }, [step])
-  );
-
   const reset = useCallback(() => {
     loadingRef.current = false;
     expandedToInterestsRef.current = false;
     expandedInterestCatsRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
+    setEntryMode("chooser");
     setStep("category");
     setFilters({});
     setSlots([]);
@@ -279,6 +259,25 @@ export default function DiscoverScreen() {
       setStep(flow[idx - 1]);
     }
   }, [step]);
+
+  // Intercept Android hardware back when mid-quiz to go back one step instead of exiting
+  useFocusEffect(
+    useCallback(() => {
+      const onBack = () => {
+        if (entryMode === "sift" && step === "category") {
+          reset();
+          return true;
+        }
+        if (step !== "category") {
+          handleBack();
+          return true;
+        }
+        return false;
+      };
+      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+      return () => sub.remove();
+    }, [entryMode, step, handleBack, reset])
+  );
 
   const goToResults = useCallback(async (f: Filters, opts?: { skipTransition?: boolean }) => {
     if (loadingRef.current) return;
@@ -445,18 +444,41 @@ export default function DiscoverScreen() {
     }
   }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
 
-  // Skip quiz when navigated here with ?browse=1
-  useEffect(() => {
-    if (browse === "1") {
-      router.setParams({ browse: undefined });
-      goToResults({});
-    }
-  }, [browse]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
     await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
+
+  const startBrowsing = useCallback(() => {
+    loadingRef.current = false;
+    expandedToInterestsRef.current = false;
+    expandedInterestCatsRef.current = [];
+    sessionDismissedRef.current = new Set();
+    setIsTransitioning(false);
+    setEntryMode("browse");
+    setStep("category");
+    setFilters({});
+    setSlots([]);
+    setResultPool([]);
+    setDismissedIds([]);
+    setSelectedEvent(null);
+    void goToResults({});
+  }, [goToResults]);
+
+  const startSifting = useCallback(() => {
+    loadingRef.current = false;
+    expandedToInterestsRef.current = false;
+    expandedInterestCatsRef.current = [];
+    sessionDismissedRef.current = new Set();
+    setIsTransitioning(false);
+    setEntryMode("sift");
+    setStep("category");
+    setFilters({});
+    setSlots([]);
+    setResultPool([]);
+    setDismissedIds([]);
+    setSelectedEvent(null);
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -639,14 +661,47 @@ export default function DiscoverScreen() {
     );
   }
 
+  if (entryMode === "chooser") {
+    return (
+      <View style={s.choicePage}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Discover</Text>
+        </View>
+        <ScrollView
+          contentContainerStyle={[s.choiceScroll, { paddingTop: 18, paddingBottom: insets.bottom + 32 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.choiceInner}>
+            <View style={s.catHeader}>
+              <Text style={s.catHeading}>How do you want{"\n"}to explore?</Text>
+            </View>
+
+            <View style={s.choiceButtons}>
+              <Pressable onPress={startBrowsing} style={[s.choiceAction, s.choiceActionPrimary]}>
+                <Text style={s.choiceActionPrimaryText}>Surprise me</Text>
+              </Pressable>
+
+              <Pressable onPress={startSifting} style={[s.choiceAction, s.choiceActionSecondary]}>
+                <Text style={s.choiceActionSecondaryText}>Sifting Event!</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   // ── Quiz steps ─────────────────────────────────────────
 
-  if (step === "category" || step === "date" || step === "distance") {
+  if (entryMode === "sift" && (step === "category" || step === "date" || step === "distance")) {
     return (
       <View style={s.catPageContainer}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Discover</Text>
+        </View>
         <ProgressBar step={step} />
         <ScrollView
-          contentContainerStyle={[s.dateScroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
+          contentContainerStyle={[s.dateScroll, { paddingTop: 24, paddingBottom: insets.bottom + 24 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -668,19 +723,16 @@ export default function DiscoverScreen() {
               <View>
                 <View style={s.catHeader}>
                   <Text style={s.catHeading}>What are you{"\n"}in the mood for?</Text>
-                  <Text style={s.catSub}>Select up to 3.</Text>
                 </View>
                 <View style={s.catGrid}>
                   {categories.map((c) => {
                     const cats = filters.categories ?? [];
                     const isSelected = cats.includes(c.value);
-                    const atLimit = cats.length >= 3 && !isSelected;
                     return (
                       <Pressable
                         key={c.value}
-                        style={[s.catTile, isSelected && s.catTileSelected, atLimit && { opacity: 0.4 }]}
+                        style={[s.catTile, isSelected && s.catTileSelected]}
                         onPress={() => {
-                          if (atLimit) return;
                           const next = isSelected
                             ? cats.filter((x) => x !== c.value)
                             : [...cats, c.value];
@@ -713,7 +765,7 @@ export default function DiscoverScreen() {
                     <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
                       <Sparkles size={16} color="#3A6EA5" strokeWidth={1.5} />
                     </View>
-                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Surprise me</Text>
+                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Anything works</Text>
                   </Pressable>
                 </View>
                 <View style={[s.catButtons, { marginTop: 28 }]}>
@@ -733,7 +785,6 @@ export default function DiscoverScreen() {
               <View>
                 <View style={s.catHeader}>
                   <Text style={s.catHeading}>When are you free?</Text>
-                  <Text style={s.catSub}>Pick a date range and we'll narrow things down.</Text>
                 </View>
                 <View style={s.datePickerWrap}>
                   <DateRangePicker
@@ -762,7 +813,7 @@ export default function DiscoverScreen() {
                       <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
                         <Zap size={16} color="#3A6EA5" strokeWidth={1.5} />
                       </View>
-                      <Text style={[s.catLabel, { color: "#3A6EA5" }]}>I'm spontaneous</Text>
+                      <Text style={[s.catLabel, { color: "#3A6EA5" }]}>I'm flexible</Text>
                     </Pressable>
                   </View>
                   <Pressable
@@ -786,7 +837,6 @@ export default function DiscoverScreen() {
               <View>
                 <View style={[s.catHeader, { marginTop: 60 }]}>
                   <Text style={s.catHeading}>Where in NYC?</Text>
-                  <Text style={s.catSub}>Pick one or more neighborhoods.</Text>
                 </View>
                 <View style={s.catGrid}>
                   {boroughOptions.map((b) => {
@@ -860,14 +910,15 @@ export default function DiscoverScreen() {
       <View style={[s.stickyHeader, { paddingTop: insets.top + 14 }]}>
         <View style={s.resultsHeaderRow}>
           <View style={{ flex: 1 }}>
+            <Text style={s.stickyHeading}>Discover</Text>
             <Text style={s.resultsHeading}>
-              {loading ? "Sorting picks..." : (userProfile ? "Your Top Picks" : "Here's what we found")}
+              {loading ? "Sorting picks..." : (userProfile ? "Your top picks" : "Here’s what we found")}
             </Text>
-            {resultPool.length > 0 && (
-              <Text style={s.eventCountLabel}>
-                {resultPool.length} event{resultPool.length !== 1 ? "s" : ""} · swipe to save or skip
-              </Text>
-            )}
+            <Text style={s.eventCountLabel}>
+              {resultPool.length > 0
+                ? `${resultPool.length} event${resultPool.length !== 1 ? "s" : ""} · swipe to save or skip`
+                : "Swipe to save or skip"}
+            </Text>
           </View>
           <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
             <Text style={s.startOverText}>Start over</Text>
@@ -1009,23 +1060,6 @@ export default function DiscoverScreen() {
             </View>
           ) : null
         }
-        ListFooterComponent={
-          planCount > 0 && slots.length > 0 ? (
-            <Pressable
-              onPress={() => router.push("/(tabs)/plan")}
-              style={s.planCta}
-            >
-              <CalendarCheck size={18} strokeWidth={1.5} color={colors.primary} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.planCtaTitle}>Plan your weekend</Text>
-                <Text style={s.planCtaSub}>
-                  {planCount} event{planCount !== 1 ? "s" : ""} saved
-                </Text>
-              </View>
-              <Text style={s.planCtaArrow}>→</Text>
-            </Pressable>
-          ) : null
-        }
       />
 
       <BottomSheet
@@ -1115,6 +1149,47 @@ export default function DiscoverScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  choicePage: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  choiceScroll: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.page,
+    justifyContent: "center",
+  },
+  choiceInner: {
+    width: "100%",
+    maxWidth: 360,
+    alignSelf: "center",
+  },
+  choiceButtons: {
+    gap: 12,
+  },
+  choiceAction: {
+    paddingVertical: 15,
+    borderRadius: radius.full,
+    alignItems: "center",
+  },
+  choiceActionPrimary: {
+    backgroundColor: colors.primary,
+  },
+  choiceActionPrimaryText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  choiceActionSecondary: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.card,
+  },
+  choiceActionSecondaryText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -1250,14 +1325,17 @@ const s = StyleSheet.create({
   },
   stickyHeader: {
     paddingHorizontal: spacing.page,
-    paddingBottom: 12,
-    backgroundColor: colors.white,
+    paddingBottom: 8,
+    backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  stickyHeading: {
+    ...typography.sectionHeading,
+  },
   resultsHeaderRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
   },
@@ -1297,33 +1375,6 @@ const s = StyleSheet.create({
     ...typography.xs,
     color: colors.textMuted,
     marginTop: 3,
-  },
-  planCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    padding: 14,
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  planCtaTitle: {
-    ...typography.sm,
-    fontWeight: "600",
-    color: colors.primary,
-  },
-  planCtaSub: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
-  planCtaArrow: {
-    fontSize: 18,
-    color: colors.primary,
-    fontWeight: "600",
   },
   // End card — shown when result pool is exhausted
   endCard: {

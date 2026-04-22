@@ -32,6 +32,7 @@ import {
   syncCustomList,
   renameCustomListDB,
   deleteCustomListDB,
+  reorderCustomListsDB,
 } from "@/lib/userDataService";
 import { supabase } from "@/lib/supabase";
 import { fetchEventById } from "@/lib/getEvents";
@@ -120,8 +121,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
             // Ensure "Favorites" list exists.
             if (!data.customLists.includes("Favorites")) {
-              data = { ...data, customLists: ["Favorites", ...data.customLists] };
-              syncCustomList(user.id, "Favorites");
+              const customLists = ["Favorites", ...data.customLists];
+              data = { ...data, customLists };
+              syncCustomList(user.id, "Favorites", 0);
+              reorderCustomListsDB(user.id, customLists);
             }
 
             // Backfill missing event dates in saved events.
@@ -230,8 +233,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
         // Ensure "Favorites" list exists.
         if (!data.customLists.includes("Favorites")) {
-          data = { ...data, customLists: ["Favorites", ...data.customLists] };
-          if (userId) syncCustomList(userId, "Favorites");
+          const customLists = ["Favorites", ...data.customLists];
+          data = { ...data, customLists };
+          if (userId) {
+            syncCustomList(userId, "Favorites", 0);
+            reorderCustomListsDB(userId, customLists);
+          }
         }
 
         const next: SiftStorage = {
@@ -340,8 +347,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     (listName: string) => {
       const trimmed = listName.trim();
       if (!trimmed || storage.customLists.includes(trimmed)) return;
-      persist({ ...storage, customLists: [...storage.customLists, trimmed] });
-      if (userIdRef.current) syncCustomList(userIdRef.current, trimmed);
+      const customLists = [...storage.customLists, trimmed];
+      persist({ ...storage, customLists });
+      if (userIdRef.current) syncCustomList(userIdRef.current, trimmed, customLists.length - 1);
     },
     [storage, persist]
   );
@@ -350,6 +358,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     (oldName: string, newName: string) => {
       const trimmed = newName.trim();
       if (!trimmed || trimmed === oldName) return;
+      if (storage.customLists.includes(trimmed)) return;
       const customLists = storage.customLists.map((l) => l === oldName ? trimmed : l);
       const savedEvents = storage.savedEvents.map((s) =>
         s.listName === oldName ? { ...s, listName: trimmed } : s
@@ -394,7 +403,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (userIdRef.current) {
         syncSavedEvent(userIdRef.current, newEvent);
-        if (isNew) syncCustomList(userIdRef.current, trimmed);
+        if (isNew) syncCustomList(userIdRef.current, trimmed, customLists.length - 1);
       }
     },
     [storage, persist]
@@ -408,6 +417,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const reorderCustomLists = useCallback(
     (newOrder: string[]) => {
       persist({ ...storage, customLists: newOrder });
+      if (userIdRef.current) reorderCustomListsDB(userIdRef.current, newOrder);
     },
     [storage, persist]
   );

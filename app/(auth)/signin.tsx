@@ -40,6 +40,10 @@ export default function SignInScreen() {
 
   const handleForgotPassword = async () => {
     if (!email.trim() || loading) return;
+    if (!supabase) {
+      showToast("Sign in is not configured right now.");
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
@@ -61,6 +65,10 @@ export default function SignInScreen() {
 
   const handleSubmit = async () => {
     if (!canSubmit || loading) return;
+    if (!supabase) {
+      showToast("Sign in is not configured right now.");
+      return;
+    }
     setLoading(true);
 
     try {

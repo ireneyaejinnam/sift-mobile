@@ -74,7 +74,9 @@ export default function SavedListsSection() {
 
   const handleRenameConfirm = (oldName: string) => {
     const trimmed = renameInput.trim();
-    if (trimmed && trimmed !== oldName) renameCustomList(oldName, trimmed);
+    if (trimmed && trimmed !== oldName && !listNames.includes(trimmed)) {
+      renameCustomList(oldName, trimmed);
+    }
     setRenamingList(null);
   };
 
