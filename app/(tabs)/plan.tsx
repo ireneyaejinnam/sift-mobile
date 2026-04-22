@@ -10,7 +10,7 @@ import {
   ScrollView,
   StyleSheet,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import EventDetail from "@/components/events/EventDetail";
 import CalendarSection from "@/components/profile/CalendarSection";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -82,7 +82,13 @@ export default function PlanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
-  const { isLoggedIn, goingEvents, toggleGoing, removeSavedEvent } = useUser();
+  const { isLoggedIn, goingEvents, toggleGoing, removeSavedEvent, refreshFromRemote } = useUser();
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) void refreshFromRemote();
+    }, [isLoggedIn, refreshFromRemote])
+  );
   const [planStep, setPlanStep] = useState<PlanStep>("shortlist");
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [detailEvent, setDetailEvent] = useState<{ event: SiftEvent; goingDate: string } | null>(null);

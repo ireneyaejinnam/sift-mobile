@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";                                         
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { User, Pencil, Check, LogOut, ChevronRight, Settings } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
@@ -60,6 +60,7 @@ export default function ProfileTab() {
     createdAt,
     updateDisplayName,
     signOut,
+    refreshFromRemote,
   } = useUser();
 
   const insets = useSafeAreaInsets();
@@ -70,6 +71,13 @@ export default function ProfileTab() {
   useEffect(() => {
     if (isLoggedIn) loadTasteProfile().then(setTasteProfile);
   }, [isLoggedIn]);
+
+  // Re-pull going/saved on focus so server-side deletions reflect in the stats.
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) void refreshFromRemote();
+    }, [isLoggedIn, refreshFromRemote])
+  );
 
   const topCategory = tasteProfile
     ? Object.entries(tasteProfile.categoryWeights).sort(([, a], [, b]) => b - a)[0]

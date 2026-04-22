@@ -65,6 +65,7 @@ interface UserContextValue extends SiftStorage {
   addSharedWithYou: (eventId: string) => void;
   updateDisplayName: (name: string) => void;
   signOut: () => Promise<void>;
+  refreshFromRemote: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -94,6 +95,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const clean = { ...initialStorage };
     setStorage(clean);
     await saveStorage(clean);
+  }, []);
+
+  // Re-fetch saved/going lists from Supabase. Called on tab focus so that
+  // server-side changes (e.g. event deletion invalidating a going_events row)
+  // propagate without requiring sign-out.
+  const refreshFromRemote = useCallback(async () => {
+    const userId = userIdRef.current;
+    if (!userId) return;
+    const remote = await fetchUserData(userId);
+    if (!remote) return;
+    setStorage((prev) => ({
+      ...prev,
+      savedEvents: remote.savedEvents,
+      goingEvents: remote.goingEvents,
+      customLists: remote.customLists,
+    }));
   }, []);
 
   // ── Startup: restore session + load data ─────────────────
@@ -504,12 +521,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       addSharedWithYou,
       updateDisplayName,
       signOut,
+      refreshFromRemote,
     }),
     [
       storage, ready, setAuth, setUserProfile,
       addSavedEvent, removeSavedEvent, getSavedListForEvent,
       toggleGoing, isGoing, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
-      getAllListNames, addSharedWithYou, updateDisplayName, signOut,
+      getAllListNames, addSharedWithYou, updateDisplayName, signOut, refreshFromRemote,
     ]
   );
 
