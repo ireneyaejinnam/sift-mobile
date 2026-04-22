@@ -147,8 +147,12 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
   const [openSheet, setOpenSheet] = useState<OpenSheet>(null);
 
   const cats = filters.categories ?? [];
+  const allCategoryValues = CATEGORIES.map((c) => c.value);
+  const allCatsSelected =
+    cats.length === allCategoryValues.length &&
+    allCategoryValues.every((value) => cats.includes(value));
   const categoryLabel =
-    cats.length === 0
+    cats.length === 0 || allCatsSelected
       ? "All Moods"
       : cats.length === 1
       ? CATEGORIES.find((c) => c.value === cats[0])?.label ?? cats[0]
@@ -175,7 +179,7 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
         <Chip
           label={categoryLabel}
-          active={cats.length > 0}
+          active={cats.length > 0 && !allCatsSelected}
           onPress={() => setOpenSheet("categories")}
         />
         <Chip
@@ -200,9 +204,14 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
         <View style={styles.sheetContent}>
           <SheetOption
             label="Select All"
-            selected={cats.length === 0}
+            selected={allCatsSelected}
             multi
-            onPress={() => onChange({ ...filters, categories: undefined })}
+            onPress={() =>
+              onChange({
+                ...filters,
+                categories: allCatsSelected ? undefined : allCategoryValues,
+              })
+            }
           />
           <View style={styles.sheetDivider} />
           {CATEGORIES.map((c) => {

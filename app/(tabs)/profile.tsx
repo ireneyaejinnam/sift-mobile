@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";                                         
+import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { User, Pencil, Check, LogOut, ChevronRight, Settings } from "lucide-react-native";
@@ -7,7 +8,6 @@ import { useUser } from "@/context/UserContext";
 import { loadTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { events } from "@/data/events";
-import CalendarSection from "@/components/profile/CalendarSection";
 import SavedListsSection from "@/components/profile/SavedListsSection";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
@@ -96,7 +96,7 @@ export default function ProfileTab() {
       <View style={[st.stickyHeader, { paddingTop: insets.top + 16 }]}>
         <Text style={st.stickyHeading}>Profile</Text>
       </View>
-      <ScrollView
+      <NestableScrollContainer
         contentContainerStyle={[st.scroll, !isLoggedIn && st.scrollGuest]}
         showsVerticalScrollIndicator={false}
       >
@@ -167,37 +167,6 @@ export default function ProfileTab() {
               <Text style={st.signInText}>Sign in to save your taste</Text>
             </Pressable>
           </View>
-        )}
-
-        {/* ── Stats ───────────────────────────── */}
-        {isLoggedIn && (
-          <View style={st.statsRow}>
-            <View style={st.statCard}>
-              <Text style={st.statNumber}>{savedEvents.length}</Text>
-              <Text style={st.statLabel}>Saved</Text>
-            </View>
-            <View style={st.statDivider} />
-            <View style={st.statCard}>
-              <Text style={st.statNumber}>{goingEvents.length}</Text>
-              <Text style={st.statLabel}>Going</Text>
-            </View>
-            {createdAt && (
-              <>
-                <View style={st.statDivider} />
-                <View style={st.statCard}>
-                  <Text style={st.statNumber}>
-                    {new Date(createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                  </Text>
-                  <Text style={st.statLabel}>Member since</Text>
-                </View>
-              </>
-            )}
-          </View>
-        )}
-
-        {/* ── Calendar ────────────────────────── */}
-        {isLoggedIn && (
-          <CalendarSection goingEvents={goingEvents} savedEvents={savedEvents} />
         )}
 
         {/* ── Shared with you ─────────────────── */}
@@ -310,6 +279,31 @@ export default function ProfileTab() {
           </View>
         )}
 
+        {/* ── Stats ───────────────────────────── */}
+        {isLoggedIn && (
+          <View style={st.statsRow}>
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{savedEvents.length}</Text>
+              <Text style={st.statLabel}>Saved</Text>
+            </View>
+            <View style={st.statDivider} />
+            <View style={st.statCard}>
+              <Text style={st.statNumber}>{goingEvents.length}</Text>
+              <Text style={st.statLabel}>Going</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Member since ────────────────────── */}
+        {isLoggedIn && createdAt && (
+          <View style={st.memberSinceCard}>
+            <Text style={st.memberSinceLabel}>Member since</Text>
+            <Text style={st.memberSinceValue}>
+              {new Date(createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+            </Text>
+          </View>
+        )}
+
         {/* ── Sign out ────────────────────────── */}
         {isLoggedIn && (
           <Pressable
@@ -323,7 +317,7 @@ export default function ProfileTab() {
             <Text style={st.signOutText}>Sign out</Text>
           </Pressable>
         )}
-      </ScrollView>
+      </NestableScrollContainer>
     </View>
   );
 }
@@ -524,4 +518,16 @@ const st = StyleSheet.create({
     paddingVertical: 14,
   },
   signOutText: { ...typography.sm, color: colors.textMuted },
+  memberSinceCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: 16,
+    marginBottom: 12,
+    ...shadows.card,
+  },
+  memberSinceLabel: { ...typography.sm, color: colors.textSecondary },
+  memberSinceValue: { ...typography.sm, fontWeight: "600", color: colors.foreground },
 });

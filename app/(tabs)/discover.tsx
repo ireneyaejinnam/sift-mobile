@@ -3,9 +3,8 @@ import {
   View,
   Text,
   Pressable,
-  FlatList,
   Modal,
-  RefreshControl,
+  type LayoutChangeEvent,
   ScrollView,
   StyleSheet,
   BackHandler,
@@ -24,7 +23,6 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ArrowLeft,
-  CalendarCheck,
   Drama,
   Dumbbell,
   Laugh,
@@ -32,6 +30,7 @@ import {
   Moon,
   Music,
   Palette,
+  RotateCcw,
   ShoppingBag,
   Sparkles,
   Trees,
@@ -59,7 +58,7 @@ import type { TasteProfile } from "@/lib/tasteProfile";
 import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
-import { colors, spacing, radius, typography } from "@/lib/theme";
+import { colors, spacing, radius, typography, shadows } from "@/lib/theme";
 import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
 
@@ -68,20 +67,6 @@ const TRANSITION_MSGS = [
   "Checking what's on this weekend...",
   "Tailoring for you...",
 ];
-
-const PICK_GRADIENTS: Partial<Record<EventCategory, [string, string]>> = {
-  arts:      ["#C9A882", "#8B5E3C"],
-  music:     ["#5B8DB8", "#2C4F70"],
-  outdoors:  ["#5A9E6F", "#2D6644"],
-  fitness:   ["#C0554A", "#7A2E28"],
-  comedy:    ["#B8A840", "#6E6020"],
-  food:      ["#C47830", "#7A4810"],
-  nightlife: ["#6B4E9E", "#3A2060"],
-  theater:   ["#4A7A9E", "#1E4060"],
-  workshops: ["#6A9E50", "#304E20"],
-  popups:    ["#B87050", "#6A3820"],
-};
-
 
 type CatIcon = React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
 
@@ -124,10 +109,6 @@ export default function DiscoverScreen() {
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
-  const planCount = isLoggedIn ? new Set([
-    ...savedEvents.map((e) => e.eventId),
-    ...goingEvents.map((e) => e.eventId),
-  ]).size : 0;
 
   useEffect(() => {
     if (userEmail) {
@@ -140,6 +121,7 @@ export default function DiscoverScreen() {
     getDismissedEvents().then(setDismissedHistory);
   }, []);
 
+  const [entryMode, setEntryMode] = useState<"chooser" | "browse" | "sift">("chooser");
   const [step, setStep] = useState<Step>("category");
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -151,25 +133,12 @@ export default function DiscoverScreen() {
   const [goingSheetEvent, setGoingSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [showGestureTip, setShowGestureTip] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
+  const [cardStageHeight, setCardStageHeight] = useState(0);
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
   const expandedInterestCatsRef = useRef<EventCategory[]>([]);
-
-  const weekendPicks = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const cutoff = new Date(today);
-    cutoff.setDate(cutoff.getDate() + 4);
-    return resultPool
-      .filter((e) => {
-        const d = new Date(e.startDate + "T12:00:00");
-        return d >= today && d < cutoff && (e.vibeScore ?? 0) >= 7;
-      })
-      .slice(0, 7);
-  }, [resultPool]);
 
   // Quiz step slide-in animation
   const quizEntrance = useSharedValue(1);
@@ -239,33 +208,20 @@ export default function DiscoverScreen() {
   // Session-dismissed: never cleared by reset() — events stay gone for the whole session
   const sessionDismissedRef = useRef(new Set<string>());
 
-  // Intercept Android hardware back when mid-quiz to go back one step instead of exiting
-  useFocusEffect(
-    useCallback(() => {
-      const onBack = () => {
-        if (step !== "category") {
-          handleBack();
-          return true; // consume the event
-        }
-        return false;
-      };
-      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
-      return () => sub.remove();
-    }, [step])
-  );
-
   const reset = useCallback(() => {
     loadingRef.current = false;
     expandedToInterestsRef.current = false;
     expandedInterestCatsRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
+    setEntryMode("chooser");
     setStep("category");
     setFilters({});
     setSlots([]);
     setResultPool([]);
     setDismissedIds([]);
     setSelectedEvent(null);
+    sessionDismissedRef.current = new Set();
   }, []);
 
   const handleBack = useCallback(() => {
@@ -276,6 +232,25 @@ export default function DiscoverScreen() {
       setStep(flow[idx - 1]);
     }
   }, [step]);
+
+  // Intercept Android hardware back when mid-quiz to go back one step instead of exiting
+  useFocusEffect(
+    useCallback(() => {
+      const onBack = () => {
+        if (entryMode === "sift" && step === "category") {
+          reset();
+          return true;
+        }
+        if (step !== "category") {
+          handleBack();
+          return true;
+        }
+        return false;
+      };
+      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+      return () => sub.remove();
+    }, [entryMode, step, handleBack, reset])
+  );
 
   const goToResults = useCallback(async (f: Filters, opts?: { skipTransition?: boolean }) => {
     if (loadingRef.current) return;
@@ -412,7 +387,7 @@ export default function DiscoverScreen() {
       // Data is ready — populate state before switching screens so no skeleton flash
       expandedToInterestsRef.current = false;
       const initial: Slot[] = resultEvents.length > 0
-        ? resultEvents.slice(0, 3).map((e) => ({
+        ? resultEvents.slice(0, 1).map((e) => ({
             event: e,
             key: `${e.id}-${Date.now()}-${Math.random()}`,
             type: 'event' as const,
@@ -447,19 +422,36 @@ export default function DiscoverScreen() {
     await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    sessionDismissedRef.current = new Set();
-    const wasExpanded = expandedToInterestsRef.current;
+  const startBrowsing = useCallback(() => {
+    loadingRef.current = false;
     expandedToInterestsRef.current = false;
-    // If user had already expanded to interests, include those categories in the refresh
-    // so they don't land back at the end card with only the original quiz filters
-    const refreshCats = wasExpanded && expandedInterestCatsRef.current.length > 0
-      ? [...(filters.categories ?? []), ...expandedInterestCatsRef.current]
-      : filters.categories;
-    await goToResults({ ...filters, categories: refreshCats?.length ? refreshCats : undefined }, { skipTransition: true });
-    setRefreshing(false);
-  }, [filters, goToResults]);
+    expandedInterestCatsRef.current = [];
+    sessionDismissedRef.current = new Set();
+    setIsTransitioning(false);
+    setEntryMode("browse");
+    setStep("category");
+    setFilters({});
+    setSlots([]);
+    setResultPool([]);
+    setDismissedIds([]);
+    setSelectedEvent(null);
+    void goToResults({});
+  }, [goToResults]);
+
+  const startSifting = useCallback(() => {
+    loadingRef.current = false;
+    expandedToInterestsRef.current = false;
+    expandedInterestCatsRef.current = [];
+    sessionDismissedRef.current = new Set();
+    setIsTransitioning(false);
+    setEntryMode("sift");
+    setStep("category");
+    setFilters({});
+    setSlots([]);
+    setResultPool([]);
+    setDismissedIds([]);
+    setSelectedEvent(null);
+  }, []);
 
   // Returns the next slot update — end card if pool exhausted, otherwise next event
   const nextSlotUpdate = (
@@ -575,13 +567,23 @@ export default function DiscoverScreen() {
     expandedInterestCatsRef.current = interestCats;
     setResultPool((prev) => [...prev, ...fresh]);
     setSlots(
-      fresh.slice(0, 3).map((e) => ({
+      fresh.slice(0, 1).map((e) => ({
         event: e,
         key: `${e.id}-${Date.now()}-${Math.random()}`,
         type: 'event' as const,
       }))
     );
   }, [userProfile, filters, dismissedIds, resultPool, tasteProfile]);
+
+  const activeSlot = slots[0] ?? null;
+  const activeQuizLabels = (activeSlot?.meta?.quizCategories ?? [])
+    .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
+    .join(" · ");
+
+  const handleCardStageLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    setCardStageHeight((prev) => (prev === nextHeight ? prev : nextHeight));
+  }, []);
 
   const handleGoingSwipe = useCallback(
     (event: SiftEvent) => {
@@ -628,14 +630,47 @@ export default function DiscoverScreen() {
     );
   }
 
+  if (entryMode === "chooser") {
+    return (
+      <View style={s.choicePage}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Discover</Text>
+        </View>
+        <ScrollView
+          contentContainerStyle={[s.choiceScroll, { paddingTop: 18, paddingBottom: insets.bottom + 32 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.choiceInner}>
+            <View style={s.catHeader}>
+              <Text style={s.catHeading}>How do you want{"\n"}to explore?</Text>
+            </View>
+
+            <View style={s.choiceButtons}>
+              <Pressable onPress={startBrowsing} style={[s.choiceAction, s.choiceActionPrimary]}>
+                <Text style={s.choiceActionPrimaryText}>Surprise me</Text>
+              </Pressable>
+
+              <Pressable onPress={startSifting} style={[s.choiceAction, s.choiceActionSecondary]}>
+                <Text style={s.choiceActionSecondaryText}>Sifting Event!</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   // ── Quiz steps ─────────────────────────────────────────
 
-  if (step === "category" || step === "date" || step === "distance") {
+  if (entryMode === "sift" && (step === "category" || step === "date" || step === "distance")) {
     return (
       <View style={s.catPageContainer}>
+        <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+          <Text style={s.stickyHeading}>Discover</Text>
+        </View>
         <ProgressBar step={step} />
         <ScrollView
-          contentContainerStyle={[s.dateScroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
+          contentContainerStyle={[s.dateScroll, { paddingTop: 24, paddingBottom: insets.bottom + 24 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -657,19 +692,16 @@ export default function DiscoverScreen() {
               <View>
                 <View style={s.catHeader}>
                   <Text style={s.catHeading}>What are you{"\n"}in the mood for?</Text>
-                  <Text style={s.catSub}>Select up to 3.</Text>
                 </View>
                 <View style={s.catGrid}>
                   {categories.map((c) => {
                     const cats = filters.categories ?? [];
                     const isSelected = cats.includes(c.value);
-                    const atLimit = cats.length >= 3 && !isSelected;
                     return (
                       <Pressable
                         key={c.value}
-                        style={[s.catTile, isSelected && s.catTileSelected, atLimit && { opacity: 0.4 }]}
+                        style={[s.catTile, isSelected && s.catTileSelected]}
                         onPress={() => {
-                          if (atLimit) return;
                           const next = isSelected
                             ? cats.filter((x) => x !== c.value)
                             : [...cats, c.value];
@@ -702,7 +734,7 @@ export default function DiscoverScreen() {
                     <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
                       <Sparkles size={16} color="#3A6EA5" strokeWidth={1.5} />
                     </View>
-                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Surprise me</Text>
+                    <Text style={[s.catLabel, { color: "#3A6EA5" }]} numberOfLines={1}>Anything works</Text>
                   </Pressable>
                 </View>
                 <View style={[s.catButtons, { marginTop: 28 }]}>
@@ -713,9 +745,6 @@ export default function DiscoverScreen() {
                   >
                     <Text style={s.catContinueText}>Continue</Text>
                   </Pressable>
-                  <Pressable onPress={() => goToResults({})} style={{ alignItems: "center", paddingVertical: 8 }}>
-                    <Text style={s.browseLinkText}>Browse everything →</Text>
-                  </Pressable>
                 </View>
               </View>
             )}
@@ -725,7 +754,6 @@ export default function DiscoverScreen() {
               <View>
                 <View style={s.catHeader}>
                   <Text style={s.catHeading}>When are you free?</Text>
-                  <Text style={s.catSub}>Pick a date range and we'll narrow things down.</Text>
                 </View>
                 <View style={s.datePickerWrap}>
                   <DateRangePicker
@@ -754,7 +782,7 @@ export default function DiscoverScreen() {
                       <View style={[s.catIconWrap, { backgroundColor: "rgba(58,110,165,0.14)" }]}>
                         <Zap size={16} color="#3A6EA5" strokeWidth={1.5} />
                       </View>
-                      <Text style={[s.catLabel, { color: "#3A6EA5" }]}>I'm spontaneous</Text>
+                      <Text style={[s.catLabel, { color: "#3A6EA5" }]}>I'm flexible</Text>
                     </Pressable>
                   </View>
                   <Pressable
@@ -778,7 +806,6 @@ export default function DiscoverScreen() {
               <View>
                 <View style={[s.catHeader, { marginTop: 60 }]}>
                   <Text style={s.catHeading}>Where in NYC?</Text>
-                  <Text style={s.catSub}>Pick one or more neighborhoods.</Text>
                 </View>
                 <View style={s.catGrid}>
                   {boroughOptions.map((b) => {
@@ -852,173 +879,101 @@ export default function DiscoverScreen() {
       <View style={[s.stickyHeader, { paddingTop: insets.top + 14 }]}>
         <View style={s.resultsHeaderRow}>
           <View style={{ flex: 1 }}>
-            <Text style={s.resultsHeading}>
-              {loading ? "Sorting picks..." : (userProfile ? "Your Top Picks" : "Here's what we found")}
-            </Text>
-            {resultPool.length > 0 && (
-              <Text style={s.eventCountLabel}>
-                {resultPool.length} event{resultPool.length !== 1 ? "s" : ""} · swipe to save or skip
-              </Text>
-            )}
+            <Text style={s.stickyHeading}>Discover</Text>
           </View>
           <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
-            <Text style={s.startOverText}>Start over</Text>
+            <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
           </Pressable>
         </View>
       </View>
 
-      <FlatList
-        data={slots}
-        keyExtractor={(item) => item.key}
-        contentContainerStyle={s.resultsScroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.primary}
+      <View style={s.resultsStage}>
+        <View style={s.resultsFilters}>
+          <GestureTutorial
+            visible={showGestureTip}
+            onDismiss={() => {
+              setShowGestureTip(false);
+              setGestureTipSeen();
+            }}
           />
-        }
-        ListHeaderComponent={
-          <View style={{ marginBottom: 20 }}>
-            {weekendPicks.length >= 2 && (
-              <View style={s.weekendSection}>
-                <Text style={s.weekendHeading}>Top picks this week</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
-                >
-                  {weekendPicks.map((pick) => (
-                    <LinearGradient
-                      key={pick.id}
-                      colors={PICK_GRADIENTS[pick.category] ?? ["#6B7280", "#374151"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={s.weekendCard}
-                    >
-                      <LinearGradient
-                        colors={["transparent", "rgba(0,0,0,0.72)"]}
-                        style={s.weekendCardOverlay}
-                      >
-                        <Text
-                          style={s.weekendCardTitle}
-                          numberOfLines={2}
-                          onPress={() => openEventDetail(pick)}
-                        >
-                          {pick.title}
-                        </Text>
-                        <Text style={s.weekendCardCategory}>{pick.category}</Text>
-                      </LinearGradient>
-                    </LinearGradient>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-            <GestureTutorial
-              visible={showGestureTip}
-              onDismiss={() => {
-                setShowGestureTip(false);
-                setGestureTipSeen();
-              }}
-            />
-            <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
+          <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
+        </View>
+
+        {activeSlot?.type === 'divider' && (
+          <View style={s.dividerRow}>
+            <View style={s.dividerLine} />
+            <Text style={s.dividerLabel}>Now showing events for you</Text>
+            <View style={s.dividerLine} />
           </View>
-        }
-        renderItem={({ item }) => {
-          if (item.type === 'divider') {
-            return (
-              <View style={s.dividerRow}>
-                <View style={s.dividerLine} />
-                <Text style={s.dividerLabel}>Now showing events for you</Text>
-                <View style={s.dividerLine} />
-              </View>
-            );
-          }
-          if (item.type === 'end-card') {
-            const quizLabels = (item.meta?.quizCategories ?? [])
-              .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
-              .join(' · ');
-            return (
-              <View style={s.endCard}>
-                <Text style={s.endCardTitle}>
-                  {quizLabels ? `That's the good stuff for ${quizLabels}.` : "You've seen it all."}
-                </Text>
-                <Text style={s.endCardSub}>
-                  {quizLabels ? "Here's what else fits your taste" : "More events based on your interests"}
-                </Text>
-                <Pressable onPress={expandToInterests} style={s.endCardButton}>
-                  <Text style={s.endCardButtonText}>Keep exploring</Text>
-                </Pressable>
-              </View>
-            );
-          }
-          if (item.type === 'done') {
-            return (
-              <View style={s.endCard}>
-                <Text style={s.endCardTitle}>You've seen it all.</Text>
-                <Text style={s.endCardSub}>No more events match your picks right now.</Text>
-                <Pressable
-                  onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
-                  style={s.endCardButton}
-                >
-                  <Text style={s.endCardButtonText}>Broaden search</Text>
-                </Pressable>
-                <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
-                  <Text style={s.browseLinkText}>Start over</Text>
-                </Pressable>
-              </View>
-            );
-          }
-          if (!item.event) return null;
-          return (
+        )}
+
+        {activeSlot?.type === 'end-card' && (
+          <View style={s.endCard}>
+            <Text style={s.endCardTitle}>
+              {activeQuizLabels
+                ? `That's the good stuff for ${activeQuizLabels}.`
+                : "You've seen it all."}
+            </Text>
+            <Text style={s.endCardSub}>
+              {activeQuizLabels
+                ? "Here's what else fits your taste"
+                : "More events based on your interests"}
+            </Text>
+            <Pressable onPress={expandToInterests} style={s.endCardButton}>
+              <Text style={s.endCardButtonText}>Keep exploring</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {activeSlot?.type === 'done' && (
+          <View style={s.endCard}>
+            <Text style={s.endCardTitle}>You've seen it all.</Text>
+            <Text style={s.endCardSub}>No more events match your picks right now.</Text>
+            <Pressable
+              onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
+              style={s.endCardButton}
+            >
+              <Text style={s.endCardButtonText}>Broaden search</Text>
+            </Pressable>
+            <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
+              <Text style={s.browseLinkText}>Start over</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {activeSlot?.type === 'event' && activeSlot.event && (
+          <View key={activeSlot.key} style={s.activeCardWrap} onLayout={handleCardStageLayout}>
             <EventCard
-              event={item.event}
+              event={activeSlot.event}
+              immersive
+              immersiveHeight={cardStageHeight}
               onPress={() => {
-                track("card_tap", { event_id: item.event!.id, category: item.event!.category });
-                openEventDetail(item.event!);
+                track("card_tap", { event_id: activeSlot.event!.id, category: activeSlot.event!.category });
+                openEventDetail(activeSlot.event!);
               }}
-              onDismiss={() => handleDismissEvent(item.event!.id)}
-              onGoing={() => handleGoingSwipe(item.event!)}
+              onDismiss={() => handleDismissEvent(activeSlot.event!.id)}
+              onGoing={() => handleGoingSwipe(activeSlot.event!)}
               onRequestSignIn={() => router.push("/(auth)/signin")}
               onBookmarkPress={() => {
-                track("event_saved", { event_id: item.event!.id });
-                setSaveSheetEvent(item.event!);
+                track("event_saved", { event_id: activeSlot.event!.id });
+                setSaveSheetEvent(activeSlot.event!);
               }}
               onSharePress={() => {
-                track("share_tap", { event_id: item.event!.id });
-                setShareSheetEvent(item.event!);
+                track("share_tap", { event_id: activeSlot.event!.id });
+                setShareSheetEvent(activeSlot.event!);
               }}
             />
-          );
-        }}
-        ListEmptyComponent={
-          loading ? (
-            <View>
-              <SkeletonCard />
-              <SkeletonCard />
-              <SkeletonCard />
-            </View>
-          ) : null
-        }
-        ListFooterComponent={
-          planCount > 0 && slots.length > 0 ? (
-            <Pressable
-              onPress={() => router.push("/(tabs)/plan")}
-              style={s.planCta}
-            >
-              <CalendarCheck size={18} strokeWidth={1.5} color={colors.primary} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.planCtaTitle}>Plan your weekend</Text>
-                <Text style={s.planCtaSub}>
-                  {planCount} event{planCount !== 1 ? "s" : ""} saved
-                </Text>
-              </View>
-              <Text style={s.planCtaArrow}>→</Text>
-            </Pressable>
-          ) : null
-        }
-      />
+          </View>
+        )}
+
+        {loading && (
+          <View style={s.loadingWrap}>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </View>
+        )}
+      </View>
 
       <BottomSheet
         open={!!saveSheetEvent}
@@ -1107,6 +1062,47 @@ export default function DiscoverScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  choicePage: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  choiceScroll: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.page,
+    justifyContent: "center",
+  },
+  choiceInner: {
+    width: "100%",
+    maxWidth: 360,
+    alignSelf: "center",
+  },
+  choiceButtons: {
+    gap: 12,
+  },
+  choiceAction: {
+    paddingVertical: 15,
+    borderRadius: radius.full,
+    alignItems: "center",
+  },
+  choiceActionPrimary: {
+    backgroundColor: colors.primary,
+  },
+  choiceActionPrimaryText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.white,
+  },
+  choiceActionSecondary: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.card,
+  },
+  choiceActionSecondaryText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -1242,34 +1238,45 @@ const s = StyleSheet.create({
   },
   stickyHeader: {
     paddingHorizontal: spacing.page,
-    paddingBottom: 12,
-    backgroundColor: colors.white,
+    paddingBottom: 8,
+    backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  stickyHeading: {
+    ...typography.sectionHeading,
+  },
   resultsHeaderRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
   },
   startOverButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: radius.full,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  startOverText: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    fontWeight: "500",
-  },
-  resultsScroll: {
+  resultsStage: {
+    flex: 1,
     paddingTop: 16,
     paddingHorizontal: spacing.page,
-    paddingBottom: 40,
+    paddingBottom: 20,
+  },
+  resultsFilters: {
+    marginBottom: 14,
+  },
+  activeCardWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  loadingWrap: {
+    paddingTop: 8,
   },
   browseLinkButton: {
     paddingVertical: 8,
@@ -1279,44 +1286,6 @@ const s = StyleSheet.create({
     color: colors.primary,
     textDecorationLine: "underline",
   },
-  resultsHeading: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.foreground,
-    letterSpacing: -0.3,
-  },
-  eventCountLabel: {
-    ...typography.xs,
-    color: colors.textMuted,
-    marginTop: 3,
-  },
-  planCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    padding: 14,
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  planCtaTitle: {
-    ...typography.sm,
-    fontWeight: "600",
-    color: colors.primary,
-  },
-  planCtaSub: {
-    ...typography.xs,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
-  planCtaArrow: {
-    fontSize: 18,
-    color: colors.primary,
-    fontWeight: "600",
-  },
   // End card — shown when result pool is exhausted
   endCard: {
     backgroundColor: colors.card,
@@ -1325,7 +1294,8 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     padding: 28,
     alignItems: "center",
-    marginBottom: 16,
+    justifyContent: "center",
+    flex: 1,
   },
   endCardTitle: {
     ...typography.sectionHeading,
@@ -1376,36 +1346,5 @@ const s = StyleSheet.create({
     ...typography.sectionHeading,
     textAlign: "center",
     color: colors.foreground,
-  },
-  weekendSection: {
-    marginBottom: 16,
-  },
-  weekendHeading: {
-    ...typography.h3,
-    marginBottom: 10,
-  },
-  weekendCard: {
-    width: 140,
-    height: 160,
-    borderRadius: radius.md,
-    overflow: "hidden",
-    justifyContent: "flex-end",
-  },
-  weekendCardOverlay: {
-    padding: 12,
-    paddingTop: 48,
-  },
-  weekendCardTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#fff",
-    lineHeight: 18,
-    marginBottom: 3,
-  },
-  weekendCardCategory: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.75)",
-    textTransform: "capitalize",
-    fontWeight: "500",
   },
 });

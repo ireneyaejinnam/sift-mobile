@@ -17,6 +17,12 @@ export interface RemoteUserData {
   customLists: string[];
 }
 
+export interface PlanEventOrderRow {
+  planDate: string;
+  eventId: string;
+  sortOrder: number;
+}
+
 // ── Fetch ────────────────────────────────────────────────────
 
 export async function fetchUserData(userId: string): Promise<RemoteUserData | null> {
@@ -26,7 +32,12 @@ export async function fetchUserData(userId: string): Promise<RemoteUserData | nu
       supabase.from("user_profiles").select("*").eq("user_id", userId).maybeSingle(),
       supabase.from("saved_events").select("*").eq("user_id", userId),
       supabase.from("going_events").select("*").eq("user_id", userId),
-      supabase.from("custom_lists").select("name").eq("user_id", userId),
+      supabase
+        .from("custom_lists")
+        .select("name, sort_order, created_at")
+        .eq("user_id", userId)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
     ]);
 
     return {
@@ -128,12 +139,104 @@ export async function deleteGoingEvent(userId: string, eventId: string): Promise
   } catch {}
 }
 
-export async function syncCustomList(userId: string, name: string): Promise<void> {
+export async function syncCustomList(
+  userId: string,
+  name: string,
+  sortOrder?: number
+): Promise<void> {
   if (!supabase) return;
   try {
     await supabase
       .from("custom_lists")
-      .upsert({ user_id: userId, name }, { onConflict: "user_id,name" });
+      .upsert(
+        {
+          user_id: userId,
+          name,
+          ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
+        },
+        { onConflict: "user_id,name" }
+      );
+  } catch {}
+}
+
+export async function renameCustomListDB(userId: string, oldName: string, newName: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.from("custom_lists").update({ name: newName }).eq("user_id", userId).eq("name", oldName);
+    await supabase.from("saved_events").update({ list_name: newName }).eq("user_id", userId).eq("list_name", oldName);
+  } catch {}
+}
+
+export async function deleteCustomListDB(userId: string, name: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.from("custom_lists").delete().eq("user_id", userId).eq("name", name);
+    await supabase.from("saved_events").delete().eq("user_id", userId).eq("list_name", name);
+  } catch {}
+}
+
+export async function reorderCustomListsDB(
+  userId: string,
+  namesInOrder: string[]
+): Promise<void> {
+  if (!supabase || namesInOrder.length === 0) return;
+  const client = supabase;
+  try {
+    await Promise.all(
+      namesInOrder.map((name, index) =>
+        client
+          .from("custom_lists")
+          .update({ sort_order: index })
+          .eq("user_id", userId)
+          .eq("name", name)
+      )
+    );
+  } catch {}
+}
+
+export async function fetchPlanEventOrders(userId: string): Promise<PlanEventOrderRow[]> {
+  if (!supabase) return [];
+  try {
+    const { data } = await supabase
+      .from("user_plan_event_orders")
+      .select("plan_date, event_id, sort_order")
+      .eq("user_id", userId)
+      .order("plan_date", { ascending: true })
+      .order("sort_order", { ascending: true });
+
+    return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      planDate: row.plan_date as string,
+      eventId: row.event_id as string,
+      sortOrder: Number(row.sort_order ?? 0),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function syncPlanEventOrder(
+  userId: string,
+  planDate: string,
+  eventIds: string[]
+): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase
+      .from("user_plan_event_orders")
+      .delete()
+      .eq("user_id", userId)
+      .eq("plan_date", planDate);
+
+    if (eventIds.length === 0) return;
+
+    await supabase.from("user_plan_event_orders").insert(
+      eventIds.map((eventId, index) => ({
+        user_id: userId,
+        plan_date: planDate,
+        event_id: eventId,
+        sort_order: index,
+      }))
+    );
   } catch {}
 }
 

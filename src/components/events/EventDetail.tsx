@@ -24,6 +24,12 @@ import {
   Share2,
   Ticket,
 } from "lucide-react-native";
+import Animated, {
+  runOnJS,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveEventSheet from "@/components/events/SaveEventSheet";
 import GoingDateSheet from "@/components/events/GoingDateSheet";
@@ -40,6 +46,7 @@ interface EventDetailProps {
   event: SiftEvent;
   onBack: () => void;
   onRequestSignIn?: () => void;
+  goingDate?: string; // when set: show only this session + "Cancel going" button
 }
 
 function formatShortDate(d: string): string {
@@ -64,6 +71,7 @@ export default function EventDetail({
   event,
   onBack,
   onRequestSignIn,
+  goingDate,
 }: EventDetailProps) {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
@@ -77,7 +85,9 @@ export default function EventDetail({
   } = useUser();
 
   // Score and sort sessions for display
-  const sessions = event.sessions ?? [];
+  const sessions = goingDate
+    ? (event.sessions ?? []).filter((s) => s.startDate === goingDate)
+    : (event.sessions ?? []);
   const scoredSessions = sessions.length > 1
     ? [...sessions]
         .map((s) => ({
@@ -97,6 +107,7 @@ export default function EventDetail({
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
   const [fallbackImage, setFallbackImage] = useState<string | null>(null);
+  const translateY = useSharedValue(0);
 
   useEffect(() => {
     if (!event.imageUrl) {
@@ -106,6 +117,7 @@ export default function EventDetail({
 
   const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
+  const DISMISS_THRESHOLD = 110;
 
   const handleBookmarkPress = () => {
     if (savedList) {
@@ -153,8 +165,18 @@ export default function EventDetail({
     showToast("Marked as going");
   };
 
+  const dismissToCard = () => {
+    translateY.value = withTiming(900, { duration: 220 }, () => {
+      runOnJS(onBack)();
+    });
+  };
+
+  const detailAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, detailAnimatedStyle]}>
       {/* Sticky back header */}
       <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
         <Pressable onPress={onBack} style={styles.backButton}>
@@ -166,6 +188,24 @@ export default function EventDetail({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        bounces
+        overScrollMode="always"
+        onScroll={(event) => {
+          const y = event.nativeEvent.contentOffset.y;
+          translateY.value = y < 0 ? Math.min(-y * 0.6, 80) : 0;
+        }}
+        onScrollEndDrag={(event) => {
+          const y = event.nativeEvent.contentOffset.y;
+          if (y < -DISMISS_THRESHOLD) {
+            dismissToCard();
+            return;
+          }
+          translateY.value = withTiming(0, { duration: 160 });
+        }}
+        onMomentumScrollEnd={() => {
+          translateY.value = withTiming(0, { duration: 160 });
+        }}
+        scrollEventThrottle={16}
       >
         {/* Card */}
         <View style={styles.card}>
@@ -440,7 +480,7 @@ export default function EventDetail({
                     going && styles.goingButtonTextActive,
                   ]}
                 >
-                  Going
+                  {goingDate && going ? "Cancel going" : "Going"}
                 </Text>
               </Pressable>
             </View>
@@ -493,7 +533,7 @@ export default function EventDetail({
           onCancel={() => setGoingSheetOpen(false)}
         />
       </BottomSheet>
-    </View>
+    </Animated.View>
   );
 }
 
