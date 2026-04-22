@@ -268,6 +268,7 @@ export default function DiscoverScreen() {
     setResultPool([]);
     setDismissedIds([]);
     setSelectedEvent(null);
+    sessionDismissedRef.current = new Set();
   }, []);
 
   const handleBack = useCallback(() => {
