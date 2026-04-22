@@ -1,13 +1,10 @@
-import React, { createRef, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, TextInput, Pressable, StyleSheet, Modal, FlatList } from "react-native";
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import ReanimatedSwipeable, {
-  type SwipeableMethods,
-} from "react-native-gesture-handler/ReanimatedSwipeable";
+import ReanimatedSwipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { Pencil, Check, X, GripVertical } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { fetchEventById } from "@/lib/getEvents";
@@ -15,11 +12,12 @@ import { events } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
 import { colors, radius, typography } from "@/lib/theme";
 import BottomSheet from "@/components/ui/BottomSheet";
+import EventPlanCard from "@/components/events/EventPlanCard";
+import EventDetail from "@/components/events/EventDetail";
 
 type ListItem = { listName: string; count: number };
 
 export default function SavedListsSection() {
-  const router = useRouter();
   const {
     savedEvents,
     removeSavedEvent,
@@ -29,13 +27,22 @@ export default function SavedListsSection() {
     reorderCustomLists,
     getAllListNames,
   } = useUser();
-  const [expandedList, setExpandedList] = useState<string | null>(null);
+  const [listSheetName, setListSheetName] = useState<string | null>(null);
+  const [detailEvent, setDetailEvent] = useState<SiftEvent | null>(null);
   const [newListName, setNewListName] = useState("");
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [renamingList, setRenamingList] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState("");
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
-  const swipeRefs = useRef<Record<string, React.RefObject<SwipeableMethods | null>>>({});
+  const detailOpenTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (detailOpenTimeoutRef.current) {
+        clearTimeout(detailOpenTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const missingIds = savedEvents
@@ -47,8 +54,16 @@ export default function SavedListsSection() {
     });
   }, [savedEvents]);
 
-  const allEventsPool = [...events, ...dbEvents];
   const listNames = getAllListNames();
+
+  const listSheetItems = useMemo<SiftEvent[]>(() => {
+    if (!listSheetName) return [];
+    const pool = [...events, ...dbEvents];
+    return savedEvents
+      .filter((s) => s.listName === listSheetName)
+      .map((s) => pool.find((e) => e.id === s.eventId))
+      .filter((e): e is SiftEvent => e != null);
+  }, [listSheetName, savedEvents, dbEvents]);
 
   const listItems: ListItem[] = listNames.map((listName) => ({
     listName,
@@ -81,9 +96,19 @@ export default function SavedListsSection() {
   };
 
   const handleDelete = (listName: string) => {
-    swipeRefs.current[listName]?.current?.close();
     deleteCustomList(listName);
-    if (expandedList === listName) setExpandedList(null);
+    if (listSheetName === listName) setListSheetName(null);
+  };
+
+  const handleOpenDetail = (event: SiftEvent) => {
+    if (detailOpenTimeoutRef.current) {
+      clearTimeout(detailOpenTimeoutRef.current);
+    }
+    setListSheetName(null);
+    detailOpenTimeoutRef.current = setTimeout(() => {
+      setDetailEvent(event);
+      detailOpenTimeoutRef.current = null;
+    }, 260);
   };
 
   const renderRightActions = (listName: string) => (
@@ -95,15 +120,10 @@ export default function SavedListsSection() {
   const renderItem = ({ item, drag, isActive }: RenderItemParams<ListItem>) => {
     const { listName, count } = item;
     const isRenaming = renamingList === listName;
-    const savedItems = savedEvents.filter((s) => s.listName === listName);
 
     return (
       <ScaleDecorator>
         <ReanimatedSwipeable
-          ref={(() => {
-            if (!swipeRefs.current[listName]) swipeRefs.current[listName] = createRef();
-            return swipeRefs.current[listName];
-          })()}
           friction={2}
           overshootRight={false}
           renderRightActions={() => renderRightActions(listName)}
@@ -131,7 +151,7 @@ export default function SavedListsSection() {
               ) : (
                 <Pressable
                   style={st.listNameRow}
-                  onPress={() => setExpandedList(expandedList === listName ? null : listName)}
+                  onPress={() => setListSheetName(listName)}
                 >
                   <View style={st.listNameGroup}>
                     <Text style={st.listName}>{listName}</Text>
@@ -150,36 +170,6 @@ export default function SavedListsSection() {
                 <GripVertical size={16} strokeWidth={1.5} color={colors.textMuted} />
               </Pressable>
             </View>
-
-            {expandedList === listName && !isRenaming && (
-              <View style={st.expanded}>
-                {savedItems.length === 0 ? (
-                  <Text style={st.emptyText}>No events saved yet</Text>
-                ) : (
-                  <View style={{ gap: 10 }}>
-                    {savedItems.map((s) => {
-                      const ev = allEventsPool.find((e) => e.id === s.eventId);
-                      if (!ev) return null;
-                      return (
-                        <Pressable
-                          key={s.eventId}
-                          style={st.eventRow}
-                          onPress={() => router.push(`/event/${s.eventId}`)}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={st.eventTitle}>{ev.title}</Text>
-                            <Text style={st.eventMeta}>{ev.startDate} · {ev.location}</Text>
-                          </View>
-                          <Pressable onPress={() => removeSavedEvent(s.eventId)}>
-                            <Text style={st.unsave}>Unsave</Text>
-                          </Pressable>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            )}
           </View>
         </ReanimatedSwipeable>
       </ScaleDecorator>
@@ -229,6 +219,44 @@ export default function SavedListsSection() {
           </Pressable>
         </View>
       </BottomSheet>
+
+      <BottomSheet
+        open={!!listSheetName}
+        onClose={() => setListSheetName(null)}
+        title={listSheetName ?? undefined}
+      >
+        <FlatList
+          data={listSheetItems}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <EventPlanCard
+              event={item}
+              onPress={() => handleOpenDetail(item)}
+              onRemove={() => removeSavedEvent(item.id)}
+            />
+          )}
+          style={st.listSheetList}
+          contentContainerStyle={st.listSheetContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <Text style={st.emptyText}>No events saved yet</Text>
+          }
+        />
+      </BottomSheet>
+
+      {detailEvent && (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setDetailEvent(null)}
+        >
+          <EventDetail
+            event={detailEvent}
+            onBack={() => setDetailEvent(null)}
+          />
+        </Modal>
+      )}
     </View>
   );
 }
@@ -294,25 +322,14 @@ const st = StyleSheet.create({
     fontWeight: "600",
     color: colors.white,
   },
-  expanded: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
   emptyText: { ...typography.sm, color: colors.textSecondary },
-  eventRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    padding: 10,
-    backgroundColor: colors.muted,
-    borderRadius: radius.sm,
-  },
-  eventTitle: { ...typography.sm, fontWeight: "500", color: colors.foreground },
-  eventMeta: { ...typography.xs, color: colors.textSecondary, marginTop: 2 },
-  unsave: { ...typography.xs, color: colors.textSecondary },
   createTrigger: { marginTop: 12 },
+  listSheetList: {
+    maxHeight: 480,
+  },
+  listSheetContent: {
+    paddingBottom: 12,
+  },
   sheetSubtext: {
     ...typography.sm,
     color: colors.textSecondary,
