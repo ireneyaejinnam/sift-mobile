@@ -151,6 +151,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: colors.white,
+    minWidth: 220,
+    paddingHorizontal: 28,
     paddingVertical: 15,
     borderRadius: radius.full,
     alignItems: "center",
@@ -168,6 +170,8 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     backgroundColor: "transparent",
+    minWidth: 220,
+    paddingHorizontal: 28,
     paddingVertical: 15,
     borderRadius: radius.full,
     alignItems: "center",
