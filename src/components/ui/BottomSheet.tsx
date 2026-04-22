@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   View,
 } from "react-native";
 import Animated, {
+  cancelAnimation,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
@@ -35,6 +36,7 @@ export default function BottomSheet({
   children,
 }: BottomSheetProps) {
   const [visible, setVisible] = useState(false);
+  const animationCycleRef = useRef(0);
   const translateY = useSharedValue(OFFSCREEN);
   const dragY = useSharedValue(0);
   const backdropOpacity = useSharedValue(0);
@@ -48,6 +50,12 @@ export default function BottomSheet({
   }));
 
   useEffect(() => {
+    animationCycleRef.current += 1;
+    const cycle = animationCycleRef.current;
+    cancelAnimation(translateY);
+    cancelAnimation(dragY);
+    cancelAnimation(backdropOpacity);
+
     if (open) {
       translateY.value = OFFSCREEN;
       dragY.value = 0;
@@ -65,7 +73,9 @@ export default function BottomSheet({
         easing: Easing.in(Easing.cubic),
       });
       backdropOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-        if (finished) runOnJS(setVisible)(false);
+        if (finished && cycle === animationCycleRef.current) {
+          runOnJS(setVisible)(false);
+        }
       });
     }
   }, [open]);
@@ -109,19 +119,21 @@ export default function BottomSheet({
         <TouchableWithoutFeedback onPress={onClose}>
           <Animated.View style={[styles.backdrop, backdropStyle]} />
         </TouchableWithoutFeedback>
-        <GestureDetector gesture={panGesture}>
-          <Animated.View style={[styles.sheet, sheetStyle]}>
+        <Animated.View style={[styles.sheet, sheetStyle]}>
+          <GestureDetector gesture={panGesture}>
             <View style={styles.handleContainer}>
               <View style={styles.handle} />
             </View>
+          </GestureDetector>
+          <View>
             {title && (
               <View style={styles.titleRow}>
                 <Text style={styles.title}>{title}</Text>
               </View>
             )}
             <View style={styles.body}>{children}</View>
-          </Animated.View>
-        </GestureDetector>
+          </View>
+        </Animated.View>
       </View>
     </Modal>
   );
