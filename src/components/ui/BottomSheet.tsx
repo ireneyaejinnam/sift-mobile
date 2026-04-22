@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import {
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TouchableWithoutFeedback,
@@ -36,7 +39,17 @@ export default function BottomSheet({
   children,
 }: BottomSheetProps) {
   const [visible, setVisible] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const animationCycleRef = useRef(0);
+
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const translateY = useSharedValue(OFFSCREEN);
   const dragY = useSharedValue(0);
   const backdropOpacity = useSharedValue(0);
@@ -115,11 +128,14 @@ export default function BottomSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         <TouchableWithoutFeedback onPress={onClose}>
           <Animated.View style={[styles.backdrop, backdropStyle]} />
         </TouchableWithoutFeedback>
-        <Animated.View style={[styles.sheet, sheetStyle]}>
+        <Animated.View style={[styles.sheet, sheetStyle, keyboardVisible && styles.sheetKeyboard]}>
           <GestureDetector gesture={panGesture}>
             <View style={styles.handleContainer}>
               <View style={styles.handle} />
@@ -134,7 +150,7 @@ export default function BottomSheet({
             <View style={styles.body}>{children}</View>
           </View>
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -154,6 +170,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     paddingBottom: 40,
+  },
+  sheetKeyboard: {
+    paddingBottom: 16,
   },
   handleContainer: {
     alignItems: "center",

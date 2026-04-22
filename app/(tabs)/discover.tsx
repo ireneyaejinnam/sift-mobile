@@ -53,7 +53,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
 import { fetchAllUpcoming, computeEventScore } from "@/lib/getEvents";
-import { loadTasteProfile, recordDislike, recordLike, hydrateTasteProfile } from "@/lib/tasteProfile";
+import { loadTasteProfile, recordEventLike, recordEventDislike, undoEventDislike, hydrateTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
@@ -136,6 +136,7 @@ export default function DiscoverScreen() {
   const [showGestureTip, setShowGestureTip] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const [cardStageHeight, setCardStageHeight] = useState(0);
+  const [lastDismissedEvent, setLastDismissedEvent] = useState<SiftEvent | null>(null);
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
   const expandedInterestCatsRef = useRef<EventCategory[]>([]);
@@ -205,6 +206,23 @@ export default function DiscoverScreen() {
       if (updated) setTasteProfile(updated);
     });
   }, [tasteProfile, savedEvents, goingEvents]);
+
+  // Re-sort the live result pool whenever category weights change (from
+  // "More like this" / "Not my thing" taps). This makes the very next card
+  // reflect the updated taste — no need to wait for a refetch.
+  const categoryWeights = tasteProfile?.categoryWeights;
+  useEffect(() => {
+    if (!categoryWeights) return;
+    if (Object.keys(categoryWeights).length === 0) return;
+    setResultPool((prev) => {
+      if (prev.length === 0) return prev;
+      return [...prev].sort((a, b) => {
+        const wa = categoryWeights[a.category] ?? 1.0;
+        const wb = categoryWeights[b.category] ?? 1.0;
+        return computeEventScore(b, wb) - computeEventScore(a, wa);
+      });
+    });
+  }, [categoryWeights]);
   // Session-dismissed: never cleared by reset() — events stay gone for the whole session
   const sessionDismissedRef = useRef(new Set<string>());
 
@@ -504,6 +522,9 @@ export default function DiscoverScreen() {
       setDismissedIds(nextDismissed);
 
       const dismissed = resultPool.find((e) => e.id === eventId);
+      if (dismissed) {
+        setLastDismissedEvent(dismissed);
+      }
       if (dismissed?.category) {
         const record: DismissedRecord = {
           eventId,
@@ -512,7 +533,7 @@ export default function DiscoverScreen() {
         };
         addDismissedEvent(record);
         setDismissedHistory((prev) => [...prev, record]);
-        recordDislike(eventId, dismissed.category).then(setTasteProfile).catch(() => {});
+        recordEventDislike(eventId).then(setTasteProfile).catch(() => {});
       }
       setSlots((prev) => {
         const idx = prev.findIndex((s) => s.event?.id === eventId);
@@ -524,6 +545,28 @@ export default function DiscoverScreen() {
     },
     [dismissedIds, filters, userProfile, resultPool]
   );
+
+  // Undoes the most recent dismiss. Pulls the event back out of dismissedIds,
+  // removes it from the taste profile's dislikedIds, and drops it back into
+  // the active slot so the user sees the card they just swiped away.
+  const handleUndoDismiss = useCallback(() => {
+    const evt = lastDismissedEvent;
+    if (!evt) return;
+    sessionDismissedRef.current.delete(evt.id);
+    setDismissedIds((prev) => prev.filter((id) => id !== evt.id));
+    undoEventDislike(evt.id).then(setTasteProfile).catch(() => {});
+    setSlots((prev) => {
+      if (prev.length === 0) {
+        return [{ event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' }];
+      }
+      const activeIdx = prev.findIndex((s) => s.type !== 'divider');
+      const idx = activeIdx === -1 ? 0 : activeIdx;
+      const next = [...prev];
+      next[idx] = { event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' };
+      return next;
+    });
+    setLastDismissedEvent(null);
+  }, [lastDismissedEvent]);
 
   // Advances the slot for a going-swiped event (shared by instant-going and date-picker confirm)
   const advanceGoingSlot = useCallback(
@@ -609,9 +652,7 @@ export default function DiscoverScreen() {
       });
       track("event_going", { event_id: event.id, source: "swipe" });
       showToast("Marked as going");
-      if (event.category) {
-        recordLike(event.id, event.category).then(setTasteProfile).catch(() => {});
-      }
+      recordEventLike(event.id).then(setTasteProfile).catch(() => {});
       advanceGoingSlot(event.id);
     },
     [isLoggedIn, toggleGoing, advanceGoingSlot, showToast]
@@ -877,15 +918,11 @@ export default function DiscoverScreen() {
   return (
     <View style={s.container}>
       {/* Sticky header — stays put while list scrolls */}
-      <View style={[s.stickyHeader, { paddingTop: insets.top + 14 }]}>
-        <View style={s.resultsHeaderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.stickyHeading}>Discover</Text>
-          </View>
-          <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
-            <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
-          </Pressable>
-        </View>
+      <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
+        <Text style={s.stickyHeading}>Discover</Text>
+        <Pressable onPress={reset} style={[s.startOverButton, { top: insets.top + 14 }]} hitSlop={8}>
+          <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
+        </Pressable>
       </View>
 
       <View style={s.resultsStage}>
@@ -948,6 +985,8 @@ export default function DiscoverScreen() {
               event={activeSlot.event}
               immersive
               immersiveHeight={cardStageHeight}
+              canUndo={!!lastDismissedEvent}
+              onUndo={handleUndoDismiss}
               onPress={() => {
                 track("card_tap", { event_id: activeSlot.event!.id, category: activeSlot.event!.category });
                 openEventDetail(activeSlot.event!);
@@ -988,8 +1027,8 @@ export default function DiscoverScreen() {
             onClose={() => setSaveSheetEvent(null)}
             onSaved={(name) => {
               showToast(`Saved to ${name}`);
-              if (saveSheetEvent?.category) {
-                recordLike(saveSheetEvent.id, saveSheetEvent.category)
+              if (saveSheetEvent) {
+                recordEventLike(saveSheetEvent.id)
                   .then(setTasteProfile).catch(() => {});
               }
             }}
@@ -1014,10 +1053,7 @@ export default function DiscoverScreen() {
               });
               track("event_going", { event_id: goingSheetEvent.id, source: "swipe" });
               showToast("Marked as going");
-              if (goingSheetEvent.category) {
-                recordLike(goingSheetEvent.id, goingSheetEvent.category)
-                  .then(setTasteProfile).catch(() => {});
-              }
+              recordEventLike(goingSheetEvent.id).then(setTasteProfile).catch(() => {});
               setGoingSheetEvent(null);
             }}
             onCancel={() => setGoingSheetEvent(null)}
@@ -1262,14 +1298,16 @@ const s = StyleSheet.create({
   },
   resultsHeaderRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
   startOverButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    position: "absolute",
+    right: spacing.page,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,

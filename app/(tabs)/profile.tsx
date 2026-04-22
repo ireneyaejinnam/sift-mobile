@@ -315,8 +315,11 @@ export default function ProfileTab() {
         {/* ── Sign out ────────────────────────── */}
         {isLoggedIn && (
           <Pressable
-            onPress={async () => {
-              await signOut();
+            onPress={() => {
+              // Fire state clear + navigation in the same tick so React
+              // batches them — gate mounts with isLoggedIn already false,
+              // so there's no brief logged-in render.
+              void signOut();
               router.replace("/(auth)/gate");
             }}
             style={st.signOutButton}

@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Flame,
   MapPin,
+  RotateCcw,
   Share2,
   Star,
   Ticket,
@@ -35,7 +36,7 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import type { SiftEvent } from "@/types/event";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
-import { recordLike, recordDislike } from "@/lib/tasteProfile";
+import { tuneUpCategory, tuneDownCategory } from "@/lib/tasteProfile";
 import { colors, radius, shadows } from "@/lib/theme";
 import { formatNYCDate } from "@/lib/time";
 
@@ -84,6 +85,8 @@ interface EventCardProps {
   onRequestSignIn?: () => void;
   onBookmarkPress: () => void;
   onSharePress: () => void;
+  onUndo?: () => void;
+  canUndo?: boolean;
   immersive?: boolean;
   immersiveHeight?: number;
 }
@@ -96,6 +99,8 @@ export default function EventCard({
   onRequestSignIn,
   onBookmarkPress,
   onSharePress,
+  onUndo,
+  canUndo = false,
   immersive = false,
   immersiveHeight,
 }: EventCardProps) {
@@ -318,7 +323,8 @@ export default function EventCard({
                 )}
               </View>
 
-              {/* Actions — overlaid top-right */}
+              {/* Actions — overlaid top-right. Undo is the rightmost icon
+                  when available (first thing the eye hits on the right). */}
               <View style={styles.imageActions}>
                 <Pressable onPress={handleBookmarkPress} style={styles.iconButton} hitSlop={8}>
                   <Bookmark
@@ -331,6 +337,11 @@ export default function EventCard({
                 <Pressable onPress={onSharePress} style={styles.iconButton} hitSlop={8}>
                   <Share2 size={16} strokeWidth={1.5} color="#fff" />
                 </Pressable>
+                {canUndo && onUndo && (
+                  <Pressable onPress={onUndo} style={styles.iconButton} hitSlop={8}>
+                    <RotateCcw size={16} strokeWidth={1.5} color="#fff" />
+                  </Pressable>
+                )}
               </View>
 
               {/* Title + meta overlaid on gradient at bottom of image */}
@@ -415,7 +426,7 @@ export default function EventCard({
         <View style={styles.feedbackSheet}>
           <Pressable
             onPress={() => {
-              recordLike(event.id, event.category).catch(() => {});
+              tuneUpCategory(event.category).catch(() => {});
               setFeedbackSheetOpen(false);
               showToast("Got it — more like this");
             }}
@@ -425,7 +436,7 @@ export default function EventCard({
           </Pressable>
           <Pressable
             onPress={() => {
-              recordDislike(event.id, event.category).catch(() => {});
+              tuneDownCategory(event.category).catch(() => {});
               setFeedbackSheetOpen(false);
               showToast("Got it — less of this");
             }}

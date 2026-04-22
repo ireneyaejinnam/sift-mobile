@@ -96,6 +96,67 @@ async function saveProfile(profile: TasteProfile): Promise<void> {
 
 // ── Record interactions ───────────────────────────────────────────────────────
 
+/**
+ * Event-level signal — the user swiped right/left on a specific event.
+ * Updates only likedIds/dislikedIds. Does NOT change category weights,
+ * because "I'm not going to this particular concert" doesn't mean
+ * "I dislike the whole concert category."
+ */
+export async function recordEventLike(eventId: string): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.likedIds = [eventId, ...profile.likedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
+  profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  await saveProfile(profile);
+  return profile;
+}
+
+export async function recordEventDislike(eventId: string): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.dislikedIds = [eventId, ...profile.dislikedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
+  profile.likedIds = profile.likedIds.filter(id => id !== eventId);
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
+ * Reverse a prior dislike (e.g. when the user taps Undo after an accidental
+ * left swipe). Removes the id from dislikedIds so the event can resurface.
+ */
+export async function undoEventDislike(eventId: string): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
+ * Category-level signal — user tapped "More like this" / "Not my thing"
+ * explicitly. Updates only the category weight. Does NOT touch the id lists.
+ */
+export async function tuneUpCategory(category: EventCategory): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.categoryWeights[category] = Math.min(
+    WEIGHT_MAX,
+    (profile.categoryWeights[category] ?? 1.0) + WEIGHT_BUMP
+  );
+  await saveProfile(profile);
+  return profile;
+}
+
+export async function tuneDownCategory(category: EventCategory): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.categoryWeights[category] = Math.max(
+    WEIGHT_MIN,
+    (profile.categoryWeights[category] ?? 1.0) - WEIGHT_DROP
+  );
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
+ * @deprecated Use recordEventLike + tuneUpCategory separately.
+ * Kept for backwards compat with any out-of-date callers.
+ */
 export async function recordLike(
   eventId: string,
   category: EventCategory
@@ -113,6 +174,9 @@ export async function recordLike(
   return profile;
 }
 
+/**
+ * @deprecated Use recordEventDislike + tuneDownCategory separately.
+ */
 export async function recordDislike(
   eventId: string,
   category: EventCategory

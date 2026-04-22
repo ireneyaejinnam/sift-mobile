@@ -1,6 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Modal, FlatList } from "react-native";
-import DraggableFlatList, {
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  Modal,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+} from "react-native";
+import {
+  NestableDraggableFlatList,
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
@@ -83,6 +96,7 @@ export default function SavedListsSection() {
   };
 
   const closeCreateSheet = () => {
+    Keyboard.dismiss();
     setNewListName("");
     setShowCreateSheet(false);
   };
@@ -179,12 +193,11 @@ export default function SavedListsSection() {
   return (
     <View style={st.section}>
       <Text style={st.h3}>Saved Lists</Text>
-      <DraggableFlatList
+      <NestableDraggableFlatList
         data={listItems}
         keyExtractor={(item) => item.listName}
         onDragEnd={({ data }) => reorderCustomLists(data.map((d) => d.listName))}
         renderItem={renderItem}
-        scrollEnabled={false}
         activationDistance={12}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
       />
@@ -193,32 +206,47 @@ export default function SavedListsSection() {
         <Text style={st.createText}>Create new list</Text>
       </Pressable>
 
-      <BottomSheet open={showCreateSheet} onClose={closeCreateSheet} title="Create new list">
-        <Text style={st.sheetSubtext}>Add a custom list to organize saved events your way.</Text>
-        <View style={st.newRow}>
-          <TextInput
-            style={st.input}
-            value={newListName}
-            onChangeText={setNewListName}
-            placeholder="List name"
-            placeholderTextColor={colors.textMuted}
-            autoFocus
-            onSubmitEditing={handleCreateList}
-          />
-        </View>
-        <View style={st.sheetActions}>
-          <Pressable onPress={closeCreateSheet} style={st.cancelBtn}>
-            <Text style={st.cancelBtnText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleCreateList}
-            disabled={!newListName.trim()}
-            style={[st.addBtn, !newListName.trim() && st.addBtnDisabled]}
-          >
-            <Text style={st.addBtnText}>Create</Text>
-          </Pressable>
-        </View>
-      </BottomSheet>
+      <Modal
+        visible={showCreateSheet}
+        transparent
+        animationType="fade"
+        onRequestClose={closeCreateSheet}
+        statusBarTranslucent
+      >
+        <KeyboardAvoidingView
+          style={st.dialogOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableWithoutFeedback onPress={closeCreateSheet}>
+            <View style={st.dialogBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={st.dialogCard}>
+            <Text style={st.dialogTitle}>Create new list</Text>
+            <Text style={st.dialogSubtext}>Add a custom list to organize saved events your way.</Text>
+            <TextInput
+              style={st.input}
+              value={newListName}
+              onChangeText={setNewListName}
+              placeholder="List name"
+              placeholderTextColor={colors.textMuted}
+              autoFocus
+              onSubmitEditing={handleCreateList}
+            />
+            <View style={st.sheetActions}>
+              <Pressable onPress={closeCreateSheet} style={st.cancelBtn}>
+                <Text style={st.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleCreateList}
+                disabled={!newListName.trim()}
+                style={[st.addBtn, !newListName.trim() && st.addBtnDisabled]}
+              >
+                <Text style={st.addBtnText}>Create</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <BottomSheet
         open={!!listSheetName}
@@ -331,6 +359,36 @@ const st = StyleSheet.create({
     paddingBottom: 12,
   },
   sheetSubtext: {
+    ...typography.sm,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  dialogOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  dialogBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  dialogCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 20,
+  },
+  dialogTitle: {
+    ...typography.body,
+    fontWeight: "600",
+    color: colors.foreground,
+    marginBottom: 6,
+  },
+  dialogSubtext: {
     ...typography.sm,
     color: colors.textSecondary,
     lineHeight: 20,

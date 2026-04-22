@@ -87,14 +87,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const clearLocalAuthState = useCallback(async () => {
     userIdRef.current = null;
     clearOnboardingDoneFlag();
-    try {
-      if (supabase) {
-        await supabase.auth.signOut({ scope: "local" });
-      }
-    } catch {}
+    // Update state synchronously first so the UI re-renders as logged-out
+    // immediately; defer the async supabase + storage writes.
     const clean = { ...initialStorage };
     setStorage(clean);
-    await saveStorage(clean);
+    saveStorage(clean).catch(() => {});
+    if (supabase) {
+      supabase.auth.signOut({ scope: "local" }).catch(() => {});
+    }
   }, []);
 
   // Re-fetch saved/going lists from Supabase. Called on tab focus so that

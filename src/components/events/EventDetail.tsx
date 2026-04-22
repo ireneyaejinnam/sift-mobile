@@ -47,6 +47,7 @@ interface EventDetailProps {
   onBack: () => void;
   onRequestSignIn?: () => void;
   goingDate?: string; // when set: show only this session + "Cancel going" button
+  hideBack?: boolean; // hide "Back to results" header (plan-page modal dismisses via drag)
 }
 
 function formatShortDate(d: string): string {
@@ -72,6 +73,7 @@ export default function EventDetail({
   onBack,
   onRequestSignIn,
   goingDate,
+  hideBack = false,
 }: EventDetailProps) {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
@@ -177,13 +179,23 @@ export default function EventDetail({
 
   return (
     <Animated.View style={[styles.container, detailAnimatedStyle]}>
-      {/* Sticky back header */}
-      <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
-          <Text style={styles.backText}>Back to results</Text>
-        </Pressable>
-      </View>
+      {/* Sticky back header — hidden when opened in a drag-to-dismiss modal (plan page) */}
+      {!hideBack && (
+        <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
+          <Pressable onPress={onBack} style={styles.backButton}>
+            <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
+            <Text style={styles.backText}>Back to results</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Drag-handle pill — shown only when the back button is hidden (plan-page
+          modal) so users know this sheet is drag-to-dismiss. */}
+      {hideBack && (
+        <View style={styles.dragHandleContainer}>
+          <View style={styles.dragHandle} />
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -548,6 +560,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  dragHandleContainer: {
+    alignItems: "center",
+    paddingTop: 10,
+    paddingBottom: 6,
+    backgroundColor: colors.background,
+  },
+  dragHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.border,
   },
   scrollContent: {
     paddingTop: 16,

@@ -293,7 +293,11 @@ export default function PlanScreen() {
       if (nextMode === viewMode) return;
       const resolvedDirection = direction ?? (nextMode === "calendar" ? 1 : -1);
       const offset = 28 * resolvedDirection;
-      const selectorTarget = viewModeWidth > 0 ? (nextMode === "calendar" ? 0 : viewModeWidth / 2) : 0;
+      // Inner area = width - 8 (4px padding on each side). The highlight pill
+      // occupies half of that, so translate by (width - 8) / 2 to land it
+      // cleanly over the second button without overflowing the container.
+      const halfInner = viewModeWidth > 0 ? (viewModeWidth - 8) / 2 : 0;
+      const selectorTarget = nextMode === "calendar" ? 0 : halfInner;
 
       NativeAnimated.timing(selectorTranslateX, {
         toValue: selectorTarget,
@@ -338,18 +342,25 @@ export default function PlanScreen() {
     (event: LayoutChangeEvent) => {
       const width = event.nativeEvent.layout.width;
       setViewModeWidth(width);
-      selectorTranslateX.setValue(viewMode === "calendar" ? 0 : width / 2);
+      const halfInner = (width - 8) / 2;
+      selectorTranslateX.setValue(viewMode === "calendar" ? 0 : halfInner);
     },
     [selectorTranslateX, viewMode]
   );
 
   const detailModal = (
-    <Modal visible={!!detailEvent} animationType="slide" presentationStyle="pageSheet">
+    <Modal
+      visible={!!detailEvent}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setDetailEvent(null)}
+    >
       {detailEvent && (
         <EventDetail
           event={detailEvent.event}
           goingDate={detailEvent.goingDate}
           onBack={() => setDetailEvent(null)}
+          hideBack
         />
       )}
     </Modal>
@@ -500,7 +511,7 @@ export default function PlanScreen() {
             style={[
               s.viewModeActiveBg,
               {
-                width: viewModeWidth / 2 - 3,
+                width: (viewModeWidth - 8) / 2,
                 transform: [{ translateX: selectorTranslateX }],
               },
             ]}
@@ -617,6 +628,21 @@ export default function PlanScreen() {
           )}
         </NativeAnimated.View>
       </View>
+
+      {shortlistEvents.length > 0 && (
+        <Pressable
+          onPress={async () => {
+            track("calendar_export", { method: "ics_all", event_count: shortlistEvents.length, source: "plan_shortlist" });
+            const ok = await shareICSFile(shortlistEvents);
+            if (ok) showToast("Calendar file ready");
+            else showToast("Couldn't open calendar");
+          }}
+          style={[s.primaryButton, { marginTop: 24 }]}
+        >
+          <CalendarPlus size={16} strokeWidth={1.5} color={colors.white} />
+          <Text style={s.primaryButtonText}>Add to Calendar</Text>
+        </Pressable>
+      )}
     </ScrollView>
     {detailModal}
     </View>
