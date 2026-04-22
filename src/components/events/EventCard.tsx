@@ -40,7 +40,9 @@ import { colors, radius, shadows } from "@/lib/theme";
 import { formatNYCDate } from "@/lib/time";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
+const SWIPE_UP_THRESHOLD = 90;
 
 const CATEGORY_STYLE: Record<string, { colors: [string, string]; emoji: string }> = {
   arts:      { colors: ["#C9A882", "#8B5E3C"], emoji: "🎨" },
@@ -82,6 +84,8 @@ interface EventCardProps {
   onRequestSignIn?: () => void;
   onBookmarkPress: () => void;
   onSharePress: () => void;
+  immersive?: boolean;
+  immersiveHeight?: number;
 }
 
 export default function EventCard({
@@ -92,6 +96,8 @@ export default function EventCard({
   onRequestSignIn,
   onBookmarkPress,
   onSharePress,
+  immersive = false,
+  immersiveHeight,
 }: EventCardProps) {
   const { showToast } = useToast();
   const {
@@ -158,21 +164,31 @@ export default function EventCard({
     onGoing();
   };
 
+  const onSwipeUpComplete = () => {
+    onPress();
+  };
+
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
-    .failOffsetY([-10, 10])
     .onUpdate((e) => {
-      translateX.value = e.translationX;
+      if (Math.abs(e.translationX) >= Math.abs(e.translationY)) {
+        translateX.value = e.translationX;
+      }
     })
     .onEnd((e) => {
-      if (e.translationX < -SWIPE_THRESHOLD) {
+      const horizontalWins = Math.abs(e.translationX) >= Math.abs(e.translationY);
+
+      if (horizontalWins && e.translationX < -SWIPE_THRESHOLD) {
         translateX.value = withTiming(-SCREEN_WIDTH, { duration: 250 }, () => {
           runOnJS(onSwipeComplete)();
         });
-      } else if (e.translationX > SWIPE_THRESHOLD) {
+      } else if (horizontalWins && e.translationX > SWIPE_THRESHOLD) {
         translateX.value = withTiming(SCREEN_WIDTH, { duration: 250 }, () => {
           runOnJS(onSwipeRightComplete)();
         });
+      } else if (!horizontalWins && e.translationY < -SWIPE_UP_THRESHOLD) {
+        translateX.value = withTiming(0, { duration: 120 });
+        runOnJS(onSwipeUpComplete)();
       } else {
         translateX.value = withTiming(0, { duration: 200 });
       }
@@ -231,17 +247,34 @@ export default function EventCard({
     event.priceLabel,
   ].filter(Boolean).join("  ·  ");
 
+  const resolvedImmersiveHeight =
+    immersive && immersiveHeight && immersiveHeight > 0
+      ? immersiveHeight
+      : undefined;
+  const heroHeight = immersive
+    ? resolvedImmersiveHeight
+      ? Math.max(220, Math.min(300, resolvedImmersiveHeight * 0.54))
+      : Math.min(SCREEN_HEIGHT * 0.34, 320)
+    : IMAGE_HEIGHT;
+
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, immersive && styles.wrapperImmersive]}>
       <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.card, animatedCardStyle]}>
+        <Animated.View
+          style={[
+            styles.card,
+            immersive && styles.cardImmersive,
+            resolvedImmersiveHeight ? { height: resolvedImmersiveHeight } : null,
+            animatedCardStyle,
+          ]}
+        >
           <Pressable onPress={onPress} onLongPress={() => setFeedbackSheetOpen(true)} style={styles.cardInner}>
             {/* ── Image hero ─────────────────────────────── */}
-            <View style={styles.heroContainer}>
+            <View style={[styles.heroContainer, { height: heroHeight }]}>
               {event.imageUrl || fallbackImage ? (
                 <Image
                   source={{ uri: event.imageUrl ?? fallbackImage! }}
-                  style={styles.image}
+                  style={[styles.image, { height: heroHeight }]}
                   resizeMode="cover"
                 />
               ) : (
@@ -249,7 +282,7 @@ export default function EventCard({
                   colors={CATEGORY_STYLE[event.category]?.colors ?? ["#6B7280", "#374151"]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={styles.imagePlaceholder}
+                  style={[styles.imagePlaceholder, { height: heroHeight }]}
                 >
                   <Text style={styles.placeholderEmoji}>
                     {CATEGORY_STYLE[event.category]?.emoji ?? "📍"}
@@ -329,7 +362,7 @@ export default function EventCard({
             </View>
 
             {/* ── Body: description hook + CTA ───────────── */}
-            <View style={styles.body}>
+            <View style={[styles.body, immersive && styles.bodyImmersive]}>
               {(event.hookText || (event.description && event.description.length > 30)) && (
                 <Text style={styles.hookText}>
                   {event.hookText ?? event.description}
@@ -446,6 +479,10 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     position: "relative",
   },
+  wrapperImmersive: {
+    marginBottom: 0,
+    flex: 1,
+  },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -455,8 +492,13 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 5,
   },
+  cardImmersive: {
+    flex: 1,
+    minHeight: 0,
+  },
   cardInner: {
     overflow: "hidden",
+    flex: 1,
   },
 
   // ── Hero image section ──────────────────────────────────
@@ -630,6 +672,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 16,
+  },
+  bodyImmersive: {
+    flex: 1,
+    justifyContent: "space-between",
   },
   hookText: {
     fontSize: 15,

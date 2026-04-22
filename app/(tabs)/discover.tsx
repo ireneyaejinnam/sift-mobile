@@ -3,9 +3,8 @@ import {
   View,
   Text,
   Pressable,
-  FlatList,
   Modal,
-  RefreshControl,
+  type LayoutChangeEvent,
   ScrollView,
   StyleSheet,
   BackHandler,
@@ -67,20 +66,6 @@ const TRANSITION_MSGS = [
   "Checking what's on this weekend...",
   "Tailoring for you...",
 ];
-
-const PICK_GRADIENTS: Partial<Record<EventCategory, [string, string]>> = {
-  arts:      ["#C9A882", "#8B5E3C"],
-  music:     ["#5B8DB8", "#2C4F70"],
-  outdoors:  ["#5A9E6F", "#2D6644"],
-  fitness:   ["#C0554A", "#7A2E28"],
-  comedy:    ["#B8A840", "#6E6020"],
-  food:      ["#C47830", "#7A4810"],
-  nightlife: ["#6B4E9E", "#3A2060"],
-  theater:   ["#4A7A9E", "#1E4060"],
-  workshops: ["#6A9E50", "#304E20"],
-  popups:    ["#B87050", "#6A3820"],
-};
-
 
 type CatIcon = React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
 
@@ -147,25 +132,12 @@ export default function DiscoverScreen() {
   const [goingSheetEvent, setGoingSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [showGestureTip, setShowGestureTip] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
+  const [cardStageHeight, setCardStageHeight] = useState(0);
   const loadingRef = useRef(false);
   const expandedToInterestsRef = useRef(false);
   const expandedInterestCatsRef = useRef<EventCategory[]>([]);
-
-  const weekendPicks = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const cutoff = new Date(today);
-    cutoff.setDate(cutoff.getDate() + 4);
-    return resultPool
-      .filter((e) => {
-        const d = new Date(e.startDate + "T12:00:00");
-        return d >= today && d < cutoff && (e.vibeScore ?? 0) >= 7;
-      })
-      .slice(0, 7);
-  }, [resultPool]);
 
   // Quiz step slide-in animation
   const quizEntrance = useSharedValue(1);
@@ -414,7 +386,7 @@ export default function DiscoverScreen() {
       // Data is ready — populate state before switching screens so no skeleton flash
       expandedToInterestsRef.current = false;
       const initial: Slot[] = resultEvents.length > 0
-        ? resultEvents.slice(0, 3).map((e) => ({
+        ? resultEvents.slice(0, 1).map((e) => ({
             event: e,
             key: `${e.id}-${Date.now()}-${Math.random()}`,
             type: 'event' as const,
@@ -479,20 +451,6 @@ export default function DiscoverScreen() {
     setDismissedIds([]);
     setSelectedEvent(null);
   }, []);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    sessionDismissedRef.current = new Set();
-    const wasExpanded = expandedToInterestsRef.current;
-    expandedToInterestsRef.current = false;
-    // If user had already expanded to interests, include those categories in the refresh
-    // so they don't land back at the end card with only the original quiz filters
-    const refreshCats = wasExpanded && expandedInterestCatsRef.current.length > 0
-      ? [...(filters.categories ?? []), ...expandedInterestCatsRef.current]
-      : filters.categories;
-    await goToResults({ ...filters, categories: refreshCats?.length ? refreshCats : undefined }, { skipTransition: true });
-    setRefreshing(false);
-  }, [filters, goToResults]);
 
   // Returns the next slot update — end card if pool exhausted, otherwise next event
   const nextSlotUpdate = (
@@ -608,13 +566,23 @@ export default function DiscoverScreen() {
     expandedInterestCatsRef.current = interestCats;
     setResultPool((prev) => [...prev, ...fresh]);
     setSlots(
-      fresh.slice(0, 3).map((e) => ({
+      fresh.slice(0, 1).map((e) => ({
         event: e,
         key: `${e.id}-${Date.now()}-${Math.random()}`,
         type: 'event' as const,
       }))
     );
   }, [userProfile, filters, dismissedIds, resultPool, tasteProfile]);
+
+  const activeSlot = slots[0] ?? null;
+  const activeQuizLabels = (activeSlot?.meta?.quizCategories ?? [])
+    .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
+    .join(" · ");
+
+  const handleCardStageLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    setCardStageHeight((prev) => (prev === nextHeight ? prev : nextHeight));
+  }, []);
 
   const handleGoingSwipe = useCallback(
     (event: SiftEvent) => {
@@ -914,11 +882,6 @@ export default function DiscoverScreen() {
             <Text style={s.resultsHeading}>
               {loading ? "Sorting picks..." : (userProfile ? "Your top picks" : "Here’s what we found")}
             </Text>
-            <Text style={s.eventCountLabel}>
-              {resultPool.length > 0
-                ? `${resultPool.length} event${resultPool.length !== 1 ? "s" : ""} · swipe to save or skip`
-                : "Swipe to save or skip"}
-            </Text>
           </View>
           <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
             <Text style={s.startOverText}>Start over</Text>
@@ -926,141 +889,93 @@ export default function DiscoverScreen() {
         </View>
       </View>
 
-      <FlatList
-        data={slots}
-        keyExtractor={(item) => item.key}
-        contentContainerStyle={s.resultsScroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.primary}
+      <View style={s.resultsStage}>
+        <View style={s.resultsFilters}>
+          <GestureTutorial
+            visible={showGestureTip}
+            onDismiss={() => {
+              setShowGestureTip(false);
+              setGestureTipSeen();
+            }}
           />
-        }
-        ListHeaderComponent={
-          <View style={{ marginBottom: 20 }}>
-            {weekendPicks.length >= 2 && (
-              <View style={s.weekendSection}>
-                <Text style={s.weekendHeading}>Top picks this week</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
-                >
-                  {weekendPicks.map((pick) => (
-                    <LinearGradient
-                      key={pick.id}
-                      colors={PICK_GRADIENTS[pick.category] ?? ["#6B7280", "#374151"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={s.weekendCard}
-                    >
-                      <LinearGradient
-                        colors={["transparent", "rgba(0,0,0,0.72)"]}
-                        style={s.weekendCardOverlay}
-                      >
-                        <Text
-                          style={s.weekendCardTitle}
-                          numberOfLines={2}
-                          onPress={() => openEventDetail(pick)}
-                        >
-                          {pick.title}
-                        </Text>
-                        <Text style={s.weekendCardCategory}>{pick.category}</Text>
-                      </LinearGradient>
-                    </LinearGradient>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-            <GestureTutorial
-              visible={showGestureTip}
-              onDismiss={() => {
-                setShowGestureTip(false);
-                setGestureTipSeen();
-              }}
-            />
-            <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
+          <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
+        </View>
+
+        {activeSlot?.type === 'divider' && (
+          <View style={s.dividerRow}>
+            <View style={s.dividerLine} />
+            <Text style={s.dividerLabel}>Now showing events for you</Text>
+            <View style={s.dividerLine} />
           </View>
-        }
-        renderItem={({ item }) => {
-          if (item.type === 'divider') {
-            return (
-              <View style={s.dividerRow}>
-                <View style={s.dividerLine} />
-                <Text style={s.dividerLabel}>Now showing events for you</Text>
-                <View style={s.dividerLine} />
-              </View>
-            );
-          }
-          if (item.type === 'end-card') {
-            const quizLabels = (item.meta?.quizCategories ?? [])
-              .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
-              .join(' · ');
-            return (
-              <View style={s.endCard}>
-                <Text style={s.endCardTitle}>
-                  {quizLabels ? `That's the good stuff for ${quizLabels}.` : "You've seen it all."}
-                </Text>
-                <Text style={s.endCardSub}>
-                  {quizLabels ? "Here's what else fits your taste" : "More events based on your interests"}
-                </Text>
-                <Pressable onPress={expandToInterests} style={s.endCardButton}>
-                  <Text style={s.endCardButtonText}>Keep exploring</Text>
-                </Pressable>
-              </View>
-            );
-          }
-          if (item.type === 'done') {
-            return (
-              <View style={s.endCard}>
-                <Text style={s.endCardTitle}>You've seen it all.</Text>
-                <Text style={s.endCardSub}>No more events match your picks right now.</Text>
-                <Pressable
-                  onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
-                  style={s.endCardButton}
-                >
-                  <Text style={s.endCardButtonText}>Broaden search</Text>
-                </Pressable>
-                <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
-                  <Text style={s.browseLinkText}>Start over</Text>
-                </Pressable>
-              </View>
-            );
-          }
-          if (!item.event) return null;
-          return (
+        )}
+
+        {activeSlot?.type === 'end-card' && (
+          <View style={s.endCard}>
+            <Text style={s.endCardTitle}>
+              {activeQuizLabels
+                ? `That's the good stuff for ${activeQuizLabels}.`
+                : "You've seen it all."}
+            </Text>
+            <Text style={s.endCardSub}>
+              {activeQuizLabels
+                ? "Here's what else fits your taste"
+                : "More events based on your interests"}
+            </Text>
+            <Pressable onPress={expandToInterests} style={s.endCardButton}>
+              <Text style={s.endCardButtonText}>Keep exploring</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {activeSlot?.type === 'done' && (
+          <View style={s.endCard}>
+            <Text style={s.endCardTitle}>You've seen it all.</Text>
+            <Text style={s.endCardSub}>No more events match your picks right now.</Text>
+            <Pressable
+              onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
+              style={s.endCardButton}
+            >
+              <Text style={s.endCardButtonText}>Broaden search</Text>
+            </Pressable>
+            <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
+              <Text style={s.browseLinkText}>Start over</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {activeSlot?.type === 'event' && activeSlot.event && (
+          <View key={activeSlot.key} style={s.activeCardWrap} onLayout={handleCardStageLayout}>
             <EventCard
-              event={item.event}
+              event={activeSlot.event}
+              immersive
+              immersiveHeight={cardStageHeight}
               onPress={() => {
-                track("card_tap", { event_id: item.event!.id, category: item.event!.category });
-                openEventDetail(item.event!);
+                track("card_tap", { event_id: activeSlot.event!.id, category: activeSlot.event!.category });
+                openEventDetail(activeSlot.event!);
               }}
-              onDismiss={() => handleDismissEvent(item.event!.id)}
-              onGoing={() => handleGoingSwipe(item.event!)}
+              onDismiss={() => handleDismissEvent(activeSlot.event!.id)}
+              onGoing={() => handleGoingSwipe(activeSlot.event!)}
               onRequestSignIn={() => router.push("/(auth)/signin")}
               onBookmarkPress={() => {
-                track("event_saved", { event_id: item.event!.id });
-                setSaveSheetEvent(item.event!);
+                track("event_saved", { event_id: activeSlot.event!.id });
+                setSaveSheetEvent(activeSlot.event!);
               }}
               onSharePress={() => {
-                track("share_tap", { event_id: item.event!.id });
-                setShareSheetEvent(item.event!);
+                track("share_tap", { event_id: activeSlot.event!.id });
+                setShareSheetEvent(activeSlot.event!);
               }}
             />
-          );
-        }}
-        ListEmptyComponent={
-          loading ? (
-            <View>
-              <SkeletonCard />
-              <SkeletonCard />
-              <SkeletonCard />
-            </View>
-          ) : null
-        }
-      />
+          </View>
+        )}
+
+        {loading && (
+          <View style={s.loadingWrap}>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </View>
+        )}
+      </View>
 
       <BottomSheet
         open={!!saveSheetEvent}
@@ -1352,10 +1267,21 @@ const s = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: "500",
   },
-  resultsScroll: {
+  resultsStage: {
+    flex: 1,
     paddingTop: 16,
     paddingHorizontal: spacing.page,
-    paddingBottom: 40,
+    paddingBottom: 20,
+  },
+  resultsFilters: {
+    marginBottom: 14,
+  },
+  activeCardWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  loadingWrap: {
+    paddingTop: 8,
   },
   browseLinkButton: {
     paddingVertical: 8,
@@ -1371,11 +1297,6 @@ const s = StyleSheet.create({
     color: colors.foreground,
     letterSpacing: -0.3,
   },
-  eventCountLabel: {
-    ...typography.xs,
-    color: colors.textMuted,
-    marginTop: 3,
-  },
   // End card — shown when result pool is exhausted
   endCard: {
     backgroundColor: colors.card,
@@ -1384,7 +1305,8 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     padding: 28,
     alignItems: "center",
-    marginBottom: 16,
+    justifyContent: "center",
+    flex: 1,
   },
   endCardTitle: {
     ...typography.sectionHeading,
@@ -1435,36 +1357,5 @@ const s = StyleSheet.create({
     ...typography.sectionHeading,
     textAlign: "center",
     color: colors.foreground,
-  },
-  weekendSection: {
-    marginBottom: 16,
-  },
-  weekendHeading: {
-    ...typography.h3,
-    marginBottom: 10,
-  },
-  weekendCard: {
-    width: 140,
-    height: 160,
-    borderRadius: radius.md,
-    overflow: "hidden",
-    justifyContent: "flex-end",
-  },
-  weekendCardOverlay: {
-    padding: 12,
-    paddingTop: 48,
-  },
-  weekendCardTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#fff",
-    lineHeight: 18,
-    marginBottom: 3,
-  },
-  weekendCardCategory: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.75)",
-    textTransform: "capitalize",
-    fontWeight: "500",
   },
 });
