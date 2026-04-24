@@ -1,136 +1,130 @@
-# Sift
+# Sift Mobile
 
-A curated event discovery app for NYC. Instead of overwhelming users with search results, Sift uses a short quiz to surface 3–5 relevant events matched to your mood, schedule, and neighborhood.
+NYC event discovery app built with Expo (SDK 54) + Supabase.
 
-## Features
+---
 
-- **Discovery quiz** — pick categories, date range, and travel distance to get personalized event picks
-- **Smart recommendations** — scoring engine weighs category, location, budget, schedule, recency, and more
-- **Event detail** — full event info with tickets, calendar export, and sharing
-- **Plan your weekend** — shortlist saved events, confirm a plan, and export to Google Calendar or Apple Calendar
-- **Save & organize** — save events to custom lists ("Date ideas", "Free stuff", "With friends", etc.)
-- **Calendar view** — track events you're going to
-- **Guest mode** — browse without signing in; sign in to persist saves across sessions
+## Setup
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Language | TypeScript |
-| Framework | React Native (Expo ~52) |
-| Navigation | Expo Router (file-based) |
-| State | React Context API |
-| Auth & Database | Supabase (Auth + PostgreSQL) |
-| Local Persistence | AsyncStorage + Expo Secure Store |
-| Analytics | Amplitude |
-| Animations | React Native Reanimated |
-| Icons | lucide-react-native |
-| API / Cron | Vercel Serverless Functions |
-
-## Project Structure
-
-```
-sift-mobile/
-├── api/                        # Vercel serverless functions
-│   ├── cron/ingest.ts          # Daily event ingestion cron job
-│   └── user-count.ts           # GET /api/user-count → { user_count: N }
-├── app/                        # Expo Router pages
-│   ├── index.tsx               # Root / auth gate
-│   ├── (auth)/                 # Sign-in screens
-│   ├── (onboarding)/           # 4-step preference wizard
-│   ├── (tabs)/                 # Main tabs (Discover, Plan, Profile)
-│   └── event/[id].tsx          # Event detail screen
-├── lib/
-│   └── ingest/                 # Event ingestion pipeline (14 sources)
-├── src/
-│   ├── components/             # Reusable UI components
-│   ├── context/                # UserContext (auth, saved events, preferences)
-│   ├── data/                   # Fallback event data
-│   ├── lib/                    # Recommendation engine, Supabase client, calendar, analytics
-│   └── types/                  # TypeScript interfaces
-└── vercel.json                 # Cron schedule config
-```
-
-## Event Ingestion Pipeline
-
-A Vercel cron job runs daily at 7 AM UTC, pulling events from 14 sources:
-
-**Ticketmaster** · **Eventbrite** · **NYC Parks** · **Museums** (MoMA, Whitney, New Museum, Brooklyn Museum) · **Pop-ups** · **NYCForFree** · **CozyCreatives** · **NYC Tourism** · **Meetup** · **Yelp** · **Dice.fm** · **Resident Advisor** · **NYC.gov** · **The Skint**
-
-After fetching, events go through: normalize → geocode → reclassify → deduplicate → cleanup → upsert to Supabase.
-
-## Quick Setup
-
-### Prerequisites
-
-- Node.js 18+
-- [Expo CLI](https://docs.expo.dev/get-started/installation/) — `npm install -g expo-cli`
-- A [Supabase](https://supabase.com) project
-- A [Vercel](https://vercel.com) account (for the cron job)
-- For iOS: Xcode + iOS Simulator
-- For Android: Android Studio + emulator, or a physical device with Expo Go
-- An [Amplitude](https://amplitude.com) project (free tier)
-
-### Environment Variables
-
-Copy `.env.example` and fill in your keys:
+### 1. Install dependencies
 
 ```bash
-cp .env.example .env
-```
-
-Required variables:
-
-| Variable | Description |
-|---|---|
-| `EXPO_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
-| `SUPABASE_URL` | Supabase project URL (server-side) |
-| `SUPABASE_SERVICE_KEY` | Supabase service role key (server-side) |
-| `TICKETMASTER_API_KEY` | Ticketmaster API key |
-| `EVENTBRITE_OAUTH_TOKEN` | Eventbrite OAuth token |
-| `EXPO_PUBLIC_AMPLITUDE_API_KEY` | Amplitude project API key |
-
-### Install & Run
-
-```bash
-git clone <repo-url>
-cd sift-mobile
 npm install
 ```
 
+### 2. Create `.env`
+
+Copy the template below and fill in your values (get them from a teammate):
+
+```env
+# Supabase — server-side only (ingest pipeline)
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
+
+# Supabase — client-side (safe to bundle)
+EXPO_PUBLIC_SUPABASE_URL=
+EXPO_PUBLIC_SUPABASE_ANON_KEY=
+
+# Event sources
+TICKETMASTER_API_KEY=
+EVENTBRITE_OAUTH_TOKEN=
+
+# Firebase (analytics)
+EXPO_PUBLIC_FIREBASE_IOS_APP_ID=
+EXPO_PUBLIC_FIREBASE_IOS_API_SECRET=
+EXPO_PUBLIC_FIREBASE_ANDROID_APP_ID=
+EXPO_PUBLIC_FIREBASE_ANDROID_API_SECRET=
+
+# Amplitude (analytics)
+EXPO_PUBLIC_AMPLITUDE_API_KEY=
+
+# AI
+ANTHROPIC_API_KEY=
+
+# Misc
+ADMIN_SECRET=
+GOOGLE_PLACES_API_KEY=
+
+# Unsplash fallback images
+UNSPLASH_ACCESS_KEY=
+EXPO_PUBLIC_UNSPLASH_ACCESS_KEY=
+```
+
+### 3. Run Supabase migrations
+
+One person per team does this (applies to the shared Supabase project):
+
 ```bash
-# Start Expo dev server
-npm start
-
-# Run on iOS Simulator
-npm run ios
-
-# Run on Android emulator / device
-npm run android
+# Requires supabase CLI + project linked
+supabase db push
 ```
 
-Scan the QR code with **Expo Go** (iOS/Android) to run on a physical device.
+Or run each migration manually in the Supabase SQL editor:
 
-### Deploy API (Vercel)
+- `supabase/migrations/003_vibe_taste.sql` — adds `vibe_score`, `vibe_checked`, `user_taste_profiles`
+- `supabase/migrations/004_drop_dead_columns.sql` — drops deprecated scoring columns
 
-The Vercel project only hosts the `/api` serverless functions (no web build). Push to `main` and Vercel will auto-deploy the cron job.
+### 4. Start the app
 
-## Path Aliases
-
-Import from `src/` using the `@/` alias:
-
-```ts
-import { SiftEvent } from '@/types/event';
-import { theme } from '@/lib/theme';
+```bash
+npx expo start
 ```
 
-## Notes
+Scan the QR code with Expo Go, or press `i` for iOS simulator / `a` for Android emulator.
 
-- If Supabase is unreachable, the app falls back to hardcoded event data in `src/data/events.ts`
-- Auth is handled by Supabase; guest mode works fully without sign-in
-- Analytics events fan out to Amplitude and a local AsyncStorage buffer — all fire-and-forget, never blocking the UI
-- Onboarding funnel events: `onboarding_started` → `onboarding_step_1_complete` → `onboarding_step_2_complete` → `onboarding_step_3_complete` → `onboarding_complete`
-- Sign-up funnel events: `sign_up_started` → `sign_up_completed`
-- Activation event: `first_event_viewed` (fires once per install)
-- `GET /api/user-count` is a public endpoint returning total registered users as `{ user_count: N }`, cached for 5 minutes
+---
+
+## Project structure
+
+```
+app/               Expo Router screens
+  (auth)/          Sign-in / sign-up
+  (tabs)/          Main tabs: Discover, Plan, Profile
+src/
+  components/      Shared UI components
+  lib/             Data fetching (getEvents.ts), Supabase client, helpers
+  types/           TypeScript types (event.ts)
+lib/ingest/        Server-side event ingest pipeline
+  ingest-all.ts    Entry point — runs all sources + post-processing
+  normalize.ts     Title blocklist, spam filter, NYC geo filter
+  config.ts        Source config, Eventbrite org seeds, disabled sources
+  google-places.ts Fills missing venue photos from Google Places
+  fetchImages.ts   Unsplash fallback — fills any remaining image gaps
+api/cron/          Vercel cron handlers (scoring, cleanup)
+supabase/
+  migrations/      SQL migration files
+```
+
+---
+
+## Ingest pipeline
+
+Run manually or via cron:
+
+```bash
+npx tsx --env-file=.env lib/ingest/ingest-all.ts
+```
+
+| Step | Script | Purpose |
+|------|--------|---------|
+| Sources | `ingest-all.ts` | Pulls events from Ticketmaster, Eventbrite, NYC Parks, etc. |
+| Geocode | `geocode.ts` | Fills missing lat/lng |
+| Reclassify | `reclassify.ts` | Fixes wrong categories |
+| Dedup | `dedup.ts` | Removes duplicate events |
+| Cleanup | `cleanup.ts` | Deletes expired events |
+| Photos | `google-places.ts` | Adds venue photos via Google Places |
+| Images | `fetchImages.ts` | Unsplash fallback for anything still missing |
+
+### Backfill images only
+
+```bash
+npx tsx --env-file=.env lib/ingest/fetchImages.ts
+```
+
+---
+
+## Notes for groupmates
+
+- After pulling a new branch, always run `npm install` — dependencies may have changed.
+- New `.env` keys added recently: `UNSPLASH_ACCESS_KEY` and `EXPO_PUBLIC_UNSPLASH_ACCESS_KEY`. Ask a teammate for the values.
+- Supabase migrations `003` and `004` need to be applied once to the shared project if not already done.

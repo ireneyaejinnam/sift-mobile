@@ -5,6 +5,7 @@ export const DISABLED_SOURCES = new Set([
   'nyc_gov',     // government programs, public hearings
   'yelp',        // generic promotional restaurant events
   'meetup',      // tech networking, professional development
+  'nyc_parks',   // rec center fitness, volunteer cleanups, kids programs — 100% suppress rate
 ]);
 
 

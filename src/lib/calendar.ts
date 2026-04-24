@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import type { SiftEvent } from "@/types/event";
 
@@ -92,14 +92,14 @@ export async function shareICSFile(events: SiftEvent[]): Promise<boolean> {
     const fileName = events.length === 1
       ? `${events[0].title.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 30)}.ics`
       : "sift-weekend-plan.ics";
-    const filePath = `${FileSystem.cacheDirectory}${fileName}`;
 
-    await FileSystem.writeAsStringAsync(filePath, icsContent, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    const file = new File(Paths.cache, fileName);
+    try { file.delete(); } catch {}
+    file.create();
+    file.write(icsContent);
 
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(filePath, {
+      await Sharing.shareAsync(file.uri, {
         mimeType: "text/calendar",
         UTI: "com.apple.ical.ics",
         dialogTitle: "Add to Calendar",
@@ -107,7 +107,8 @@ export async function shareICSFile(events: SiftEvent[]): Promise<boolean> {
       return true;
     }
     return false;
-  } catch {
+  } catch (err) {
+    console.warn("[calendar] shareICSFile failed:", err);
     return false;
   }
 }

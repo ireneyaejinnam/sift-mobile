@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -24,6 +24,12 @@ import {
   Share2,
   Ticket,
 } from "lucide-react-native";
+import Animated, {
+  runOnJS,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveEventSheet from "@/components/events/SaveEventSheet";
 import GoingDateSheet from "@/components/events/GoingDateSheet";
@@ -31,6 +37,7 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import type { SiftEvent, EventSession } from "@/types/event";
+import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 import { scoreSession, getBudgetMax } from "@/lib/recommend";
 import { formatNYCDate } from "@/lib/time";
@@ -39,6 +46,8 @@ interface EventDetailProps {
   event: SiftEvent;
   onBack: () => void;
   onRequestSignIn?: () => void;
+  goingDate?: string; // when set: show only this session + "Cancel going" button
+  hideBack?: boolean; // hide "Back to results" header (plan-page modal dismisses via drag)
 }
 
 function formatShortDate(d: string): string {
@@ -63,6 +72,8 @@ export default function EventDetail({
   event,
   onBack,
   onRequestSignIn,
+  goingDate,
+  hideBack = false,
 }: EventDetailProps) {
   const insets = useSafeAreaInsets();
   const { showToast } = useToast();
@@ -76,7 +87,9 @@ export default function EventDetail({
   } = useUser();
 
   // Score and sort sessions for display
-  const sessions = event.sessions ?? [];
+  const sessions = goingDate
+    ? (event.sessions ?? []).filter((s) => s.startDate === goingDate)
+    : (event.sessions ?? []);
   const scoredSessions = sessions.length > 1
     ? [...sessions]
         .map((s) => ({
@@ -95,9 +108,18 @@ export default function EventDetail({
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
+  const [fallbackImage, setFallbackImage] = useState<string | null>(null);
+  const translateY = useSharedValue(0);
+
+  useEffect(() => {
+    if (!event.imageUrl) {
+      getUnsplashFallback(event.category).then(setFallbackImage);
+    }
+  }, [event.id, event.category, event.imageUrl]);
 
   const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
+  const DISMISS_THRESHOLD = 110;
 
   const handleBookmarkPress = () => {
     if (savedList) {
@@ -145,26 +167,64 @@ export default function EventDetail({
     showToast("Marked as going");
   };
 
+  const dismissToCard = () => {
+    translateY.value = withTiming(900, { duration: 220 }, () => {
+      runOnJS(onBack)();
+    });
+  };
+
+  const detailAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
   return (
-    <View style={styles.container}>
-      {/* Sticky back header */}
-      <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
-          <Text style={styles.backText}>Back to results</Text>
-        </Pressable>
-      </View>
+    <Animated.View style={[styles.container, detailAnimatedStyle]}>
+      {/* Sticky back header — hidden when opened in a drag-to-dismiss modal (plan page) */}
+      {!hideBack && (
+        <View style={[styles.backHeader, { paddingTop: insets.top + 16 }]}>
+          <Pressable onPress={onBack} style={styles.backButton}>
+            <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
+            <Text style={styles.backText}>Back to results</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Drag-handle pill — shown only when the back button is hidden (plan-page
+          modal) so users know this sheet is drag-to-dismiss. */}
+      {hideBack && (
+        <View style={styles.dragHandleContainer}>
+          <View style={styles.dragHandle} />
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        bounces
+        overScrollMode="always"
+        onScroll={(event) => {
+          const y = event.nativeEvent.contentOffset.y;
+          translateY.value = y < 0 ? Math.min(-y * 0.6, 80) : 0;
+        }}
+        onScrollEndDrag={(event) => {
+          const y = event.nativeEvent.contentOffset.y;
+          if (y < -DISMISS_THRESHOLD) {
+            dismissToCard();
+            return;
+          }
+          translateY.value = withTiming(0, { duration: 160 });
+        }}
+        onMomentumScrollEnd={() => {
+          translateY.value = withTiming(0, { duration: 160 });
+        }}
+        scrollEventThrottle={16}
       >
         {/* Card */}
         <View style={styles.card}>
           {/* Image */}
-          {event.imageUrl ? (
+          {event.imageUrl || fallbackImage ? (
             <Image
-              source={{ uri: event.imageUrl }}
+              source={{ uri: event.imageUrl ?? fallbackImage! }}
               style={styles.image}
               resizeMode="cover"
             />
@@ -432,7 +492,7 @@ export default function EventDetail({
                     going && styles.goingButtonTextActive,
                   ]}
                 >
-                  Going
+                  {goingDate && going ? "Cancel going" : "Going"}
                 </Text>
               </Pressable>
             </View>
@@ -485,7 +545,7 @@ export default function EventDetail({
           onCancel={() => setGoingSheetOpen(false)}
         />
       </BottomSheet>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -500,6 +560,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+  },
+  dragHandleContainer: {
+    alignItems: "center",
+    paddingTop: 10,
+    paddingBottom: 6,
+    backgroundColor: colors.background,
+  },
+  dragHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.border,
   },
   scrollContent: {
     paddingTop: 16,

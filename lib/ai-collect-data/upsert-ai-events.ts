@@ -9,7 +9,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync, existsSync, unlinkSync } from 'fs';
+import { readFileSync, existsSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { resolveImage } from './fix-images';
 
@@ -210,9 +210,10 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
   }
 
   if (!keepLocal) {
-    for (const p of [OUTPUT_PATH, NAME_LIST_PATH]) {
-      if (existsSync(p)) { unlinkSync(p); console.log(`[upsert] Deleted ${p}`); }
-    }
+    // Reset ai_new_events.json to empty array (keeps the file so Metro bundler doesn't break)
+    writeFileSync(OUTPUT_PATH, '[]\n', 'utf-8');
+    console.log(`[upsert] Reset ${OUTPUT_PATH} to []`);
+    if (existsSync(NAME_LIST_PATH)) { unlinkSync(NAME_LIST_PATH); console.log(`[upsert] Deleted ${NAME_LIST_PATH}`); }
   }
 }
 

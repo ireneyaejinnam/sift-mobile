@@ -28,12 +28,36 @@ export default function SignInScreen() {
   const { setAuth, isLoggedIn } = useUser();
   const { showToast } = useToast();
   const [isCreateAccount, setIsCreateAccount] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const canSubmit = email.trim().length > 0 && password.trim().length >= 6;
+  const canSubmit = isForgotPassword
+    ? email.trim().length > 0
+    : email.trim().length > 0 && password.trim().length >= 6;
+
+  const handleForgotPassword = async () => {
+    if (!email.trim() || loading) return;
+    if (!supabase) {
+      showToast("Sign in is not configured right now.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      if (error) {
+        showToast(error.message);
+      } else {
+        showToast("Reset link sent — check your email");
+        setIsForgotPassword(false);
+      }
+    } catch {
+      showToast("Something went wrong. Try again.");
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (isCreateAccount) track("sign_up_started");
@@ -41,6 +65,10 @@ export default function SignInScreen() {
 
   const handleSubmit = async () => {
     if (!canSubmit || loading) return;
+    if (!supabase) {
+      showToast("Sign in is not configured right now.");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -48,7 +76,6 @@ export default function SignInScreen() {
         const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password: password.trim(),
-          options: { data: { display_name: displayName.trim() || undefined } },
         });
         if (error) {
           showToast(error.message);
@@ -198,11 +225,12 @@ export default function SignInScreen() {
       >
         <View style={styles.form}>
           <Text style={styles.heading}>
-            {isCreateAccount ? "Create account" : "Sign in"}
+            {isForgotPassword ? "Reset password" : isCreateAccount ? "Create account" : "Sign in"}
           </Text>
           <Text style={styles.subtitle}>
-            We'll use this to save your preferences and personalize your
-            experience.
+            {isForgotPassword
+              ? "Enter your email and we'll send you a reset link."
+              : "We'll use this to save your preferences and personalize your experience."}
           </Text>
 
           {/* Google Sign In */}
@@ -226,7 +254,7 @@ export default function SignInScreen() {
           </View>
 
           {/* Username — only for signup */}
-          {isCreateAccount && (
+          {isCreateAccount && !isForgotPassword && (
             <>
               <Text style={styles.label}>Username</Text>
               <TextInput
@@ -254,23 +282,36 @@ export default function SignInScreen() {
             autoCorrect={false}
           />
 
-          {/* Password */}
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={[styles.input, { marginBottom: 24 }]}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            placeholderTextColor={colors.textMuted}
-            secureTextEntry
-          />
+          {/* Password — hidden in forgot password mode */}
+          {!isForgotPassword && (
+            <>
+              <Text style={styles.label}>Password</Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry
+              />
+              {!isCreateAccount && (
+                <Pressable
+                  onPress={() => setIsForgotPassword(true)}
+                  style={styles.forgotLink}
+                >
+                  <Text style={styles.forgotLinkText}>Forgot password?</Text>
+                </Pressable>
+              )}
+            </>
+          )}
 
           {/* Submit */}
           <Pressable
-            onPress={handleSubmit}
+            onPress={isForgotPassword ? handleForgotPassword : handleSubmit}
             disabled={!canSubmit || loading}
             style={({ pressed }) => [
               styles.primaryButton,
+              { marginTop: 16 },
               (!canSubmit || loading) && styles.primaryButtonDisabled,
               pressed && canSubmit && styles.primaryButtonPressed,
             ]}
@@ -278,28 +319,41 @@ export default function SignInScreen() {
             <Text style={styles.primaryButtonText}>
               {loading
                 ? "Please wait..."
+                : isForgotPassword
+                ? "Send Reset Link"
                 : isCreateAccount
                 ? "Create Account"
                 : "Sign In"}
             </Text>
           </Pressable>
 
-          {/* Toggle create/signin */}
-          <Pressable
-            onPress={() => setIsCreateAccount(!isCreateAccount)}
-            style={styles.toggleButton}
-          >
-            <Text style={styles.toggleText}>
-              {isCreateAccount
-                ? "Already have an account? Sign in"
-                : "Create an account instead"}
-            </Text>
-          </Pressable>
+          {/* Toggle create/signin or back to signin from forgot */}
+          {isForgotPassword ? (
+            <Pressable
+              onPress={() => setIsForgotPassword(false)}
+              style={styles.toggleButton}
+            >
+              <Text style={styles.toggleText}>Back to sign in</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => setIsCreateAccount(!isCreateAccount)}
+              style={styles.toggleButton}
+            >
+              <Text style={styles.toggleText}>
+                {isCreateAccount
+                  ? "Already have an account? Sign in"
+                  : "Create an account instead"}
+              </Text>
+            </Pressable>
+          )}
 
           {/* Guest link */}
-          <Pressable onPress={handleContinueAsGuest} style={styles.guestLink}>
-            <Text style={styles.guestLinkText}>Continue as guest</Text>
-          </Pressable>
+          {!isForgotPassword && (
+            <Pressable onPress={handleContinueAsGuest} style={styles.guestLink}>
+              <Text style={styles.guestLinkText}>Continue as guest</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -435,5 +489,14 @@ const styles = StyleSheet.create({
     ...typography.sm,
     color: colors.textSecondary,
     textDecorationLine: "underline",
+  },
+  forgotLink: {
+    alignSelf: "flex-end",
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  forgotLinkText: {
+    ...typography.sm,
+    color: colors.primary,
   },
 });

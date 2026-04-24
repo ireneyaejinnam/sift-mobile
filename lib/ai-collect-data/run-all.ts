@@ -44,10 +44,10 @@ async function main() {
     : DEFAULT_MAX_PER_SOURCE;
 
   const modelIdx = args.indexOf('--model');
-  const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : 'gpt-5.4';
+  const model = modelIdx !== -1 && args[modelIdx + 1] ? args[modelIdx + 1] : 'claude-sonnet-4-6';
 
   const collectModelIdx = args.indexOf('--collect-model');
-  const collectModel = collectModelIdx !== -1 && args[collectModelIdx + 1] ? args[collectModelIdx + 1] : 'gpt-4o-mini';
+  const collectModel = collectModelIdx !== -1 && args[collectModelIdx + 1] ? args[collectModelIdx + 1] : 'claude-haiku-4-5-20251001';
 
   const sourceIdx = args.indexOf('--source');
   const source = sourceIdx !== -1 && args[sourceIdx + 1] ? args[sourceIdx + 1] : undefined;

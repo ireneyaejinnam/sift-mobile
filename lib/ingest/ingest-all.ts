@@ -19,6 +19,7 @@ import { reclassifyEvents } from './reclassify';
 import { deduplicateEvents } from './dedup';
 import { cleanupExpired } from './cleanup';
 import { fillMissingPhotos } from './google-places';
+import { fetchMissingImages } from './fetchImages';
 import { DISABLED_SOURCES } from './config';
 
 async function run(name: string, source: string, fn: () => Promise<void>) {
@@ -60,7 +61,8 @@ async function main() {
     ['Reclassify', reclassifyEvents],
     ['Dedup',      deduplicateEvents],
     ['Cleanup',    cleanupExpired],
-    ['Photos',     fillMissingPhotos],
+    ['Photos',     fillMissingPhotos],    // Google Places — venue-specific photos
+    ['Images',     fetchMissingImages],   // Unsplash fallback — catches anything Google missed
   ] as [string, () => Promise<void>][]) {
     try { await fn(); } catch (e) { console.error(`[Ingest] ${name} failed:`, e); }
   }

@@ -1,4 +1,5 @@
 import type {
+  BoroughName,
   EventCategory,
   EventDistance,
   PriceRange,
@@ -19,5 +20,6 @@ export interface Filters {
   dateTo?: string;
   price?: PriceRange;
   distance?: EventDistance;
+  boroughs?: BoroughName[];
   vibe?: Vibe;
 }

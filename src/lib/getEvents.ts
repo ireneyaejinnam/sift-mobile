@@ -3,6 +3,19 @@ import { todayNYC, nowNYC } from "./time";
 import type { SiftEvent, EventCategory, EventSession } from "@/types/event";
 import type { Filters } from "@/types/quiz";
 import VIBE_SUPPRESSED_IDS from "../../lib/ingest/vibe-suppressed-ids.json";
+import {
+  fetchLocalEvents,
+  fetchLocalEventById,
+  fetchLocalAllUpcoming,
+  LOCAL_SEED_COUNT,
+} from "./localEvents";
+
+// Dev flag: serve events from local JSON seed instead of Supabase.
+// Set EXPO_PUBLIC_USE_LOCAL_SEED=true to enable (see lib/ai-collect-data/output/ai_new_events.json).
+const USE_LOCAL_SEED = process.env.EXPO_PUBLIC_USE_LOCAL_SEED === "true";
+if (USE_LOCAL_SEED) {
+  console.log(`[getEvents] Using local seed — ${LOCAL_SEED_COUNT} events`);
+}
 
 // Sources excluded from the client feed (low quality / wrong demographic).
 const EXCLUDED_SOURCES = ['nyc_tourism', 'nyc_gov', 'yelp', 'meetup'];
@@ -95,6 +108,7 @@ interface EventRow {
   category: string;
   image_url?: string | null;
   description?: string | null;
+  hook_text?: string | null;
   venue_name?: string | null;
   address?: string | null;
   borough?: string | null;
@@ -108,6 +122,7 @@ interface EventRow {
   on_sale_date?: string | null;
   tags?: string[] | null;
   vibe_score?: number | null;
+  social_signal?: number | null;
 }
 
 /** Map a DB row + its matched sessions into a frontend SiftEvent. */
@@ -186,11 +201,13 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
     sessions: sessions.length > 0 ? sessions : undefined,
     locationsVary,
     vibeScore: row.vibe_score ?? undefined,
+    socialSignal: row.social_signal ?? undefined,
+    hookText: row.hook_text ?? undefined,
   };
 }
 
 /**
- * Composite ranking score: vibe * 0.60 + timeliness * 0.25 + completeness * 0.15
+ * Composite ranking score: vibe * 0.50 + timeliness * 0.30 + completeness * 0.20
  * categoryWeight (from taste profile) is applied as a multiplier.
  */
 export function computeEventScore(
@@ -217,7 +234,7 @@ export function computeEventScore(
     (event.location ? 0.2 : 0) +
     (event.priceLabel && event.priceLabel !== "See tickets" ? 0.1 : 0);
 
-  const base = vibe * 0.60 + timeliness * 0.25 + completeness * 0.15;
+  const base = vibe * 0.50 + timeliness * 0.30 + completeness * 0.20;
   return base * categoryWeight;
 }
 
@@ -229,6 +246,7 @@ export async function fetchEvents(
   filters: Filters,
   limit = 100
 ): Promise<SiftEvent[]> {
+  if (USE_LOCAL_SEED) return fetchLocalEvents(filters, limit);
   if (!supabase) return [];
 
   const today = todayNYC();
@@ -352,9 +370,19 @@ export async function fetchEventById(
   id: string,
   filters?: Partial<Filters>
 ): Promise<SiftEvent | null> {
+  if (USE_LOCAL_SEED) return fetchLocalEventById(id);
   if (!supabase) return null;
 
-  const { data, error } = await supabase
+  // Try the configured table first, then fall back to the other table.
+  // This ensures plan events are always found regardless of which source
+  // the app is currently browsing (EXPO_PUBLIC_EVENTS_SOURCE=ai vs default).
+  const fallbackTable = EVENTS_TABLE === "ai_events" ? "events" : "ai_events";
+  const fallbackSessionsTable = SESSIONS_TABLE === "ai_event_sessions" ? "event_sessions" : "ai_event_sessions";
+
+  let data: any = null;
+  let resolvedSessionsTable = SESSIONS_TABLE;
+
+  const { data: primary, error } = await supabase
     .from(EVENTS_TABLE)
     .select("*")
     .eq("id", id)
@@ -364,11 +392,25 @@ export async function fetchEventById(
     console.error("[getEvents] fetchEventById error:", error.message);
     return null;
   }
+
+  if (primary) {
+    data = primary;
+  } else {
+    // Not found in primary table — try fallback
+    const { data: fallback } = await supabase
+      .from(fallbackTable)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    data = fallback;
+    resolvedSessionsTable = fallbackSessionsTable;
+  }
+
   if (!data) return null;
 
-  // Fetch all upcoming sessions for this event
+  // Fetch all upcoming sessions from whichever table the event was found in
   const { data: sessions } = await supabase
-    .from(SESSIONS_TABLE)
+    .from(resolvedSessionsTable)
     .select("*")
     .eq("event_id", id)
     .gte("date", todayNYC())
@@ -403,6 +445,17 @@ export async function fetchAllUpcoming(
   categories?: EventCategory[],
   categoryWeights?: Partial<Record<EventCategory, number>>
 ): Promise<SiftEvent[]> {
+  if (USE_LOCAL_SEED) {
+    const mapped = fetchLocalAllUpcoming(limit, categories);
+    if (categoryWeights && Object.keys(categoryWeights).length > 0) {
+      mapped.sort((a: SiftEvent, b: SiftEvent) => {
+        const wa = categoryWeights[a.category] ?? 1.0;
+        const wb = categoryWeights[b.category] ?? 1.0;
+        return computeEventScore(b, wb) - computeEventScore(a, wa);
+      });
+    }
+    return mapped;
+  }
   if (!supabase) return [];
 
   const today = todayNYC();

@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
-import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
+import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react-native";
 import type { GoingEvent, SavedEvent } from "@/types/user";
 import { useUser } from "@/context/UserContext";
-import { colors, radius, typography, spacing } from "@/lib/theme";
+import { colors, radius, typography, spacing, shadows } from "@/lib/theme";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -20,11 +20,17 @@ function getDaysInMonth(year: number, month: number) {
 interface CalendarSectionProps {
   goingEvents: GoingEvent[];
   savedEvents: SavedEvent[];
+  title?: string | null;
+  renderGoingEvents?: (events: GoingEvent[], date: string) => ReactNode;
+  showSavedDetails?: boolean;
 }
 
 export default function CalendarSection({
   goingEvents,
   savedEvents,
+  title = "My Calendar",
+  renderGoingEvents,
+  showSavedDetails = true,
 }: CalendarSectionProps) {
   const router = useRouter();
   const { removeSavedEvent, toggleGoing } = useUser();
@@ -85,92 +91,124 @@ export default function CalendarSection({
 
   const selGoing = selectedDate ? dateToGoing.get(selectedDate) ?? [] : [];
   const selSaved = selectedDate ? dateToSaved.get(selectedDate) ?? [] : [];
+  const isSelectedToday = selectedDate === todayKey;
 
   return (
     <View style={st.section}>
-      <Text style={st.h3}>My Calendar</Text>
+      {title ? <Text style={st.h3}>{title}</Text> : null}
 
-      {/* Month navigation */}
-      <View style={st.monthNav}>
-        <Pressable onPress={prevMonth} style={st.navButton} hitSlop={8}>
-          <ChevronLeft size={18} strokeWidth={2} color={colors.textSecondary} />
-        </Pressable>
-        <Text style={st.monthLabel}>{monthLabel}</Text>
-        <Pressable onPress={nextMonth} style={st.navButton} hitSlop={8}>
-          <ChevronRight size={18} strokeWidth={2} color={colors.textSecondary} />
-        </Pressable>
-      </View>
-
-      <View style={st.grid}>
-        {WEEKDAYS.map((w, i) => (
-          <View key={i} style={st.weekdayCell}>
-            <Text style={st.weekday}>{w}</Text>
+      <View style={st.calendarCard}>
+        <View style={st.monthNav}>
+          <View style={st.monthChip}>
+            <CalendarDays size={14} strokeWidth={1.8} color={colors.textSecondary} />
+            <Text style={st.monthLabel}>{monthLabel}</Text>
           </View>
-        ))}
-        {days.map((day, i) => {
-          if (day === null) return <View key={`pad-${i}`} style={st.dayCell} />;
-          const key = toDateKey(day);
-          const hasGoing = (dateToGoing.get(key) ?? []).length > 0;
-          const hasSaved = (dateToSaved.get(key) ?? []).length > 0;
-          const isSelected = selectedDate === key;
-          const isToday = key === todayKey;
-          return (
-            <Pressable
-              key={key}
-              onPress={() => setSelectedDate(isSelected ? null : key)}
-              style={[
-                st.dayCell,
-                st.dayButton,
-                hasGoing && st.dayGoing,
-                hasSaved && !hasGoing && st.daySaved,
-                isToday && st.dayToday,
-                isSelected && st.daySelected,
-              ]}
-            >
-              <Text style={[st.dayText, isToday && st.dayTextToday]}>{day}</Text>
-              <View style={st.dots}>
-                {hasGoing && <View style={st.dotGoing} />}
-                {hasSaved && <View style={st.dotSaved} />}
-              </View>
+          <View style={st.monthActions}>
+            <Pressable onPress={prevMonth} style={st.navButton} hitSlop={8}>
+              <ChevronLeft size={18} strokeWidth={2} color={colors.textSecondary} />
             </Pressable>
-          );
-        })}
+            <Pressable onPress={nextMonth} style={st.navButton} hitSlop={8}>
+              <ChevronRight size={18} strokeWidth={2} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={st.grid}>
+          {WEEKDAYS.map((w, i) => (
+            <View key={i} style={st.weekdayCell}>
+              <Text style={st.weekday}>{w}</Text>
+            </View>
+          ))}
+          {days.map((day, i) => {
+            if (day === null) return <View key={`pad-${i}`} style={st.dayCell} />;
+            const key = toDateKey(day);
+            const hasGoing = (dateToGoing.get(key) ?? []).length > 0;
+            const hasSaved = (dateToSaved.get(key) ?? []).length > 0;
+            const isSelected = selectedDate === key;
+            const isToday = key === todayKey;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => setSelectedDate(isSelected ? null : key)}
+                style={[
+                  st.dayCell,
+                  st.dayButton,
+                  hasGoing && st.dayGoing,
+                  hasSaved && !hasGoing && st.daySaved,
+                  isToday && st.dayToday,
+                  isSelected && st.daySelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    st.dayText,
+                    isToday && st.dayTextToday,
+                    isSelected && st.dayTextSelected,
+                  ]}
+                >
+                  {day}
+                </Text>
+                <View style={st.dots}>
+                  {hasGoing && <View style={[st.dot, st.dotGoing]} />}
+                  {hasSaved && <View style={[st.dot, st.dotSaved]} />}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {selectedDate && (
         <View style={st.detail}>
-          <Text style={st.detailDate}>
-            {new Date(selectedDate + "T12:00:00").toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "short",
-              day: "numeric",
-            })}
-          </Text>
+          <View style={st.detailHeader}>
+            <View>
+              {isSelectedToday ? <Text style={st.detailLabelTop}>TODAY</Text> : null}
+              <View style={st.detailDateRow}>
+                <Text style={st.detailDayNumber}>
+                  {new Date(selectedDate + "T12:00:00").getDate()}
+                </Text>
+                <View>
+                  <Text style={st.detailDate}>
+                    {new Date(selectedDate + "T12:00:00").toLocaleDateString("en-US", {
+                      weekday: "long",
+                    })}
+                  </Text>
+                  <Text style={st.detailSummary}>
+                    {selGoing.length} going event{selGoing.length !== 1 ? "s" : ""}
+                    {showSavedDetails ? ` · ${selSaved.length} saved` : ""}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
           {selGoing.length > 0 && (
-            <View style={{ marginBottom: 8 }}>
-              <Text style={st.detailLabel}>Going:</Text>
-              {selGoing.map((e) => (
-                <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.detailItem}>{e.eventTitle}</Text>
-                    {e.eventEndDate && e.eventEndDate !== e.eventDate && (
-                      <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
-                    )}
-                  </View>
-                  <Pressable
-                    onPress={() => toggleGoing({ eventId: e.eventId, eventTitle: e.eventTitle, eventDate: e.eventDate })}
-                    hitSlop={8}
-                    style={st.removeBtn}
-                  >
-                    <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
+            <View style={st.cardsList}>
+              {renderGoingEvents ? (
+                renderGoingEvents(selGoing, selectedDate)
+              ) : (
+                selGoing.map((e) => (
+                  <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.detailItem}>{e.eventTitle}</Text>
+                      {e.eventEndDate && e.eventEndDate !== e.eventDate && (
+                        <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
+                      )}
+                    </View>
+                    <Pressable
+                      onPress={() => toggleGoing({ eventId: e.eventId, eventTitle: e.eventTitle, eventDate: e.eventDate })}
+                      hitSlop={8}
+                      style={st.removeBtn}
+                    >
+                      <X size={14} strokeWidth={2.5} color={colors.textSecondary} />
+                    </Pressable>
                   </Pressable>
-                </Pressable>
-              ))}
+                ))
+              )}
             </View>
           )}
-          {selSaved.length > 0 && (
+          {showSavedDetails && selSaved.length > 0 && (
             <View>
-              <Text style={st.detailLabel}>Saved:</Text>
+              <Text style={st.detailLabel}>Saved</Text>
               {selSaved.map((s) => (
                 <Pressable key={s.eventId} style={st.eventRow} onPress={() => router.push(`/event/${s.eventId}`)}>
                   <View style={{ flex: 1 }}>
@@ -202,60 +240,118 @@ export default function CalendarSection({
 const st = StyleSheet.create({
   section: { marginBottom: 32 },
   h3: { ...typography.h3, marginBottom: 12 },
+  calendarCard: {
+    backgroundColor: colors.card,
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.card,
+  },
   monthNav: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
   },
-  navButton: {
-    padding: 4,
+  monthChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.full,
+    backgroundColor: colors.muted,
   },
-  monthLabel: { ...typography.sm, color: colors.textSecondary, fontWeight: "600" },
-  grid: { flexDirection: "row", flexWrap: "wrap" },
-  weekdayCell: { width: "14.28%", alignItems: "center", marginBottom: 4 },
-  weekday: { ...typography.xs, fontWeight: "600", color: colors.textSecondary },
-  dayCell: { width: "14.28%", height: 44, alignItems: "center", justifyContent: "flex-start", paddingTop: 8 },
+  monthActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  navButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  monthLabel: { ...typography.sm, color: colors.foreground, fontWeight: "600" },
+  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 8 },
+  weekdayCell: { width: "14.28%", alignItems: "center", marginBottom: 8 },
+  weekday: { ...typography.xs, fontWeight: "500", color: colors.textSecondary },
+  dayCell: { width: "14.28%", height: 48, alignItems: "center", justifyContent: "center", paddingTop: 4 },
   dayButton: {
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 24,
   },
   dayGoing: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
+    backgroundColor: "#E9EEF5",
   },
   daySaved: {
-    backgroundColor: "rgba(232, 170, 106, 0.1)",
-    borderColor: colors.accent,
+    backgroundColor: "rgba(232, 170, 106, 0.12)",
   },
   dayToday: {
     borderColor: colors.foreground,
-    borderWidth: 1.5,
+    borderWidth: 1.2,
   },
   dayTextToday: {
     fontWeight: "700" as const,
   },
+  dayTextSelected: {
+    color: colors.white,
+  },
   daySelected: {
-    borderColor: colors.foreground,
-    backgroundColor: colors.muted,
+    backgroundColor: colors.foreground,
   },
   dayText: { ...typography.sm, color: colors.foreground },
-  dots: { flexDirection: "row", gap: 2, marginTop: 2, height: 6 },
-  dotGoing: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.primary },
-  dotSaved: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent },
+  dots: { flexDirection: "row", gap: 3, marginTop: 2, height: 6 },
+  dot: { width: 4, height: 4, borderRadius: 2 },
+  dotGoing: { backgroundColor: colors.primary },
+  dotSaved: { backgroundColor: colors.accent },
   detail: {
-    padding: 12,
-    backgroundColor: colors.muted,
-    borderRadius: radius.md,
+    padding: 16,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.card,
   },
-  detailDate: { ...typography.sm, fontWeight: "600", color: colors.foreground, marginBottom: 8 },
-  detailLabel: { ...typography.xs, color: colors.textSecondary },
+  detailHeader: {
+    marginBottom: 14,
+  },
+  detailLabelTop: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    marginBottom: 8,
+  },
+  detailDateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  detailDayNumber: {
+    fontSize: 42,
+    lineHeight: 42,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  detailDate: { ...typography.sm, fontWeight: "600", color: colors.foreground },
+  detailSummary: { ...typography.xs, color: colors.textSecondary, marginTop: 2 },
+  detailLabel: { ...typography.xs, color: colors.textSecondary, marginBottom: 6 },
+  cardsList: {
+    gap: 8,
+    marginBottom: 8,
+  },
   eventRow: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 4,
+    backgroundColor: colors.muted,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   detailItem: { ...typography.sm },
   detailSub: { ...typography.xs, color: colors.textSecondary, marginTop: 1 },

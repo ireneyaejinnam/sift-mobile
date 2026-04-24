@@ -23,5 +23,5 @@ android/
 *.tsbuildinfo
 .claude/
 
-# AI data collection output
-lib/ai-collect-data/output/
+# AI data collection output (ai_new_events.json is tracked as empty placeholder)
+lib/ai-collect-data/output/ai_new_events_name_list.json

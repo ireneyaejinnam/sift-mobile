@@ -9,9 +9,9 @@
  * Export: resolveImage(event, model?) → string | null
  */
 
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function isImageUrlValid(url: string): Promise<boolean> {
   try {
@@ -58,13 +58,15 @@ Event: ${title}${urlLine}
 Reply with ONLY the image URL, nothing else. If you cannot find one, reply with "none".`;
 
   try {
-    const response = await (openai as any).responses.create({
+    const response = await anthropic.messages.create({
       model,
-      tools: [{ type: 'web_search' }],
-      instructions: 'You are a helpful assistant. Reply with only a direct image URL or "none".',
-      input: prompt,
+      max_tokens: 256,
+      system: 'You are a helpful assistant. Reply with only a direct image URL or "none".',
+      tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
+      messages: [{ role: 'user', content: prompt }],
     });
-    const text = (response.output_text ?? '').trim();
+    const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
+    const text = textBlocks.map(b => b.text).join('').trim();
     if (!text || text.toLowerCase() === 'none') return null;
     // Extract URL if model added extra text
     const match = text.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(\?\S*)?/i);
@@ -93,7 +95,7 @@ async function unsplashFindImage(title: string): Promise<string | null> {
 
 export async function resolveImage(
   event: { title: string; image_url?: string | null; event_url?: string | null },
-  model = 'gpt-5.4'
+  model = 'claude-sonnet-4-6'
 ): Promise<string | null> {
   const { title, image_url, event_url } = event;
 

@@ -30,6 +30,9 @@ import {
   syncGoingEvent,
   deleteGoingEvent as deleteGoingEventDB,
   syncCustomList,
+  renameCustomListDB,
+  deleteCustomListDB,
+  reorderCustomListsDB,
 } from "@/lib/userDataService";
 import { supabase } from "@/lib/supabase";
 import { fetchEventById } from "@/lib/getEvents";
@@ -54,14 +57,25 @@ interface UserContextValue extends SiftStorage {
   }) => boolean;
   isGoing: (eventId: string) => boolean;
   addCustomList: (listName: string) => void;
+  renameCustomList: (oldName: string, newName: string) => void;
+  deleteCustomList: (listName: string) => void;
+  reorderCustomLists: (newOrder: string[]) => void;
   saveEventToNewList: (listName: string, eventId: string, meta?: { title?: string; startDate?: string; endDate?: string }) => void;
   getAllListNames: () => string[];
   addSharedWithYou: (eventId: string) => void;
   updateDisplayName: (name: string) => void;
   signOut: () => Promise<void>;
+  refreshFromRemote: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
+
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Invalid Refresh Token|Refresh Token Not Found/i.test(error.message)
+  );
+}
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [storage, setStorage] = useState<SiftStorage>(initialStorage);
@@ -70,13 +84,53 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Supabase user ID — used to key all remote data operations.
   const userIdRef = useRef<string | null>(null);
 
+  const clearLocalAuthState = useCallback(async () => {
+    userIdRef.current = null;
+    clearOnboardingDoneFlag();
+    // Update state synchronously first so the UI re-renders as logged-out
+    // immediately; defer the async supabase + storage writes.
+    const clean = { ...initialStorage };
+    setStorage(clean);
+    saveStorage(clean).catch(() => {});
+    if (supabase) {
+      supabase.auth.signOut({ scope: "local" }).catch(() => {});
+    }
+  }, []);
+
+  // Re-fetch saved/going lists from Supabase. Called on tab focus so that
+  // server-side changes (e.g. event deletion invalidating a going_events row)
+  // propagate without requiring sign-out.
+  const refreshFromRemote = useCallback(async () => {
+    const userId = userIdRef.current;
+    if (!userId) return;
+    const remote = await fetchUserData(userId);
+    if (!remote) return;
+    setStorage((prev) => ({
+      ...prev,
+      savedEvents: remote.savedEvents,
+      goingEvents: remote.goingEvents,
+      customLists: remote.customLists,
+    }));
+  }, []);
+
   // ── Startup: restore session + load data ─────────────────
 
   useEffect(() => {
     (async () => {
       try {
         if (supabase) {
-          const { data: sessionData } = await supabase.auth.getSession();
+          let sessionData;
+          try {
+            const result = await supabase.auth.getSession();
+            sessionData = result.data;
+          } catch (error) {
+            if (isInvalidRefreshTokenError(error)) {
+              await clearLocalAuthState();
+              setReady(true);
+              return;
+            }
+            throw error;
+          }
 
           if (sessionData.session?.user) {
             const user = sessionData.session.user;
@@ -91,13 +145,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 ...initialStorage,
                 isLoggedIn: true,
                 userEmail: user.email ?? "",
-                userDisplayName:
-                  remote.displayName ??
-                  (user.user_metadata?.display_name as string | undefined),
+                userDisplayName: remote.displayName,
                 userProfile: remote.userProfile,
                 savedEvents: remote.savedEvents,
                 goingEvents: remote.goingEvents,
                 customLists: remote.customLists,
+                createdAt: user.created_at,
               };
             } else {
               // Supabase unavailable — use cached local data.
@@ -106,14 +159,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 ...cached,
                 isLoggedIn: true,
                 userEmail: user.email ?? cached.userEmail,
-                userDisplayName:
-                  (user.user_metadata?.display_name as string | undefined) ??
-                  cached.userDisplayName,
+                userDisplayName: cached.userDisplayName,
+                createdAt: user.created_at ?? cached.createdAt,
               };
             }
 
             if (data.userProfile) setOnboardingDoneFlag();
             else clearOnboardingDoneFlag();
+
+            // Ensure "Favorites" list exists.
+            if (!data.customLists.includes("Favorites")) {
+              const customLists = ["Favorites", ...data.customLists];
+              data = { ...data, customLists };
+              syncCustomList(user.id, "Favorites", 0);
+              reorderCustomListsDB(user.id, customLists);
+            }
 
             // Backfill missing event dates in saved events.
             data = await backfillSavedEventDates(data);
@@ -122,10 +182,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             saveStorage(data);
           } else {
             // No session — guest always starts clean.
-            clearOnboardingDoneFlag();
-            const clean = { ...initialStorage };
-            setStorage(clean);
-            saveStorage(clean);
+            await clearLocalAuthState();
           }
         }
       } catch {
@@ -162,7 +219,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => listener.subscription.unsubscribe();
-  }, []);
+  }, [clearLocalAuthState]);
 
   // ── Local + cache persist ────────────────────────────────
 
@@ -178,9 +235,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (isLoggedIn && userEmail) {
         // Get the Supabase user ID from the current session.
         let userId: string | null = null;
+        let supabaseCreatedAt: string | undefined;
+        let authFullName: string | undefined;
         if (supabase) {
           const { data } = await supabase.auth.getUser();
           userId = data.user?.id ?? null;
+          supabaseCreatedAt = data.user?.created_at;
+          authFullName = data.user?.user_metadata?.full_name as string | undefined;
         }
         userIdRef.current = userId;
 
@@ -191,6 +252,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           if (remote) {
             data = {
               ...initialStorage,
+              userDisplayName: remote.displayName,
               userProfile: remote.userProfile,
               savedEvents: remote.savedEvents,
               goingEvents: remote.goingEvents,
@@ -204,15 +266,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         if (data.userProfile) setOnboardingDoneFlag();
         else clearOnboardingDoneFlag();
 
+        const resolvedName =
+          userDisplayName !== undefined
+            ? userDisplayName
+            : authFullName ?? data.userDisplayName;
+
+        // Write resolved name to user_profiles (single source of truth)
+        if (resolvedName && userId) {
+          syncDisplayName(userId, resolvedName);
+        }
+
+        // Ensure "Favorites" list exists.
+        if (!data.customLists.includes("Favorites")) {
+          const customLists = ["Favorites", ...data.customLists];
+          data = { ...data, customLists };
+          if (userId) {
+            syncCustomList(userId, "Favorites", 0);
+            reorderCustomListsDB(userId, customLists);
+          }
+        }
+
         const next: SiftStorage = {
           ...data,
           isLoggedIn: true,
           userEmail,
-          userDisplayName:
-            userDisplayName !== undefined
-              ? userDisplayName
-              : data.userDisplayName,
-          createdAt: data.createdAt ?? new Date().toISOString(),
+          userDisplayName: resolvedName,
+          createdAt: supabaseCreatedAt ?? data.createdAt,
         };
         persist(next);
       } else {
@@ -313,8 +392,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     (listName: string) => {
       const trimmed = listName.trim();
       if (!trimmed || storage.customLists.includes(trimmed)) return;
-      persist({ ...storage, customLists: [...storage.customLists, trimmed] });
-      if (userIdRef.current) syncCustomList(userIdRef.current, trimmed);
+      const customLists = [...storage.customLists, trimmed];
+      persist({ ...storage, customLists });
+      if (userIdRef.current) syncCustomList(userIdRef.current, trimmed, customLists.length - 1);
+    },
+    [storage, persist]
+  );
+
+  const renameCustomList = useCallback(
+    (oldName: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === oldName) return;
+      if (storage.customLists.includes(trimmed)) return;
+      const customLists = storage.customLists.map((l) => l === oldName ? trimmed : l);
+      const savedEvents = storage.savedEvents.map((s) =>
+        s.listName === oldName ? { ...s, listName: trimmed } : s
+      );
+      persist({ ...storage, customLists, savedEvents });
+      if (userIdRef.current) renameCustomListDB(userIdRef.current, oldName, trimmed);
+    },
+    [storage, persist]
+  );
+
+  const deleteCustomList = useCallback(
+    (listName: string) => {
+      const customLists = storage.customLists.filter((l) => l !== listName);
+      const savedEvents = storage.savedEvents.filter((s) => s.listName !== listName);
+      persist({ ...storage, customLists, savedEvents });
+      if (userIdRef.current) deleteCustomListDB(userIdRef.current, listName);
     },
     [storage, persist]
   );
@@ -343,15 +448,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (userIdRef.current) {
         syncSavedEvent(userIdRef.current, newEvent);
-        if (isNew) syncCustomList(userIdRef.current, trimmed);
+        if (isNew) syncCustomList(userIdRef.current, trimmed, customLists.length - 1);
       }
     },
     [storage, persist]
   );
 
   const getAllListNames = useCallback(
-    () => [...DEFAULT_LISTS, ...storage.customLists],
+    () => storage.customLists,
     [storage.customLists]
+  );
+
+  const reorderCustomLists = useCallback(
+    (newOrder: string[]) => {
+      persist({ ...storage, customLists: newOrder });
+      if (userIdRef.current) reorderCustomListsDB(userIdRef.current, newOrder);
+    },
+    [storage, persist]
   );
 
   // ── Misc ──────────────────────────────────────────────────
@@ -383,13 +496,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    try {
-      if (supabase) await supabase.auth.signOut();
-    } catch {}
-    userIdRef.current = null;
-    clearOnboardingDoneFlag();
-    persist({ ...initialStorage });
-  }, [persist]);
+    await clearLocalAuthState();
+  }, [clearLocalAuthState]);
 
   // ── Context value ─────────────────────────────────────────
 
@@ -405,17 +513,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       toggleGoing,
       isGoing,
       addCustomList,
+      renameCustomList,
+      deleteCustomList,
+      reorderCustomLists,
       saveEventToNewList,
       getAllListNames,
       addSharedWithYou,
       updateDisplayName,
       signOut,
+      refreshFromRemote,
     }),
     [
       storage, ready, setAuth, setUserProfile,
       addSavedEvent, removeSavedEvent, getSavedListForEvent,
-      toggleGoing, isGoing, addCustomList, saveEventToNewList,
-      getAllListNames, addSharedWithYou, updateDisplayName, signOut,
+      toggleGoing, isGoing, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
+      getAllListNames, addSharedWithYou, updateDisplayName, signOut, refreshFromRemote,
     ]
   );
 
