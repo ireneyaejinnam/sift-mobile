@@ -3,6 +3,7 @@ import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as Linking from "expo-linking";
+import { useShareIntentContext, ShareIntentProvider } from "expo-share-intent";
 import { ClientProviders } from "@/components/providers/ClientProviders";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { track } from "@/lib/track";
@@ -54,12 +55,32 @@ function DeepLinkHandler() {
   return null;
 }
 
+function ShareIntentHandler() {
+  const router = useRouter();
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+
+  useEffect(() => {
+    if (hasShareIntent && shareIntent) {
+      const url = shareIntent.webUrl ?? shareIntent.text ?? "";
+      if (url) {
+        track("share_intent_received", { url: url.slice(0, 100) });
+        router.push(`/add-event?prefill=${encodeURIComponent(url)}`);
+        resetShareIntent();
+      }
+    }
+  }, [hasShareIntent, shareIntent]);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
+        <ShareIntentProvider>
         <ClientProviders>
           <DeepLinkHandler />
+          <ShareIntentHandler />
           <InAppFeedback />
           <StatusBar style="dark" />
           <Stack
@@ -80,8 +101,13 @@ export default function RootLayout() {
               name="event/[id]"
               options={{ animation: "slide_from_right" }}
             />
+            <Stack.Screen
+              name="add-event"
+              options={{ animation: "slide_from_bottom" }}
+            />
           </Stack>
         </ClientProviders>
+        </ShareIntentProvider>
       </ErrorBoundary>
     </GestureHandlerRootView>
   );

@@ -61,6 +61,17 @@
         {
           "calendarPermission": "Sift adds events to your calendar so you never miss them."
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosShareExtensionName": "Sift Share",
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsImageWithMaxCount": 1
+          }
+        }
       ]
     ],
     "extra": {
