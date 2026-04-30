@@ -16,6 +16,7 @@ import { createClient } from '@supabase/supabase-js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { EVENTBRITE_SEED_ORGS } from '../ingest/config';
+import { chatText, MODELS } from './openai';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
@@ -38,16 +39,10 @@ export interface NameListEntry {
   source_url: string | null;
 }
 
-// ── Unified model caller (OpenAI or Gemini) ───────────────────────────
+// ── Unified model caller (OpenAI for dedup/cancel) ────────────────────
 
 async function callCollectModel(model: string, prompt: string): Promise<string> {
-  const res = await anthropic.messages.create({
-    model,
-    max_tokens: 10,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  const block = res.content[0];
-  return block.type === 'text' ? block.text : '';
+  return chatText(model, [{ role: 'user', content: prompt }]);
 }
 
 // ── LLM cancellation check ────────────────────────────────────────────
@@ -659,72 +654,191 @@ async function* genShotgun(): AsyncGenerator<Candidate> {
 }
 
 // ── AI-Powered Event Discovery ──────────────────────────────────────
+// Uses the full discovery prompt from prompts/discovery-prompt.md.
+// Single call per run with 3-pass approach: fetch → search → verify.
 
-async function* genAIDiscover(): AsyncGenerator<Candidate> {
-  const queries = [
-    // Shopping & brands
-    'NYC sample sales this week Stussy Kith ALD Aritzia COS',
-    'NYC pop-up shops opening this week SoHo Williamsburg',
-    // Food & drink
-    'new restaurant openings NYC this month Infatuation Eater',
-    'food festivals NYC this month Smorgasburg pop-up',
-    'wine tasting events NYC natural wine bars',
-    // Music & nightlife
-    "concerts NYC this week Baby's All Right Elsewhere Brooklyn Steel",
-    'DJ sets NYC this weekend Good Room Public Records House of Yes',
-    // Culture & arts
-    'art exhibitions opening NYC this week gallery Chelsea',
-    'film screenings NYC Metrograph Film Forum Nitehawk',
-    'comedy shows NYC Comedy Cellar Caveat Gotham',
-    // Fitness & wellness
-    'run club events NYC Bandit Tracksmith Flyers',
-    'fitness events NYC pop-up classes this week',
-    // General discovery
-    'things to do NYC this weekend Infatuation Secret NYC',
-    'best events NYC this week TimeOut',
-    'NYC pop-ups immersive experiences this month',
-    'Brooklyn Flea Chelsea Flea Artists Fleas this weekend',
-  ];
+const DISCOVERY_SYSTEM_PROMPT = `You are the editorial curator for **Sift**, a NYC event discovery app. Your job is to surface events that an 18-35 year old NYC professional would actually want to know about, and to ignore everything else.
 
-  for (const query of queries) {
-    try {
-      const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
-        messages: [{ role: 'user', content: `Search for: "${query}"
+### Who Sift is for
 
-Find specific upcoming events in NYC. Return a JSON array of up to 10 events:
-[{"name": "exact event title", "source_url": "https://direct-link-to-event"}]
+The Sift user is 18-35, lives in NYC, works a real job, and treats their weekends seriously. They follow accounts like @whatisnewyork, read The Infatuation and Eater NYC, have a Resy account, and text their group chat before they commit to plans. They have taste, disposable income, and limited time. They are not tourists, not students discovering the city for the first time, not corporate happy-hour people, and not the underground-only crowd. They are mainstream-tasteful: Sabrina Carpenter at MSG is as valid as a warehouse DJ set.
+
+The brands, artists, venues, and restaurants below are the **cultural anchors** that define the cluster. You are not limited to these — surface anything that *fits the cluster*. Use them to calibrate, not as a checklist.
+
+#### FASHION & SHOPPING
+- **Anchors**: Kith, Aimé Leon Dore (ALD), AMI Paris, COS, Every Other Thursday, Buck Mason, Todd Snyder, Chanel, Stüssy, Carhartt WIP, A.P.C., Rag & Bone, Oak + Fort
+- **Adjacent**: Aritzia, & Other Stories, Sézane, Arc'teryx, Dover Street Market, Bode, Awake NY, Story Mfg, Online Ceramics, Noah, Engineered Garments, Norse Projects, Acne Studios, Margiela, Our Legacy, Drake's
+- **Event types**: sample sales, brand pop-ups, store openings, capsule launches, NYFW satellite events, designer resale, vintage markets (Artists & Fleas, Brooklyn Flea, Chelsea Flea, Hester Street Fair, Grand Bazaar)
+
+#### MUSIC & NIGHTLIFE
+- **Anchor artists**: Fred Again, John Summit, Disco Lines, Dom Dolla, Lorde, Sabrina Carpenter, Empire of the Sun, TV Girl, Disclosure
+- **Adjacent artists**: Charli XCX, Bad Bunny, Tyler the Creator, Khruangbin, Kali Uchis, Blood Orange, Bicep, Four Tet, Skrillex, Anyma, Kaytranada, Justice, ODESZA, Diplo, Peggy Gou, Honey Dijon, Mall Grab, FISHER, Chris Stussy
+- **Anchor venues**: MSG, Barclays Center, Brooklyn Steel, Forest Hills Stadium, Avant Gardner / The Brooklyn Mirage, Webster Hall, Terminal 5, Knockdown Center, Elsewhere, Baby's All Right, Music Hall of Williamsburg, Bowery Ballroom, Le Poisson Rouge, Public Records, Good Room, House of Yes, Mood Ring, Nowadays, Sultan Room, Racket, Sony Hall, Joe's Pub, Brooklyn Made, TV Eye
+- **Event types**: arena/stadium tours, club nights with named DJs, festival lineups, DJ residencies, listening parties, album release shows
+
+#### FITNESS & WELLNESS
+- **Anchors**: Barry's, SoulCycle, Equinox, CorePower Yoga, Solidcore
+- **Run clubs**: Bandit Running, Tracksmith, NYC Flyers, November Project NYC, Nike Run Club NYC, Brooklyn Track Club
+- **Event types**: special pop-up classes, brand-collab fitness events, themed run-club runs, race events, climbing comps, padel tournaments, credible wellness pop-ups
+
+#### FOOD & RESTAURANTS
+- **Anchors**: Monkey Bar, Don Angie, San Sabino, Au Cheval, 4 Charles Prime Rib, Nom Wah Tea Parlor, 7th Street Burger
+- **Adjacent**: Carbone, Torrisi, Jean's, Bistrot Ha, Semma, Dhamaka, Estela, Lilia, Misi, Bar Pisellino, Via Carota, Ursula, Sunday in Brooklyn, Buvette, Cervo's, Rolo's, Thai Diner, Atomix, Atoboy, Cote
+- **Event types**: new restaurant openings covered by Eater / Infatuation / Resy, chef collab dinners, omakase pop-ups, food festivals with credible chef rosters
+
+#### BARS & COCKTAILS
+- **Anchors**: Jean's NYC, Jewel Box, Le Dive, Swan Room, Superbueno, Dante, Schmuck
+- **Event types**: bar openings, guest bartender takeovers, natural wine tastings, cocktail menu launches, speakeasy openings
+
+#### CULTURE & ARTS
+- **Institutions**: MoMA, Whitney, Guggenheim, Met, Brooklyn Museum, New Museum, The Shed, Fotografiska, Neue Galerie, Dia Beacon, Storm King, Noguchi
+- **Cinemas**: Metrograph, Film Forum, IFC Center, Nitehawk, Alamo Drafthouse Brooklyn, Angelika, Roxy Cinema
+- **Comedy**: Comedy Cellar, Caveat, The Stand, Gotham, Union Hall, The Bell House
+- **Event types**: museum exhibition openings, gallery openings, repertory film series, comedy showcases, author events, panel talks
+
+#### SPORTS
+- **Teams**: Knicks, Rangers, Yankees, Mets, NYCFC, Liberty, Nets
+- **Event types**: marquee home games, playoff games, theme nights, US Open tennis, NYC Marathon
+
+### Quality bar — apply ruthlessly
+
+**8-10 (KEEP)**: Names a recognized brand/artist/chef/venue. Real date, real venue, real ticket/RSVP/source URL. Limited or special.
+**6-7 (MAYBE)**: Right vibe, real venue, lesser-known but credible source.
+**1-5 (KILL)**: Tourist traps, corporate networking, webinars, generic pub crawls, "DJ TBD," chain venues, wrong demo, no-name fashion, low-quality fitness.
+
+### Critical calibration rules
+1. Mainstream is not a downgrade. Lady Gaga at MSG = 9. Whitney Biennial = 10.
+2. Niche is not automatically good. Random open mic at unknown bar = 4.
+3. Brand recognition is signal. Stüssy sample sale = 8. "Streetwear pop-up" with no brands named = 3.
+4. The test: Would a 28-year-old who works in tech/finance/media/fashion/PR text this to their group chat?`;
+
+function buildDiscoveryUserMessage(): string {
+  const today = new Date().toISOString().split('T')[0];
+  const thirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  return `Find upcoming NYC events between ${today} and ${thirtyDays} that fit the Sift user. Work in three passes — cheapest first. Stop as soon as you have 25–40 strong candidates; quality over quantity.
+
+PASS 1 — Deterministic feed fetch (web_fetch only, no web_search).
+
+Fetch these pages directly and extract events:
+
+Music venue calendars:
+- https://www.bowerypresents.com/new-york-metro/shows/brooklyn-steel
+- https://www.bowerypresents.com/new-york-metro/shows/webster-hall
+- https://www.bowerypresents.com/new-york-metro/shows/terminal-5
+- https://www.babysallright.com/calendar
+- https://www.elsewhere.club/calendar
+- https://publicrecords.nyc
+- https://knockdown.center/events/
+- https://www.houseofyes.org/events
+- https://www.avant-gardner.com/shows
+
+Fashion / sample sale aggregators:
+- https://www.chicmi.com/new-york/sample-sales/
+- https://260samplesale.com/
+- https://pulsd.com/new-york/sample-sales
+
+Food:
+- https://www.eater.com/new-york
+- https://www.theinfatuation.com/new-york/guides/new-nyc-restaurants-openings
+
+Culture:
+- https://whitney.org/exhibitions
+- https://www.newmuseum.org/exhibitions
+- https://metrograph.com/calendar/
+
+PASS 2 — Targeted web_search ONLY for gaps Pass 1 didn't cover. AT MOST 6 searches total.
+
+PASS 3 — Verification: if any candidate source_url is a listicle, fetch the page and extract the direct event link. Drop candidates where you can't find a direct link.
+
+OUTPUT — Return ONLY a valid JSON array. No prose. No markdown fences.
+
+[
+  {
+    "name": "exact event title as listed on the source",
+    "source_url": "https://direct-link-to-event-or-tickets-page"
+  }
+]
 
 Rules:
-- Only real, upcoming events with specific dates
-- Only NYC (five boroughs)
-- Must have a real source URL (event page, not a listicle)
-- No past events, no recurring classes, no webinars
-- Return [] if nothing found` }],
+- Only events dated ${today} to ${thirtyDays}
+- Only NYC five boroughs (Forest Hills Stadium, Dia Beacon, Storm King allowed)
+- source_url MUST be an event / tickets / venue page — no listicle URLs
+- Music candidates MUST include a named headliner
+- Score >= 6 only — drop anything lower
+- Return [] if nothing meets the bar`;
+}
+
+async function* genAIDiscover(): AsyncGenerator<Candidate> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      console.log(`[collect] AI discover: running single-call 3-pass discovery (attempt ${attempt + 1}/2)...`);
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8000,
+        system: [{ type: 'text', text: DISCOVERY_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+        tools: [
+          { type: 'web_search_20250305', name: 'web_search' as const },
+        ],
+        messages: [{ role: 'user', content: buildDiscoveryUserMessage() }],
       });
 
       const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
       const text = textBlocks.map(b => b.text).join('\n');
-      const match = text.match(/\[[\s\S]*\]/);
-      if (!match) continue;
 
-      const events = JSON.parse(match[0]) as Array<{ name: string; source_url: string }>;
+      const events = extractJsonArray(text);
+      console.log(`[collect] AI discover: found ${events.length} candidates`);
+
       for (const e of events) {
         const name = (e.name ?? '').trim();
         const url = (e.source_url ?? '').trim();
         if (name && url && url.startsWith('http')) yield { name, source_url: url };
       }
+      return; // success — don't retry
     } catch (err) {
-      console.error(`[collect] AI discover error for "${query}":`, (err as Error).message);
+      console.error(`[collect] AI discover error (attempt ${attempt + 1}/2):`, (err as Error).message);
+      if (attempt === 0) {
+        console.log('[collect] Retrying AI discover in 10s...');
+        await new Promise(r => setTimeout(r, 10000));
+      }
     }
   }
+  console.error('[collect] AI discover failed after 2 attempts, continuing with other sources');
+}
+
+/** Robustly extract a JSON array from LLM output that may contain surrounding text */
+function extractJsonArray(text: string): Array<{ name: string; source_url: string }> {
+  // Try to find all [...] blocks and parse the largest valid one
+  const candidates: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '[') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (text[i] === ']') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        candidates.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+
+  // Try each candidate from largest to smallest
+  candidates.sort((a, b) => b.length - a.length);
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].name) return parsed;
+    } catch { /* try next */ }
+  }
+  return [];
 }
 
 // ── Main export ───────────────────────────────────────────────────────
 
-export async function collectAllNames(maxPerSource = DEFAULT_MAX_PER_SOURCE, sourceFilter?: string, collectModel = 'claude-haiku-4-5-20251001'): Promise<NameListEntry[]> {
+export async function collectAllNames(maxPerSource = DEFAULT_MAX_PER_SOURCE, sourceFilter?: string, collectModel = 'gpt-4o-mini'): Promise<NameListEntry[]> {
   // Load existing local list
   const existing = loadNameList();
   const existingUrls = new Set(existing.map(e => e.source_url).filter(Boolean) as string[]);

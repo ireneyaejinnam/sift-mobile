@@ -17,8 +17,8 @@ if (USE_LOCAL_SEED) {
   console.log(`[getEvents] Using local seed — ${LOCAL_SEED_COUNT} events`);
 }
 
-// Sources excluded from the client feed (low quality / wrong demographic).
-const EXCLUDED_SOURCES = ['nyc_tourism', 'nyc_gov', 'yelp', 'meetup'];
+// Legacy sources still in DB but no longer ingested — exclude from feed.
+const EXCLUDED_SOURCES = ['nyc_tourism', 'nyc_gov', 'yelp', 'meetup', 'nyc_parks'];
 
 // Only show events in NYC boroughs — hard filter at the DB level.
 const NYC_BOROUGHS = ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island'];
@@ -26,10 +26,9 @@ const NYC_BOROUGHS = ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island
 // Events suppressed by Claude vibe check — client-side filter until DB migration runs.
 const VIBE_SUPPRESSED = new Set<string>(VIBE_SUPPRESSED_IDS);
 
-const SOURCE = process.env.EXPO_PUBLIC_EVENTS_SOURCE; // e.g. "nycforfree", "test"
 const USE_TEST = process.env.EXPO_PUBLIC_USE_TEST_DATA === "true";
-const EVENTS_TABLE   = SOURCE ? `${SOURCE}_events`         : USE_TEST ? "test_events"         : "events";
-const SESSIONS_TABLE = SOURCE ? `${SOURCE}_event_sessions` : USE_TEST ? "test_event_sessions" : "event_sessions";
+const EVENTS_TABLE   = USE_TEST ? "test_events"         : "events";
+const SESSIONS_TABLE = USE_TEST ? "test_event_sessions" : "event_sessions";
 
 // Frontend category → DB category
 const CATEGORY_TO_DB: Partial<Record<EventCategory, string>> = {
@@ -373,16 +372,7 @@ export async function fetchEventById(
   if (USE_LOCAL_SEED) return fetchLocalEventById(id);
   if (!supabase) return null;
 
-  // Try the configured table first, then fall back to the other table.
-  // This ensures plan events are always found regardless of which source
-  // the app is currently browsing (EXPO_PUBLIC_EVENTS_SOURCE=ai vs default).
-  const fallbackTable = EVENTS_TABLE === "ai_events" ? "events" : "ai_events";
-  const fallbackSessionsTable = SESSIONS_TABLE === "ai_event_sessions" ? "event_sessions" : "ai_event_sessions";
-
-  let data: any = null;
-  let resolvedSessionsTable = SESSIONS_TABLE;
-
-  const { data: primary, error } = await supabase
+  const { data, error } = await supabase
     .from(EVENTS_TABLE)
     .select("*")
     .eq("id", id)
@@ -393,24 +383,10 @@ export async function fetchEventById(
     return null;
   }
 
-  if (primary) {
-    data = primary;
-  } else {
-    // Not found in primary table — try fallback
-    const { data: fallback } = await supabase
-      .from(fallbackTable)
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    data = fallback;
-    resolvedSessionsTable = fallbackSessionsTable;
-  }
-
   if (!data) return null;
 
-  // Fetch all upcoming sessions from whichever table the event was found in
   const { data: sessions } = await supabase
-    .from(resolvedSessionsTable)
+    .from(SESSIONS_TABLE)
     .select("*")
     .eq("event_id", id)
     .gte("date", todayNYC())

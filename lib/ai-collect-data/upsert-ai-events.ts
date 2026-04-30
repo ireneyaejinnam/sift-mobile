@@ -2,8 +2,8 @@
  * upsert-ai-events.ts
  *
  * Step 4: Read ai_events.json and upsert into Supabase.
- * - ai_events table: one row per event
- * - ai_event_sessions table: one row per session (or single-session fallback)
+ * Writes to the unified `events` table with source_type='ai_discovery'
+ * and `event_sessions` table for sessions.
  *
  * Safe to re-run — upserts on source_id (events) and (event_id, date, time) (sessions).
  */
@@ -43,6 +43,7 @@ function sanitizeEvent(raw: any): Record<string, any> | null {
   return {
     source_id:    String(raw.source_id),
     source:       'ai',
+    source_type:  'ai_discovery',
     title:        String(raw.title).slice(0, 500),
     category:     raw.category,
     description:  raw.description ? String(raw.description).slice(0, 1000) : null,
@@ -82,7 +83,7 @@ function buildSessions(raw: any, eventId: string): Record<string, any>[] {
       .map((s: RawSession) => ({
         event_id:   eventId,
         date:       s.date,
-        time:       s.time ?? null,
+        time:       s.time ?? '',
         venue_name: s.venue_name ?? null,
         address:    s.address ?? null,
         borough:    VALID_BOROUGHS.has(s.borough ?? '') ? s.borough : null,
@@ -96,7 +97,7 @@ function buildSessions(raw: any, eventId: string): Record<string, any>[] {
     return [{
       event_id:   eventId,
       date:       raw.start_date,
-      time:       null,
+      time:       '',
       venue_name: raw.venue_name ?? null,
       address:    raw.address ?? null,
       borough:    VALID_BOROUGHS.has(raw.borough ?? '') ? raw.borough : null,
@@ -147,8 +148,8 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
     const batch = sanitized.slice(i, i + 50);
 
     const { data: upserted, error } = await supabase
-      .from('ai_events')
-      .upsert(batch, { onConflict: 'source_id' })
+      .from('events')
+      .upsert(batch, { onConflict: 'source,source_id' })
       .select('id, source_id');
 
     if (error) {
@@ -171,16 +172,19 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
       const rawEv = raw.find(r => r.source_id === ev.source_id);
       if (!rawEv) continue;
       for (const s of buildSessions(rawEv, eventId)) {
-        const key = `${s.event_id}::${s.date}`;
+        const key = `${s.event_id}::${s.date}::${s.time ?? ''}`;
         if (!sessionMap.has(key)) sessionMap.set(key, s);
       }
     }
-    const sessionRows = [...sessionMap.values()];
+    const sessionRows = [...sessionMap.values()].map(s => ({
+      ...s,
+      time: s.time ?? '',
+    }));
 
     if (sessionRows.length > 0) {
       const { error: sessErr } = await supabase
-        .from('ai_event_sessions')
-        .upsert(sessionRows, { onConflict: 'event_id,date' });
+        .from('event_sessions')
+        .upsert(sessionRows, { onConflict: 'event_id,date,time' });
 
       if (sessErr) {
         console.error(`[upsert] Sessions batch error at ${i}:`, sessErr.message);

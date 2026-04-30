@@ -1,8 +1,11 @@
 /**
  * cleanup-expired.ts
  *
- * Deletes expired events from Supabase ai_events (and cascades to ai_event_sessions).
+ * Deletes expired events from the unified events table (both ai_discovery and scraper).
+ * Cascades to event_sessions.
  * An event is expired when end_date < today, or start_date < today if end_date is null.
+ *
+ * Also cleans up ai_event_name_list entries for expired AI-discovered events.
  *
  * Usage:
  *   npx tsx --env-file=.env lib/ai-collect-data/cleanup-expired.ts
@@ -18,29 +21,31 @@ const supabase = createClient(
 export async function cleanupExpiredEvents(): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
 
-  // Collect source_urls of expired events before deleting
-  const { data: expiredByEndDate } = await supabase
-    .from('ai_events')
+  // Collect source_urls of expired AI-discovered events (for name list cleanup)
+  const { data: expiredAiByEndDate } = await supabase
+    .from('events')
     .select('source_url')
+    .eq('source_type', 'ai_discovery')
     .not('end_date', 'is', null)
     .lt('end_date', today);
 
-  const { data: expiredByStartDate } = await supabase
-    .from('ai_events')
+  const { data: expiredAiByStartDate } = await supabase
+    .from('events')
     .select('source_url')
+    .eq('source_type', 'ai_discovery')
     .is('end_date', null)
     .lt('start_date', today);
 
   const expiredUrls = [
-    ...(expiredByEndDate ?? []),
-    ...(expiredByStartDate ?? []),
+    ...(expiredAiByEndDate ?? []),
+    ...(expiredAiByStartDate ?? []),
   ]
     .map(e => e.source_url)
     .filter((url): url is string => !!url);
 
-  // Delete expired events
+  // Delete ALL expired events (both ai_discovery and scraper)
   const { data: endDateDeleted, error: e1 } = await supabase
-    .from('ai_events')
+    .from('events')
     .delete()
     .not('end_date', 'is', null)
     .lt('end_date', today)
@@ -49,7 +54,7 @@ export async function cleanupExpiredEvents(): Promise<void> {
   if (e1) console.error('[cleanup] Error deleting by end_date:', e1.message);
 
   const { data: startDateDeleted, error: e2 } = await supabase
-    .from('ai_events')
+    .from('events')
     .delete()
     .is('end_date', null)
     .lt('start_date', today)

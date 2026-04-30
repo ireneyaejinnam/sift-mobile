@@ -1,17 +1,16 @@
 /**
  * fix-images.ts
  *
- * Resolves a valid image URL for an event using a three-stage fallback:
+ * Resolves a valid image URL for an event using a four-stage fallback:
  *   1. og:image — scrape the event_url page
- *   2. LLM (gpt-5.4-mini by default) — ask the model to find an image URL
- *   3. Unsplash — search by event title keywords
+ *   2. Tavily web search — search for event image via tavily.com REST API
+ *   3. LLM (gpt-4o-mini) — ask the model to suggest an image URL
+ *   4. Unsplash — search by event title keywords
  *
  * Export: resolveImage(event, model?) → string | null
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+import { chatText } from './openai';
 
 export async function isImageUrlValid(url: string): Promise<boolean> {
   try {
@@ -45,30 +44,52 @@ async function ogImageFromUrl(eventUrl: string): Promise<string | null> {
   }
 }
 
+async function tavilyFindImage(title: string): Promise<string | null> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query: `${title} NYC event photo`,
+        search_depth: 'basic',
+        include_images: true,
+        max_results: 3,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { images?: string[] };
+    for (const img of data.images ?? []) {
+      if (img && await isImageUrlValid(img)) return img;
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[fix-images] Tavily error for "${title}":`, (err as Error).message);
+    return null;
+  }
+}
+
 async function llmFindImage(
   title: string,
   eventUrl: string | null,
   model: string
 ): Promise<string | null> {
   const urlLine = eventUrl ? `\nEvent URL: ${eventUrl}` : '';
-  const prompt = `Find a direct image URL (.jpg, .jpeg, .png, or .webp) for this NYC event. The image should be a real, publicly accessible photo related to the event or venue.
+  const prompt = `Suggest a direct image URL (.jpg, .jpeg, .png, or .webp) for this NYC event. The image should be a real, publicly accessible photo related to the event or venue.
 
 Event: ${title}${urlLine}
 
 Reply with ONLY the image URL, nothing else. If you cannot find one, reply with "none".`;
 
   try {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 256,
-      system: 'You are a helpful assistant. Reply with only a direct image URL or "none".',
-      tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
-    const text = textBlocks.map(b => b.text).join('').trim();
+    const text = await chatText(model, [
+      { role: 'system', content: 'You are a helpful assistant. Reply with only a direct image URL or "none".' },
+      { role: 'user', content: prompt },
+    ]);
     if (!text || text.toLowerCase() === 'none') return null;
-    // Extract URL if model added extra text
     const match = text.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(\?\S*)?/i);
     return match ? match[0] : (text.startsWith('http') ? text : null);
   } catch (err) {
@@ -95,7 +116,7 @@ async function unsplashFindImage(title: string): Promise<string | null> {
 
 export async function resolveImage(
   event: { title: string; image_url?: string | null; event_url?: string | null },
-  model = 'claude-sonnet-4-6'
+  model = 'gpt-4o-mini'
 ): Promise<string | null> {
   const { title, image_url, event_url } = event;
 
@@ -113,14 +134,21 @@ export async function resolveImage(
     }
   }
 
-  // Stage 2: LLM
+  // Stage 2: Tavily web search
+  const tavily = await tavilyFindImage(title);
+  if (tavily) {
+    console.log(`[fix-images] Tavily image: ${tavily}`);
+    return tavily;
+  }
+
+  // Stage 3: LLM
   const llm = await llmFindImage(title, event_url ?? null, model);
   if (llm && await isImageUrlValid(llm)) {
     console.log(`[fix-images] LLM image: ${llm}`);
     return llm;
   }
 
-  // Stage 3: Unsplash
+  // Stage 4: Unsplash
   const unsplash = await unsplashFindImage(title);
   if (unsplash) {
     console.log(`[fix-images] Unsplash image: ${unsplash}`);

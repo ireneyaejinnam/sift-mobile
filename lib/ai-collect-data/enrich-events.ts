@@ -2,19 +2,17 @@
  * enrich-events.ts
  *
  * Step 2: Read ai_new_events_name_list.json, enrich each unprocessed name
- * via LLM + web search, append results to output/ai_new_events.json.
+ * via LLM, append results to output/ai_new_events.json.
  *
  * - Reads/writes local files only (no Supabase)
  * - Marks entries as processed: true in ai_new_events_name_list.json
- * - Supports --model gpt-5.4-mini | gpt-5.4 | gemini-2.5-flash | gemini-2.5-pro
+ * - Default model: gpt-4o-mini (OpenAI Structured Outputs)
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { NameListEntry } from './collect-names';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+import { chatJSON, MODELS } from './openai';
 
 const OUTPUT_DIR       = join(__dirname, 'output');
 const NAME_LIST_PATH   = join(OUTPUT_DIR, 'ai_new_events_name_list.json');
@@ -44,19 +42,47 @@ function saveEvents(events: any[]): void {
 
 // ── Prompt ────────────────────────────────────────────────────────────
 
-function buildPrompt(eventName: string, sourceUrl?: string | null): string {
+async function fetchSourcePageText(sourceUrl?: string | null): Promise<string> {
+  if (!sourceUrl) return '';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(sourceUrl, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'text/html,application/xhtml+xml' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return '';
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 8000);
+  } catch {
+    return '';
+  }
+}
+
+function buildPrompt(eventName: string, sourceUrl?: string | null, pageText = ''): string {
   const eventLine = sourceUrl
     ? `Event: ${eventName}\nSource URL (where this event was found, not necessarily the official page): ${sourceUrl}`
     : `Event: ${eventName}`;
   const sourceNote = sourceUrl
     ? `Prefer the official event website for all data. Only fall back to the Source URL above if no official page can be found.`
     : '';
+  const pageContent = pageText
+    ? `\nFetched source page content:\n${pageText}\n`
+    : '';
   return `Event Data Spec
 
-Search the web and output a JSON array for the following NYC event. Output exactly one event object in the array. If you cannot find reliable information, return an empty array [].
+Using the event name, source URL, and fetched page content below, provide structured event data for this NYC event. Output exactly one event object. If you do not have enough information to fill the required fields, return an empty events array.
 
 ${eventLine}
 ${sourceNote}
+${pageContent}
 
 ---
 Event fields
@@ -90,30 +116,81 @@ Rules
 - Omit any field you cannot confirm
 - price_min/price_max: ONLY use prices from the official ticket/event page. If price is not clearly listed, set price_min: 0 and is_free: false (unknown price, not confirmed free).
 - start_date: MUST match the official event page exactly. Do not guess or infer dates.
-- If the official event page is down, inaccessible, or information cannot be confirmed, return [] rather than guessing.
+- If you do not have enough information to fill required fields accurately, return an empty events array rather than guessing.
 
 Return ONLY a valid JSON array, no markdown, no explanation.`;
 }
 
+// ── JSON Schema for Structured Outputs ────────────────────────────────
+
+const EVENT_SCHEMA = {
+  name: 'enrich_events_response',
+  schema: {
+    type: 'object',
+    properties: {
+      events: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            source_id:   { type: 'string' },
+            title:       { type: 'string' },
+            category:    { type: 'string', enum: ['art', 'live_music', 'comedy', 'food', 'outdoors', 'nightlife', 'popups', 'fitness', 'theater', 'workshops'] },
+            description: { type: 'string' },
+            start_date:  { type: 'string' },
+            end_date:    { type: ['string', 'null'] },
+            venue_name:  { type: ['string', 'null'] },
+            address:     { type: 'string' },
+            borough:     { type: 'string', enum: ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island', 'Various borough'] },
+            price_min:   { type: 'number' },
+            price_max:   { type: ['number', 'null'] },
+            is_free:     { type: 'boolean' },
+            event_url:   { type: 'string' },
+            image_url:   { type: ['string', 'null'] },
+            ticket_url:  { type: ['string', 'null'] },
+            tags:        { type: ['array', 'null'], items: { type: 'string' } },
+            sessions:    { type: ['array', 'null'], items: {
+              type: 'object',
+              properties: {
+                date:       { type: 'string' },
+                time:       { type: ['string', 'null'] },
+                venue_name: { type: ['string', 'null'] },
+                address:    { type: ['string', 'null'] },
+                borough:    { type: ['string', 'null'] },
+                price_min:  { type: ['number', 'null'] },
+                price_max:  { type: ['number', 'null'] },
+              },
+              required: ['date', 'time', 'venue_name', 'address', 'borough', 'price_min', 'price_max'],
+              additionalProperties: false,
+            } },
+          },
+          required: ['source_id', 'title', 'category', 'description', 'start_date', 'end_date', 'venue_name', 'address', 'borough', 'price_min', 'price_max', 'is_free', 'event_url', 'image_url', 'ticket_url', 'tags', 'sessions'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['events'],
+    additionalProperties: false,
+  },
+} as const;
+
 // ── Model call ────────────────────────────────────────────────────────
 
-async function callModel(model: string, prompt: string): Promise<string> {
-  const response = await anthropic.messages.create({
+async function callModel(model: string, prompt: string): Promise<any[]> {
+  const result = await chatJSON<{ events: any[] }>(
     model,
-    max_tokens: 4096,
-    system: 'You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation.',
-    tools: [{ type: 'web_search_20250305', name: 'web_search' as const }],
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  // Extract text from response blocks (may include tool_use/tool_result blocks from web search)
-  const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
-  return textBlocks.map(b => b.text).join('\n') || '[]';
+    [
+      { role: 'system', content: 'You are a data extraction assistant for NYC events. Use the event name, source URL, and fetched source page content to fill in structured event data. If you lack sufficient information for required fields, return an empty events array.' },
+      { role: 'user', content: prompt },
+    ],
+    EVENT_SCHEMA
+  );
+  return result.events ?? [];
 }
 
 // ── Main export ───────────────────────────────────────────────────────
 
-export async function enrichEvents(model = 'claude-sonnet-4-6'): Promise<void> {
+export async function enrichEvents(model = 'gpt-4o-mini'): Promise<void> {
   const nameList = loadNameList();
   const allEvents = loadEvents();
 
@@ -130,31 +207,19 @@ export async function enrichEvents(model = 'claude-sonnet-4-6'): Promise<void> {
   let totalAdded = 0;
 
   for (let i = 0; i < unprocessed.length; i++) {
-    const batch = unprocessed.slice(i, i + 1);
-    const entry = batch[0];
+    const entry = unprocessed[i];
 
-    console.log(`[enrich] Batch ${i + 1}/${unprocessed.length}: ${entry.name}`);
+    console.log(`[enrich] ${i + 1}/${unprocessed.length}: ${entry.name}`);
 
     try {
-      const raw = await callModel(model, buildPrompt(entry.name, entry.source_url));
-      console.log(`[enrich] Response:`, raw.slice(0, 200));
-
-      const stripped = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
-      const match = stripped.match(/\[[\s\S]*\]/);
-
-      if (!match) {
-        console.warn(`[enrich] Could not parse JSON for: ${entry.name}`);
-      } else {
-        const events = JSON.parse(match[0]) as any[];
-        // Attach source_url from name list entry
-        const enriched = events.map(ev => ({ ...ev, source_url: entry.source_url }));
-        allEvents.push(...enriched);
-        totalAdded += enriched.length;
-        console.log(`[enrich] Got ${enriched.length} events`);
-        saveEvents(allEvents);
-      }
-
-
+      const pageText = await fetchSourcePageText(entry.source_url);
+      const events = await callModel(model, buildPrompt(entry.name, entry.source_url, pageText));
+      // Attach source_url from name list entry
+      const enriched = events.map(ev => ({ ...ev, source_url: entry.source_url }));
+      allEvents.push(...enriched);
+      totalAdded += enriched.length;
+      console.log(`[enrich] Got ${enriched.length} events`);
+      saveEvents(allEvents);
     } catch (err) {
       const msg = (err as Error).message;
       console.error(`[enrich] Error for "${entry.name}":`, msg);
@@ -168,7 +233,7 @@ export async function enrichEvents(model = 'claude-sonnet-4-6'): Promise<void> {
     }
 
     if (i + 1 < unprocessed.length) {
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
 
