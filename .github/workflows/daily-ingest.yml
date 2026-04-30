@@ -1,14 +1,14 @@
-name: Daily Curated Ingest
+name: Curated Scraper Ingest
 
 on:
   schedule:
-    - cron: '0 7 * * *'  # Daily at 07:00 UTC
-  workflow_dispatch:       # Manual trigger from GitHub UI
+    - cron: '0 7 */3 * *'  # Every 3 days at 07:00 UTC
+  workflow_dispatch:         # Manual trigger from GitHub UI
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +20,17 @@ jobs:
 
       - run: npm ci
 
-      - name: Run daily ingest pipeline
+      - name: Scrape curated sources + geocode + postprocess
         run: npx tsx lib/ingest/run-daily.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           EVENTBRITE_OAUTH_TOKEN: ${{ secrets.EVENTBRITE_OAUTH_TOKEN }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+
+      - name: Vibe-check scraped events
+        run: npx tsx lib/ai-collect-data/score-scraped.ts
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

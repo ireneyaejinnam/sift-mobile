@@ -13,8 +13,8 @@ export async function upsertEvents(events: SiftEvent[]): Promise<{ inserted: num
   for (let i = 0; i < events.length; i += 50) {
     const batch = events.slice(i, i + 50);
 
-    // Strip sessions before upserting events table
-    const eventRows = batch.map(({ sessions, ...ev }) => ev);
+    // Strip sessions before upserting events table; suppress by default until vibe-checked
+    const eventRows = batch.map(({ sessions, ...ev }) => ({ ...ev, is_suppressed: true }));
 
     const { data: upserted, error } = await supabase
       .from('events')
