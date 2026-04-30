@@ -287,9 +287,8 @@ export async function hydrateTasteProfile(
   if (!allIds.length) return null;
 
   try {
-    const SOURCE = process.env.EXPO_PUBLIC_EVENTS_SOURCE;
     const USE_TEST = process.env.EXPO_PUBLIC_USE_TEST_DATA === "true";
-    const eventsTable = SOURCE ? `${SOURCE}_events` : USE_TEST ? "test_events" : "events";
+    const eventsTable = USE_TEST ? "test_events" : "events";
 
     const { data } = await supabase
       .from(eventsTable)

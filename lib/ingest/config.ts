@@ -1,14 +1,3 @@
-// Sources disabled from ingestion (wrong demographic / low quality).
-// Remove a source from this set to re-enable it.
-export const DISABLED_SOURCES = new Set([
-  'nyc_tourism', // tourist-oriented events, not for locals
-  'nyc_gov',     // government programs, public hearings
-  'yelp',        // generic promotional restaurant events
-  'meetup',      // tech networking, professional development
-  'nyc_parks',   // rec center fitness, volunteer cleanups, kids programs — 100% suppress rate
-]);
-
-
 export const SIFT_CATEGORIES = [
   'live_music', 'art', 'comedy', 'outdoors', 'fitness',
   'food', 'nightlife', 'theater', 'workshops', 'popups'

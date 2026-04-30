@@ -8,20 +8,28 @@ const supabase = createClient(
 // ── Cross-source duplicate removal ───────────────────────────
 
 export async function deduplicateEvents(): Promise<void> {
-  console.log('[Dedup] Scanning for cross-source duplicates...');
+  console.log('[Dedup] Scanning for duplicates...');
 
-  const { data, error } = await supabase
-    .from('events')
-    .select('id, title, source, start_date, venue_name, description, image_url')
-    .order('start_date', { ascending: true })
-    .limit(5000);
+  // Fetch all events (paginated, no limit)
+  let allEvents: any[] = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id, title, source, start_date, venue_name, description, image_url')
+      .order('start_date', { ascending: true })
+      .range(offset, offset + PAGE - 1);
 
-  if (error) {
-    console.error('[Dedup] Fetch error:', error.message);
-    return;
+    if (error) { console.error('[Dedup] Fetch error:', error.message); return; }
+    if (!data || data.length === 0) break;
+    allEvents.push(...data);
+    if (data.length < PAGE) break;
+    offset += PAGE;
   }
 
-  const events = data ?? [];
+  const events = allEvents;
+  console.log(`[Dedup] Loaded ${events.length} events`);
   const toDelete = new Set<string>();
 
   // Group by date (YYYY-MM-DD) + normalized venue
@@ -44,7 +52,7 @@ export async function deduplicateEvents(): Promise<void> {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i];
         const b = group[j];
-        if (a.source === b.source) continue;
+        if (a.source === b.source) continue; // same-source dupes handled by mergeRecurringEvents
         if (toDelete.has(a.id) || toDelete.has(b.id)) continue;
 
         const titleA = a.title.toLowerCase().replace(/[^a-z0-9 ]/g, '');
@@ -79,31 +87,39 @@ export async function deduplicateEvents(): Promise<void> {
 export async function mergeRecurringEvents(): Promise<void> {
   console.log('[Dedup] Scanning for recurring events to merge...');
 
-  const { data, error } = await supabase
-    .from('events')
-    .select('id, title, source, source_id, start_date, venue_name, address, borough, description, image_url, category, price_min, price_max')
-    .gte('start_date', new Date().toISOString().split('T')[0])
-    .order('start_date', { ascending: true })
-    .limit(5000);
+  // Fetch all future events (no limit — need full dataset for dedup)
+  let allEvents: any[] = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id, title, source, source_id, start_date, venue_name, address, borough, description, image_url, category, price_min, price_max')
+      .gte('start_date', new Date().toISOString().split('T')[0])
+      .order('start_date', { ascending: true })
+      .range(offset, offset + PAGE - 1);
 
-  if (error) {
-    console.error('[Dedup] Fetch error:', error.message);
-    return;
+    if (error) { console.error('[Dedup] Fetch error:', error.message); return; }
+    if (!data || data.length === 0) break;
+    allEvents.push(...data);
+    if (data.length < PAGE) break;
+    offset += PAGE;
   }
 
-  const events = data ?? [];
+  const events = allEvents;
+  console.log(`[Dedup] Loaded ${events.length} future events`);
 
-  // Group by source + normalized title + normalized venue
+  // Group by normalized title + venue so generic recurring events at different venues stay separate.
   type EventRecord = typeof events[number];
   const groups = new Map<string, EventRecord[]>();
 
   for (const ev of events) {
-    const titleKey = ev.title.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 40).trim();
-    const venueKey = (ev.venue_name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
-    // Only merge within the same source to avoid cross-source false positives
-    const key = `${ev.source}::${titleKey}::${venueKey}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(ev);
+    const titleKey = ev.title.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+    const venueKey = (ev.venue_name || ev.address || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+    if (!titleKey || !venueKey) continue;
+    const groupKey = `${titleKey}::${venueKey}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey)!.push(ev);
   }
 
   let merged = 0;

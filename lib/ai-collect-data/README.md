@@ -1,6 +1,10 @@
 # AI Event Data Collection Pipeline
 
-Collects NYC event data from 13 sources, enriches each event via LLM + web search, and upserts into Supabase.
+Collects NYC event data from 18+ sources, enriches each event via LLM, and upserts into Supabase.
+
+**Two-vendor LLM stack:**
+- **Claude Sonnet 4.6** — discovery only (native web search + best reasoning)
+- **OpenAI gpt-4o-mini** — everything else (enrich, dedup, hooks, scoring, images) via Structured Outputs
 
 ---
 
@@ -38,7 +42,7 @@ Each step is independently runnable (see individual scripts below).
 |------|---------|-------------|
 | `--limit N` | `20` | Max events collected per source |
 | `--source NAME` | all | Only collect from this one source |
-| `--model MODEL` | `gpt-5.4` | LLM model for enrich step |
+| `--model MODEL` | `gpt-4o-mini` | LLM model for enrich step |
 | `--collect-model MODEL` | `gpt-4o-mini` | LLM model for collect dedup/cancel checks |
 | `--skip-cleanup` | — | Skip Step 1 |
 | `--skip-collect` | — | Skip Step 2 |
@@ -46,15 +50,22 @@ Each step is independently runnable (see individual scripts below).
 | `--skip-upsert` | — | Skip Step 4 |
 | `--keep-local` | — | Keep local JSON files after upsert (default: delete) |
 
+### LLM Vendor Routing
+
+Set `LLM_PROVIDER` env var to control routing (`auto` is default):
+
+| Provider | Discovery | Enrich/Dedup/Hooks/Images |
+|----------|-----------|---------------------------|
+| `auto` | Claude Sonnet 4.6 | OpenAI gpt-4o-mini |
+| `claude` | Claude | Claude |
+| `openai` | OpenAI (no web search) | OpenAI |
+
 ### Supported Models
 
 | Model | Provider | Notes |
 |-------|----------|-------|
-| `gpt-4o-mini` | OpenAI | Fast, cheap — good for dedup/cancel checks |
-| `gpt-5.4-mini` | OpenAI | |
-| `gpt-5.4` | OpenAI | Best quality — recommended for enrich |
-| `gemini-2.5-flash` | Google | Fast Gemini |
-| `gemini-2.5-pro` | Google | Best quality Gemini |
+| `gpt-4o-mini` | OpenAI | Default for enrich/dedup/hooks/images (Structured Outputs) |
+| `claude-sonnet-4-6` | Anthropic | Default for discovery (native web search) |
 
 ---
 
@@ -88,8 +99,8 @@ Each step is independently runnable (see individual scripts below).
 Three layers applied to each candidate event, in order:
 
 1. **URL exact match** — skip if `source_url` already exists in local JSON or Supabase `ai_event_name_list`
-2. **LLM dedup** (`gpt-4o-mini`) — skip if name semantically matches an already-collected event
-3. **Cancellation check** (`gpt-4o-mini`) — fetch the event page, ask LLM if it's canceled/postponed
+2. **LLM dedup** (`gpt-4o-mini` via OpenAI) — skip if name semantically matches an already-collected event
+3. **Cancellation check** (`gpt-4o-mini` via OpenAI) — fetch the event page, ask LLM if it's canceled/postponed
 
 ---
 
@@ -122,12 +133,13 @@ A 5-second delay is added between events. On rate-limit errors, retries automati
 
 ## Image Resolution (upsert step)
 
-Before upserting, each event's image is validated and resolved via three-stage fallback:
+Before upserting, each event's image is validated and resolved via four-stage fallback:
 
 1. **Validate existing** — HEAD request to check if `image_url` is accessible
 2. **og:image** — scrape the `event_url` page for `<meta property="og:image">`
-3. **LLM** (`gpt-5.4`) — web search for a direct image URL
-4. **Unsplash** — search by event title (requires `UNSPLASH_ACCESS_KEY`)
+3. **Tavily** — web search for event image via tavily.com REST API
+4. **LLM** (`gpt-4o-mini`) — ask model to suggest a direct image URL
+5. **Unsplash** — search by event title (requires `UNSPLASH_ACCESS_KEY`)
 
 ---
 
@@ -155,9 +167,10 @@ TRUNCATE ai_event_sessions, ai_events, ai_event_name_list RESTART IDENTITY CASCA
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 
-# LLM
-OPENAI_API_KEY=        # collect + enrich (OpenAI models) + fix-images
-GEMINI_API_KEY=        # enrich (Gemini models) + collect if --collect-model gemini-*
+# LLM — two-vendor stack
+ANTHROPIC_API_KEY=     # discovery (Claude Sonnet 4.6 with web search)
+OPENAI_API_KEY=        # enrich, dedup, hooks, images (gpt-4o-mini Structured Outputs)
+TAVILY_API_KEY=        # image resolution web search (tavily.com)
 
 # Sources
 TICKETMASTER_API_KEY=
@@ -165,7 +178,8 @@ EVENTBRITE_OAUTH_TOKEN=
 NYC_EVENT_CALENDAR_KEY=   # Azure APIM subscription key for api.nyc.gov
 
 # Optional
-UNSPLASH_ACCESS_KEY=   # image fallback (Stage 4 of image resolution)
+LLM_PROVIDER=          # auto (default) | claude | openai
+UNSPLASH_ACCESS_KEY=   # image fallback (Stage 5 of image resolution)
 ```
 
 ---
@@ -210,3 +224,38 @@ Set `EXPO_PUBLIC_EVENTS_SOURCE=ai` in `.env` to point the app at these tables:
 ai_events          → EVENTS_TABLE
 ai_event_sessions  → SESSIONS_TABLE
 ```
+
+---
+
+## GitHub Actions Setup
+
+The AI discovery pipeline runs automatically via GitHub Actions every 3 days. To set it up:
+
+### 1. Add repository secrets
+
+Go to **GitHub repo > Settings > Secrets and variables > Actions > New repository secret** and add each:
+
+| Secret name | Where to get it |
+|-------------|-----------------|
+| `ANTHROPIC_API_KEY` | https://console.anthropic.com/settings/keys |
+| `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
+| `TAVILY_API_KEY` | https://app.tavily.com (dashboard after sign-in) |
+| `SUPABASE_URL` | Supabase dashboard > Settings > API > Project URL |
+| `SUPABASE_SERVICE_KEY` | Supabase dashboard > Settings > API > service_role key |
+| `GOOGLE_PLACES_API_KEY` | https://console.cloud.google.com/apis/credentials |
+| `UNSPLASH_ACCESS_KEY` | https://unsplash.com/oauth/applications |
+| `TICKETMASTER_API_KEY` | https://developer.ticketmaster.com/products-and-docs/apis/getting-started/ |
+| `EVENTBRITE_OAUTH_TOKEN` | https://www.eventbrite.com/platform/api-keys |
+
+### 2. Verify the workflow
+
+After pushing, go to **Actions** tab > **AI Event Discovery** > **Run workflow** (top right) to trigger manually. It should complete within 60 minutes.
+
+### 3. Schedule
+
+The workflow runs on `cron: '0 11 */3 * *'` — every 3 days at 11:00 UTC (7 AM ET). It also runs `score-scraped.ts` to vibe-check scraper-ingested events.
+
+### 4. Billing caps (set these before enabling)
+
+- **OpenAI**: https://platform.openai.com/settings/organization/limits → $25/month
+- **Anthropic**: https://console.anthropic.com/settings/limits → $25/month

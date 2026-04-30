@@ -1,89 +1,61 @@
-import { TICKETMASTER_CATEGORY_MAP } from './config';
-import { normalizeEvent } from './normalize';
-import { upsertEvents } from './upsert';
-import { SiftEvent } from './schema';
-
 const API_KEY = process.env.TICKETMASTER_API_KEY!;
 const BASE_URL = 'https://app.ticketmaster.com/discovery/v2/events.json';
 
-const SEGMENTS = ['Music', 'Arts & Theatre', 'Comedy', 'Miscellaneous'];
+/**
+ * Lookup mode only — no longer used as a daily fetcher.
+ * Called from enrich-events.ts to find ticket URLs for AI-discovered events.
+ *
+ * The AI discovery pipeline (collect-names.ts) already scrapes Ticketmaster
+ * as one of its 18+ sources, so a separate daily ingest is redundant.
+ */
 
-export async function ingestTicketmaster(): Promise<void> {
-  console.log('[Ticketmaster] Starting ingest...');
-  const allEvents: SiftEvent[] = [];
+export interface TicketmasterLookup {
+  ticket_url: string | null;
+  price_min: number | null;
+  price_max: number | null;
+  image_url: string | null;
+}
 
-  for (const segment of SEGMENTS) {
-    let page = 0;
-    let totalPages = 1;
+/**
+ * Search Ticketmaster for a specific event by name.
+ * Returns ticket URL, price range, and image if found.
+ */
+export async function lookupTicketmaster(eventName: string): Promise<TicketmasterLookup | null> {
+  if (!API_KEY) return null;
 
-    while (page < totalPages && page < 5) {
-      const params = new URLSearchParams({
-        apikey: API_KEY,
-        city: 'New York',
-        stateCode: 'NY',
-        size: '200',
-        page: String(page),
-        sort: 'date,asc',
-        startDateTime: new Date().toISOString().split('.')[0] + 'Z',
-        classificationName: segment,
-      });
+  try {
+    const params = new URLSearchParams({
+      apikey: API_KEY,
+      keyword: eventName,
+      city: 'New York',
+      stateCode: 'NY',
+      size: '3',
+      sort: 'relevance,desc',
+    });
 
-      const res = await fetch(`${BASE_URL}?${params}`);
-      if (!res.ok) {
-        console.error(`[Ticketmaster] HTTP ${res.status} for segment "${segment}" page ${page}`);
-        break;
-      }
+    const res = await fetch(`${BASE_URL}?${params}`);
+    if (!res.ok) return null;
 
-      const json = await res.json();
-      totalPages = json.page?.totalPages ?? 1;
+    const json = await res.json();
+    const events = json._embedded?.events ?? [];
+    if (events.length === 0) return null;
 
-      const events = json._embedded?.events ?? [];
-      for (const ev of events) {
-        const venueCity = ev._embedded?.venues?.[0]?.city?.name;
-        if (venueCity && venueCity !== 'New York') continue;
-
-        const venue = ev._embedded?.venues?.[0];
-        const segmentName = ev.classifications?.[0]?.segment?.name;
-        const category = TICKETMASTER_CATEGORY_MAP[segmentName] ?? 'popups';
-
-        const normalized = normalizeEvent({
-          source: 'ticketmaster',
-          source_id: ev.id,
-          title: ev.name,
-          description: ev.info || ev.pleaseNote || undefined,
-          category,
-          start_date: ev.dates?.start?.dateTime || ev.dates?.start?.localDate,
-          end_date: ev.dates?.end?.dateTime || ev.dates?.end?.localDate || undefined,
-          venue_name: venue?.name,
-          address: venue?.address?.line1,
-          latitude: venue?.location ? parseFloat(venue.location.latitude) : undefined,
-          longitude: venue?.location ? parseFloat(venue.location.longitude) : undefined,
-          price_min: ev.priceRanges?.[0]?.min,
-          price_max: ev.priceRanges?.[0]?.max,
-          is_free: !ev.priceRanges || ev.priceRanges[0]?.min === 0,
-          ticket_url: ev.url,
-          event_url: ev.url,
-          image_url: ev.images?.[0]?.url,
-          on_sale_date: ev.sales?.public?.startDateTime,
-        });
-
-        if (normalized) allEvents.push(normalized);
-      }
-
-      page++;
-      await new Promise(r => setTimeout(r, 250)); // 4 req/sec, well within 5/sec limit
-    }
-
-    console.log(`[Ticketmaster] Segment "${segment}" done. Running total: ${allEvents.length}`);
+    const ev = events[0];
+    return {
+      ticket_url: ev.url ?? null,
+      price_min: ev.priceRanges?.[0]?.min ?? null,
+      price_max: ev.priceRanges?.[0]?.max ?? null,
+      image_url: ev.images?.[0]?.url ?? null,
+    };
+  } catch {
+    return null;
   }
-
-  console.log(`[Ticketmaster] Fetched ${allEvents.length} events total`);
-  const result = await upsertEvents(allEvents);
-  console.log(`[Ticketmaster] Upserted: ${result.inserted}, Errors: ${result.errors}`);
 }
 
-async function main() {
-  await ingestTicketmaster();
+/**
+ * @deprecated No longer runs as a daily fetcher. Use the AI discovery pipeline instead.
+ * Kept for backwards compatibility with any code that imports ingestTicketmaster.
+ */
+export async function ingestTicketmaster(): Promise<void> {
+  console.log('[Ticketmaster] Skipped — lookup mode only. Use AI discovery pipeline for event collection.');
 }
-
-main().catch(console.error);

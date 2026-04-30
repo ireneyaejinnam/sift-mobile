@@ -5,6 +5,7 @@
 create table if not exists ai_event_name_list (
   id         uuid primary key default gen_random_uuid(),
   name       text not null unique,
+  source_url text unique,
   sources    text[] not null default '{}',   -- which sources mentioned this event
   processed  boolean not null default false, -- true after enrichment step runs
   created_at timestamptz not null default now()

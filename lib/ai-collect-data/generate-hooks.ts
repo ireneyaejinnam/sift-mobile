@@ -6,7 +6,7 @@
  *
  * Targets:
  *   --target local   Update lib/ai-collect-data/output/ai_new_events.json (default)
- *   --target db      Update events + ai_events tables in Supabase (requires migration 007)
+ *   --target db      Update events table in Supabase
  *   --target both    Both
  *
  * Other flags:
@@ -18,12 +18,10 @@
  *   npx tsx --env-file=.env lib/ai-collect-data/generate-hooks.ts --target db --limit 50
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+import { chatJSON } from './openai';
 
 const EVENTS_PATH = join(__dirname, 'output/ai_new_events.json');
 
@@ -48,65 +46,103 @@ Tell them WHY it's worth their Friday night — the name, the venue reputation, 
 If the event is free, mention it naturally. If it's a recurring show, say what makes this run special.
 Output only the hook text, no quotes, no extra commentary.`;
 
-function buildUserMessage(event: any): string {
+const HOOKS_SCHEMA = {
+  name: 'hooks_response',
+  schema: {
+    type: 'object',
+    properties: {
+      hooks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            index: { type: 'number' },
+            hook_text: { type: 'string' },
+          },
+          required: ['index', 'hook_text'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['hooks'],
+    additionalProperties: false,
+  },
+} as const;
+
+function buildEventSummary(event: any, index: number): string {
   const parts = [
-    `Title: ${event.title}`,
-    event.venue_name ? `Venue: ${event.venue_name}` : null,
-    event.borough ? `Borough: ${event.borough}` : null,
-    `Category: ${event.category}`,
-    event.description ? `Description: ${event.description}` : null,
-    event.price_min === 0 || event.is_free ? `Price: Free` : event.price_min ? `Price: from $${event.price_min}` : null,
-    event.tags?.length ? `Tags: ${event.tags.join(', ')}` : null,
+    `[${index}] Title: ${event.title}`,
+    event.venue_name ? `  Venue: ${event.venue_name}` : null,
+    event.borough ? `  Borough: ${event.borough}` : null,
+    `  Category: ${event.category}`,
+    event.description ? `  Description: ${event.description}` : null,
+    event.price_min === 0 || event.is_free ? `  Price: Free` : event.price_min ? `  Price: from $${event.price_min}` : null,
+    event.tags?.length ? `  Tags: ${event.tags.join(', ')}` : null,
   ].filter(Boolean);
-  return parts.join('\n') + '\n\nWrite the hook.';
+  return parts.join('\n');
 }
 
-async function generateHook(event: any): Promise<string | null> {
+async function generateHooksBatch(events: any[]): Promise<Map<number, string>> {
+  const results = new Map<number, string>();
+  const summaries = events.map((e, i) => buildEventSummary(e, i)).join('\n\n');
+
   try {
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildUserMessage(event) }],
-    });
-    const text = (msg.content[0] as any).text?.trim();
-    return text || null;
+    const response = await chatJSON<{ hooks: Array<{ index: number; hook_text: string }> }>(
+      'gpt-4o-mini',
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Write a hook for each event below. Return one hook per event using the index number.\n\n${summaries}` },
+      ],
+      HOOKS_SCHEMA
+    );
+    for (const h of response.hooks) {
+      if (h.hook_text?.trim()) results.set(h.index, h.hook_text.trim());
+    }
   } catch (err) {
-    console.error(`  ✗ Claude error for "${event.title}":`, err);
-    return null;
+    console.error(`  ✗ OpenAI batch error:`, err);
   }
+  return results;
 }
+
+const BATCH_SIZE = 10;
 
 async function processLocal() {
   const events: any[] = JSON.parse(readFileSync(EVENTS_PATH, 'utf-8'));
   const needsHook = events.filter(e => !e.hook_text).slice(0, limit === Infinity ? undefined : limit);
 
-  console.log(`[local] ${needsHook.length} events need hooks (${events.length} total)`);
+  console.log(`[local] ${needsHook.length} events need hooks (${events.length} total), batch size: ${BATCH_SIZE}`);
   if (needsHook.length === 0) return;
 
   let done = 0;
-  for (const event of needsHook) {
-    process.stdout.write(`  [${++done}/${needsHook.length}] ${event.title.slice(0, 50)}...`);
-    const hook = await generateHook(event);
-    if (hook) {
-      if (dryRun) {
-        console.log(`\n    → ${hook}`);
+  for (let i = 0; i < needsHook.length; i += BATCH_SIZE) {
+    const batch = needsHook.slice(i, i + BATCH_SIZE);
+    console.log(`  [batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(needsHook.length / BATCH_SIZE)}] ${batch.length} events`);
+
+    const hookMap = await generateHooksBatch(batch);
+
+    for (let j = 0; j < batch.length; j++) {
+      const event = batch[j];
+      const hook = hookMap.get(j);
+      done++;
+      if (hook) {
+        if (dryRun) {
+          console.log(`    [${done}] ${event.title.slice(0, 50)} → ${hook}`);
+        } else {
+          event.hook_text = hook;
+          console.log(`    [${done}] ${event.title.slice(0, 50)} ✓`);
+        }
       } else {
-        event.hook_text = hook;
-        console.log(' ✓');
+        console.log(`    [${done}] ${event.title.slice(0, 50)} ✗ skipped`);
       }
-    } else {
-      console.log(' ✗ skipped');
     }
-    if (!dryRun && done % 10 === 0) {
+
+    if (!dryRun) {
       writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2), 'utf-8');
-      console.log(`  [saved ${done} so far]`);
     }
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 500));
   }
 
   if (!dryRun) {
-    writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2), 'utf-8');
     console.log(`\n[local] Done. Wrote hooks to ${EVENTS_PATH}`);
   }
 }
@@ -118,45 +154,49 @@ async function processDB(table: 'events' | 'ai_events') {
   );
 
   let offset = 0;
-  const batchSize = 50;
+  const fetchSize = 50;
   let totalProcessed = 0;
 
   while (totalProcessed < limit) {
-    const fetchSize = Math.min(batchSize, limit - totalProcessed);
+    const remaining = Math.min(fetchSize, limit - totalProcessed);
     const { data, error } = await supabase
       .from(table)
       .select('id, title, description, category, venue_name, borough, price_min, is_free, tags')
       .is('hook_text', null)
       .eq('is_suppressed', false)
-      .range(offset, offset + fetchSize - 1);
+      .range(offset, offset + remaining - 1);
 
     if (error) { console.error(`[${table}] fetch error:`, error.message); break; }
     if (!data || data.length === 0) { console.log(`[${table}] No more events to process.`); break; }
 
-    console.log(`[${table}] Processing batch of ${data.length}...`);
+    console.log(`[${table}] Processing ${data.length} events in batches of ${BATCH_SIZE}...`);
 
-    for (const event of data) {
-      process.stdout.write(`  ${event.title.slice(0, 50)}...`);
-      const hook = await generateHook(event);
-      if (hook) {
-        if (dryRun) {
-          console.log(`\n    → ${hook}`);
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+      const hookMap = await generateHooksBatch(batch);
+
+      for (let j = 0; j < batch.length; j++) {
+        const event = batch[j];
+        const hook = hookMap.get(j);
+        if (hook) {
+          if (dryRun) {
+            console.log(`    ${event.title.slice(0, 50)} → ${hook}`);
+          } else {
+            const { error: updateErr } = await supabase
+              .from(table)
+              .update({ hook_text: hook })
+              .eq('id', event.id);
+            if (updateErr) console.log(`    ${event.title.slice(0, 50)} ✗ update failed: ${updateErr.message}`);
+            else console.log(`    ${event.title.slice(0, 50)} ✓`);
+          }
         } else {
-          const { error: updateErr } = await supabase
-            .from(table)
-            .update({ hook_text: hook })
-            .eq('id', event.id);
-          if (updateErr) console.log(` ✗ update failed: ${updateErr.message}`);
-          else console.log(' ✓');
+          console.log(`    ${event.title.slice(0, 50)} ✗ skipped`);
         }
-      } else {
-        console.log(' ✗ skipped');
+        totalProcessed++;
       }
-      totalProcessed++;
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 500));
     }
 
-    await new Promise(r => setTimeout(r, 3000));
     offset += data.length;
   }
 
@@ -169,7 +209,6 @@ async function main() {
   if (target === 'local' || target === 'both') await processLocal();
   if (target === 'db' || target === 'both') {
     await processDB('events');
-    await processDB('ai_events');
   }
 }
 
