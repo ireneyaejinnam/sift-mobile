@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
-import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react-native";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, X } from "lucide-react-native";
 import type { GoingEvent, SavedEvent } from "@/types/user";
 import { useUser } from "@/context/UserContext";
 import { colors, radius, typography, spacing, shadows } from "@/lib/theme";
@@ -189,7 +189,15 @@ export default function CalendarSection({
                 selGoing.map((e) => (
                   <Pressable key={e.eventId} style={st.eventRow} onPress={() => router.push(`/event/${e.eventId}`)}>
                     <View style={{ flex: 1 }}>
-                      <Text style={st.detailItem}>{e.eventTitle}</Text>
+                      <View style={st.eventTitleRow}>
+                        <Text style={st.detailItem}>{e.eventTitle}</Text>
+                        {e.committed && (
+                          <View style={st.committedBadge}>
+                            <Check size={10} strokeWidth={2.5} color={colors.white} />
+                            <Text style={st.committedText}>Committed</Text>
+                          </View>
+                        )}
+                      </View>
                       {e.eventEndDate && e.eventEndDate !== e.eventDate && (
                         <Text style={st.detailSub}>runs through {e.eventEndDate}</Text>
                       )}
@@ -353,7 +361,18 @@ const st = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  detailItem: { ...typography.sm },
+  eventTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  committedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: colors.primary,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: radius.full,
+  },
+  committedText: { fontSize: 10, fontWeight: "600", color: colors.white },
+  detailItem: { ...typography.sm, flex: 1 },
   detailSub: { ...typography.xs, color: colors.textSecondary, marginTop: 1 },
   removeBtn: {
     padding: 2,

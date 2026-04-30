@@ -60,7 +60,8 @@ export type AnalyticsEventType =
   | "calendar_export"
   | "guest_started"
   | "sign_in_completed"
-  | "onboarding_step_4_complete";
+  | "onboarding_step_4_complete"
+  | "feedback_submitted";
 
 interface AnalyticsEvent {
   event_type: AnalyticsEventType;

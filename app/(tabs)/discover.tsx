@@ -171,12 +171,18 @@ export default function DiscoverScreen() {
   // EventDetail slide animation — transparent modal + Reanimated worklet, no bridge overhead
   const [eventDetailVisible, setEventDetailVisible] = useState(false);
   const eventSlideY = useSharedValue(900);
+  const detailCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const eventDetailStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: eventSlideY.value }],
   }));
 
   const openEventDetail = useCallback((event: SiftEvent) => {
+    // Cancel any pending close timer from a previous close
+    if (detailCloseTimer.current) {
+      clearTimeout(detailCloseTimer.current);
+      detailCloseTimer.current = null;
+    }
     setSelectedEvent(event);
     eventSlideY.value = 900;
     setEventDetailVisible(true);
@@ -190,6 +196,14 @@ export default function DiscoverScreen() {
         runOnJS(setSelectedEvent)(null);
       }
     });
+    // Safety net: if animation callback never fires at all (production build
+    // re-render interruption), force-close after 300ms. Cancelled by
+    // openEventDetail if the user reopens before this fires.
+    if (detailCloseTimer.current) clearTimeout(detailCloseTimer.current);
+    detailCloseTimer.current = setTimeout(() => {
+      setEventDetailVisible(false);
+      setSelectedEvent(null);
+    }, 300);
   }, []);
 
   // Load taste profile (AsyncStorage for guests, Supabase for logged-in)

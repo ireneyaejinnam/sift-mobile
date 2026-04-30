@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import {
+  Alert,
   View,
   Text,
   Image,
@@ -36,6 +37,8 @@ import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
+import { track } from "@/lib/track";
+import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { SiftEvent, EventSession } from "@/types/event";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
@@ -84,7 +87,34 @@ export default function EventDetail({
     removeSavedEvent,
     toggleGoing,
     isGoing,
+    markCommitted,
   } = useUser();
+
+  const promptCalendar = (ev: SiftEvent) => {
+    Alert.alert("Add to your calendar?", undefined, [
+      {
+        text: "Google Calendar",
+        onPress: () => {
+          track("calendar_export", { event_id: ev.id, method: "google" });
+          Linking.openURL(generateGoogleCalendarUrl(ev));
+        },
+      },
+      {
+        text: "Apple Calendar",
+        onPress: async () => {
+          track("calendar_export", { event_id: ev.id, method: "apple" });
+          const ok = await addToDeviceCalendar(ev);
+          if (ok) showToast("Added to calendar");
+        },
+      },
+      { text: "Skip", style: "cancel" },
+    ]);
+  };
+  const calendarEventForDate = (date: string): SiftEvent => ({
+    ...event,
+    startDate: date,
+    endDate: date,
+  });
 
   // Score and sort sessions for display
   const sessions = goingDate
@@ -152,6 +182,7 @@ export default function EventDetail({
       const date = selectedSessionKey.split("::")[0];
       toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: date });
       showToast("Marked as going");
+      promptCalendar(calendarEventForDate(date));
       return;
     }
     // Range exhibition: open sheet to pick a day
@@ -165,6 +196,7 @@ export default function EventDetail({
       eventDate: event.startDate,
     });
     showToast("Marked as going");
+    promptCalendar(event);
   };
 
   const dismissToCard = () => {
@@ -447,7 +479,11 @@ export default function EventDetail({
             {/* Ticket / On-sale badge */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
+                onPress={() => {
+                  track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
+                  if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
+                  markCommitted(event.id);
+                }}
                 style={styles.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -541,6 +577,7 @@ export default function EventDetail({
             });
             setGoingSheetOpen(false);
             showToast("Marked as going");
+            promptCalendar(calendarEventForDate(date));
           }}
           onCancel={() => setGoingSheetOpen(false)}
         />

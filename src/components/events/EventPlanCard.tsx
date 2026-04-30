@@ -10,10 +10,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { ScaleDecorator } from "react-native-draggable-flatlist";
-import { Trash2 } from "lucide-react-native";
+import { Check, Trash2 } from "lucide-react-native";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, typography, shadows } from "@/lib/theme";
 import type { SiftEvent } from "@/types/event";
+import { useUser } from "@/context/UserContext";
 
 const SWIPE_DELETE_THRESHOLD = 88;
 
@@ -30,6 +31,8 @@ export default function EventPlanCard({
   drag?: () => void;
   isActive?: boolean;
 }) {
+  const { getGoingEvent } = useUser();
+  const goingEvent = getGoingEvent(event.id);
   const [fallbackImage, setFallbackImage] = useState<string | null>(null);
   const translateX = useSharedValue(0);
 
@@ -89,7 +92,14 @@ export default function EventPlanCard({
             ) : (
               <View style={sc.thumbPlaceholder} />
             )}
-            <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
+            <View style={sc.titleRow}>
+              <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
+              {goingEvent?.committed && (
+                <View style={sc.committedBadge}>
+                  <Check size={9} strokeWidth={2.5} color={colors.white} />
+                </View>
+              )}
+            </View>
           </Pressable>
         </View>
       </Animated.View>
@@ -160,11 +170,25 @@ const sc = StyleSheet.create({
     height: 64,
     backgroundColor: colors.border,
   },
+  titleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 8,
+  },
   cardTitle: {
     ...typography.body,
     fontWeight: "500",
     color: colors.foreground,
     flex: 1,
-    paddingRight: 8,
+  },
+  committedBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

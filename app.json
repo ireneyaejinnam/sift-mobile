@@ -19,15 +19,32 @@
       "bundleIdentifier": "com.siftnyc.app",
       "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCalendarsFullAccessUsageDescription": "Sift adds events to your calendar so you never miss them.",
+        "NSCalendarsUsageDescription": "Sift adds events to your calendar so you never miss them."
+      },
+      "associatedDomains": ["applinks:siftapp.site"]
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#293132"
       },
-      "package": "com.sift.mobile"
+      "package": "com.sift.mobile",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "siftapp.site",
+              "pathPrefix": "/event/"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -38,7 +55,13 @@
       "expo-router",
       "expo-secure-store",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Sift adds events to your calendar so you never miss them."
+        }
+      ]
     ],
     "extra": {
       "router": {

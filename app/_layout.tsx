@@ -1,16 +1,66 @@
-import { useEffect } from "react";
-import { Stack } from "expo-router";
+import { useEffect, useCallback } from "react";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import * as Linking from "expo-linking";
 import { ClientProviders } from "@/components/providers/ClientProviders";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { track } from "@/lib/track";
 import { colors } from "@/lib/theme";
+import { InAppFeedback } from "@/components/feedback/InAppFeedback";
+
+function useDeepLinkRouter() {
+  const router = useRouter();
+
+  const isExpoRouterOwnedUrl = useCallback((url: string) => {
+    return (
+      /^sift:\/\//i.test(url) ||
+      /^https?:\/\/siftapp\.site(?:\/|$)/i.test(url)
+    );
+  }, []);
+
+  const handleUrl = useCallback(
+    (url: string, shouldPush = true) => {
+      const match = url.match(
+        /https?:\/\/siftapp\.site\/event\/([A-Za-z0-9_-]+)/
+      );
+      if (match) {
+        const eventId = match[1];
+        track("shared_link_opened", { event_id: eventId, has_app: true });
+        if (shouldPush) router.push(`/event/${eventId}`);
+      }
+    },
+    [router]
+  );
+
+  useEffect(() => {
+    // Cold launch: check initial URL
+    Linking.getInitialURL().then((url) => {
+      // Expo Router resolves owned cold-start links; pushing here duplicates the route.
+      if (url) handleUrl(url, !isExpoRouterOwnedUrl(url));
+    });
+
+    // Warm launch: listen for incoming URLs
+    // Expo Router also handles owned URLs, so only push for non-owned URLs
+    const sub = Linking.addEventListener("url", (e) =>
+      handleUrl(e.url, !isExpoRouterOwnedUrl(e.url))
+    );
+    return () => sub.remove();
+  }, [handleUrl, isExpoRouterOwnedUrl]);
+}
+
+function DeepLinkHandler() {
+  useDeepLinkRouter();
+  return null;
+}
 
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
         <ClientProviders>
+          <DeepLinkHandler />
+          <InAppFeedback />
           <StatusBar style="dark" />
           <Stack
             screenOptions={{

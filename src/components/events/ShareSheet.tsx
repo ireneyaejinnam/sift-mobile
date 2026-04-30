@@ -17,10 +17,10 @@ export default function ShareSheet({
   onClose,
 }: ShareSheetProps) {
   const { showToast } = useToast();
-  const url = eventUrl ?? "";
-  const text = url
-    ? `Check out this event: ${eventTitle} ${url}`
-    : `Check out this event: ${eventTitle}`;
+  const shareBaseUrl =
+    process.env.EXPO_PUBLIC_SHARE_BASE_URL ?? "https://siftapp.site";
+  const url = `${shareBaseUrl}/event/${eventId}`;
+  const text = `Check out this event: ${eventTitle} ${url}`;
 
   const copyLink = async () => {
     await Clipboard.setStringAsync(url);

@@ -1,5 +1,7 @@
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import * as Calendar from "expo-calendar";
+import { Platform, Alert } from "react-native";
 import type { SiftEvent } from "@/types/event";
 
 /**
@@ -83,8 +85,73 @@ export function generateGoogleCalendarUrl(event: SiftEvent): string {
 }
 
 /**
- * Save .ics file and open the native share sheet so the user can
- * add it to Apple Calendar, Google Calendar, or any calendar app.
+ * Add event directly to the device's default calendar via expo-calendar.
+ * Requests calendar permission on first use. Returns true if the event was created.
+ */
+export async function addToDeviceCalendar(event: SiftEvent): Promise<boolean> {
+  try {
+    const { status } = await Calendar.requestCalendarPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Calendar access needed",
+        "Enable calendar access in Settings to add events.",
+      );
+      return false;
+    }
+
+    // Get the default calendar, or find the first writable one
+    let calendarId: string | undefined;
+
+    if (Platform.OS === "ios") {
+      try {
+        const defaultCal = await Calendar.getDefaultCalendarAsync();
+        calendarId = defaultCal?.id;
+      } catch {
+        // No default calendar configured — fall through to writable search
+      }
+    }
+
+    if (!calendarId) {
+      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      const writable = calendars.find(
+        (c) => c.allowsModifications && c.source?.type === "local"
+      ) ?? calendars.find((c) => c.allowsModifications);
+      calendarId = writable?.id;
+    }
+
+    if (!calendarId) {
+      console.warn("[calendar] No writable calendar found");
+      return false;
+    }
+
+    const startDate = new Date(event.startDate + "T12:00:00");
+    const endDate = event.endDate
+      ? new Date(event.endDate + "T23:59:00")
+      : new Date(event.startDate + "T23:59:00");
+
+    const notes = event.description.slice(0, 500) +
+      (event.ticketUrl ? `\n\nTickets: ${event.ticketUrl}` : "") +
+      (event.eventUrl ? `\n\nEvent page: ${event.eventUrl}` : "");
+
+    await Calendar.createEventAsync(calendarId, {
+      title: event.title,
+      startDate,
+      endDate,
+      location: [event.location, event.address].filter(Boolean).join(", "),
+      notes,
+      url: event.ticketUrl ?? event.eventUrl ?? undefined,
+      allDay: true,
+    });
+
+    return true;
+  } catch (err) {
+    console.warn("[calendar] addToDeviceCalendar failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Share .ics file via native share sheet (fallback for bulk export / Android).
  */
 export async function shareICSFile(events: SiftEvent[]): Promise<boolean> {
   try {
