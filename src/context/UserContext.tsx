@@ -56,6 +56,8 @@ interface UserContextValue extends SiftStorage {
     eventEndDate?: string;
   }) => boolean;
   isGoing: (eventId: string) => boolean;
+  markCommitted: (eventId: string) => void;
+  getGoingEvent: (eventId: string) => GoingEvent | undefined;
   addCustomList: (listName: string) => void;
   renameCustomList: (oldName: string, newName: string) => void;
   deleteCustomList: (listName: string) => void;
@@ -386,6 +388,24 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [storage.goingEvents]
   );
 
+  const getGoingEvent = useCallback(
+    (eventId: string) => storage.goingEvents.find((e) => e.eventId === eventId),
+    [storage.goingEvents]
+  );
+
+  const markCommitted = useCallback(
+    (eventId: string) => {
+      const committedAt = new Date().toISOString();
+      const goingEvents = storage.goingEvents.map((e) =>
+        e.eventId === eventId ? { ...e, committed: true, committedAt } : e
+      );
+      persist({ ...storage, goingEvents });
+      const updated = goingEvents.find((e) => e.eventId === eventId);
+      if (userIdRef.current && updated) syncGoingEvent(userIdRef.current, updated);
+    },
+    [storage, persist]
+  );
+
   // ── Lists ─────────────────────────────────────────────────
 
   const addCustomList = useCallback(
@@ -512,6 +532,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       getSavedListForEvent,
       toggleGoing,
       isGoing,
+      markCommitted,
+      getGoingEvent,
       addCustomList,
       renameCustomList,
       deleteCustomList,
@@ -526,7 +548,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [
       storage, ready, setAuth, setUserProfile,
       addSavedEvent, removeSavedEvent, getSavedListForEvent,
-      toggleGoing, isGoing, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
+      toggleGoing, isGoing, markCommitted, getGoingEvent, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
       getAllListNames, addSharedWithYou, updateDisplayName, signOut, refreshFromRemote,
     ]
   );

@@ -24,6 +24,8 @@ export interface GoingEvent {
   eventDate: string;
   eventEndDate?: string;
   markedAt: string;
+  committed?: boolean;
+  committedAt?: string;
 }
 
 export interface SharedWithYouEvent {

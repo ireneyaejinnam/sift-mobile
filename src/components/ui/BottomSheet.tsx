@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -40,7 +40,7 @@ export default function BottomSheet({
 }: BottomSheetProps) {
   const [visible, setVisible] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const animationCycleRef = useRef(0);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
@@ -62,12 +62,26 @@ export default function BottomSheet({
     opacity: backdropOpacity.value,
   }));
 
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleCloseTimer = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = setTimeout(() => {
+      setVisible(false);
+      onClose();
+    }, 300);
+  }, [clearCloseTimer, onClose]);
+
   useEffect(() => {
-    animationCycleRef.current += 1;
-    const cycle = animationCycleRef.current;
     cancelAnimation(translateY);
     cancelAnimation(dragY);
     cancelAnimation(backdropOpacity);
+    clearCloseTimer();
 
     if (open) {
       translateY.value = OFFSCREEN;
@@ -86,12 +100,16 @@ export default function BottomSheet({
         easing: Easing.in(Easing.cubic),
       });
       backdropOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-        if (finished && cycle === animationCycleRef.current) {
-          runOnJS(setVisible)(false);
-        }
+        if (finished) runOnJS(setVisible)(false);
       });
+      // Safety net: if the animation callback never fires (interrupted
+      // by rapid re-renders in production builds), force-hide after 300ms
+      closeTimerRef.current = setTimeout(() => setVisible(false), 300);
     }
   }, [open]);
+
+  // Clean up timer on unmount
+  useEffect(() => clearCloseTimer, [clearCloseTimer]);
 
   const panGesture = Gesture.Pan()
     .onUpdate((e) => {
@@ -114,6 +132,8 @@ export default function BottomSheet({
           }
         );
         backdropOpacity.value = withTiming(0, { duration: 200 });
+        // Safety net for swipe-dismiss path too
+        runOnJS(scheduleCloseTimer)();
       } else {
         // Snap back
         dragY.value = withSpring(0, { damping: 20, stiffness: 300 });

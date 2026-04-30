@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import {
+  Alert,
   View,
   Text,
   Image,
+  Linking,
   Pressable,
   StyleSheet,
   Dimensions,
@@ -34,6 +36,7 @@ import GoingDateSheet from "@/components/events/GoingDateSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
+import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { SiftEvent } from "@/types/event";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { tuneUpCategory, tuneDownCategory } from "@/lib/tasteProfile";
@@ -112,7 +115,34 @@ export default function EventCard({
     removeSavedEvent,
     toggleGoing,
     isGoing,
+    markCommitted,
   } = useUser();
+
+  const promptCalendar = (ev: SiftEvent) => {
+    Alert.alert("Add to your calendar?", undefined, [
+      {
+        text: "Google Calendar",
+        onPress: () => {
+          track("calendar_export", { event_id: ev.id, method: "google" });
+          Linking.openURL(generateGoogleCalendarUrl(ev));
+        },
+      },
+      {
+        text: "Apple Calendar",
+        onPress: async () => {
+          track("calendar_export", { event_id: ev.id, method: "apple" });
+          const ok = await addToDeviceCalendar(ev);
+          if (ok) showToast("Added to calendar");
+        },
+      },
+      { text: "Skip", style: "cancel" },
+    ]);
+  };
+  const calendarEventForDate = (date: string): SiftEvent => ({
+    ...event,
+    startDate: date,
+    endDate: date,
+  });
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [fallbackImage, setFallbackImage] = useState<string | null>(null);
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
@@ -155,6 +185,7 @@ export default function EventCard({
       eventDate: event.startDate,
     });
     track("event_going", { event_id: event.id });
+    promptCalendar(event);
   };
 
   // ── Swipe gesture ────────────────────────────────────────
@@ -382,6 +413,7 @@ export default function EventCard({
                     onPress={() => {
                       track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
                       if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
+                      markCommitted(event.id);
                     }}
                     style={styles.ctaButton}
                   >
@@ -464,6 +496,7 @@ export default function EventCard({
             setGoingSheetOpen(false);
             track("event_going", { event_id: event.id });
             showToast("Marked as going");
+            promptCalendar(calendarEventForDate(date));
           }}
           onCancel={() => setGoingSheetOpen(false)}
         />

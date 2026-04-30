@@ -32,7 +32,7 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
-import { generateGoogleCalendarUrl, shareICSFile } from "@/lib/calendar";
+import { generateGoogleCalendarUrl, addToDeviceCalendar, shareICSFile } from "@/lib/calendar";
 import { fetchEventById } from "@/lib/getEvents";
 import { events } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
@@ -50,6 +50,16 @@ export default function SharedEventPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { showToast } = useToast();
+
+  // If user arrived via deep link (no back stack), go to discover feed
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/discover");
+    }
+  };
+
   const {
     isLoggedIn,
     getSavedListForEvent,
@@ -57,6 +67,7 @@ export default function SharedEventPage() {
     removeSavedEvent,
     addSavedEvent,
     addSharedWithYou,
+    markCommitted,
   } = useUser();
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
@@ -140,7 +151,7 @@ export default function SharedEventPage() {
       <View style={s.centered}>
         <Text style={s.heading}>Event not found</Text>
         <Text style={s.sub}>This event may have expired or been removed.</Text>
-        <Pressable onPress={() => router.back()} style={s.primaryButton}>
+        <Pressable onPress={goBack} style={s.primaryButton}>
           <Text style={s.primaryButtonText}>Go back</Text>
         </Pressable>
       </View>
@@ -154,7 +165,7 @@ export default function SharedEventPage() {
         showsVerticalScrollIndicator={false}
       >
         {/* Back */}
-        <Pressable onPress={() => router.back()} style={s.backButton}>
+        <Pressable onPress={goBack} style={s.backButton}>
           <ArrowLeft size={18} color={colors.foreground} strokeWidth={1.5} />
           <Text style={s.backText}>Back</Text>
         </Pressable>
@@ -245,7 +256,11 @@ export default function SharedEventPage() {
             {/* Ticket button */}
             {event.ticketUrl ? (
               <Pressable
-                onPress={() => { if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl); }}
+                onPress={() => {
+                  track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
+                  if (event.ticketUrl) WebBrowser.openBrowserAsync(event.ticketUrl);
+                  markCommitted(event.id);
+                }}
                 style={s.ticketButton}
               >
                 <Ticket size={16} strokeWidth={1.5} color={colors.white} />
@@ -279,9 +294,15 @@ export default function SharedEventPage() {
                     {
                       text: "Apple Calendar",
                       onPress: async () => {
-                        track("calendar_export", { event_id: event.id, method: "ics" });
-                        const ok = await shareICSFile([event]);
-                        if (!ok) showToast("Couldn't open calendar");
+                        track("calendar_export", { event_id: event.id, method: "apple" });
+                        const nativeAvailable = Platform.OS !== "web" && typeof addToDeviceCalendar === "function";
+                        const ok = nativeAvailable ? await addToDeviceCalendar(event) : false;
+                        if (ok) {
+                          showToast("Added to calendar");
+                          return;
+                        }
+                        const shared = await shareICSFile([event]);
+                        if (shared) showToast("Calendar file ready");
                       },
                     },
                     { text: "Cancel", style: "cancel" },
