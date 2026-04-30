@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sift — Leave-behind deck</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAF9F7;
+    --fg: #1A1F2B;
+    --muted: #6B6F76;
+    --subtle: #8E9196;
+    --border: #E8E6E3;
+    --primary: #5A7BAF;
+    --primary-light: rgba(90, 123, 175, 0.10);
+    --primary-ring: rgba(90, 123, 175, 0.32);
+    --accent: #E8AA6A;
+    --accent-soft: rgba(232, 170, 106, 0.14);
+    --good: #4F8A65;
+    --warn: #C97A4A;
+    --card: #FFFFFF;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .deck { position: relative; width: 100vw; height: 100vh; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 5vh 7vw;
+    opacity: 0; pointer-events: none;
+    transition: opacity 360ms ease;
+    overflow: hidden;
+  }
+  .slide.active { opacity: 1; pointer-events: auto; }
+
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 2.5vh; }
+  .brand img { height: 38px; width: auto; }
+  .brand-name { font-family: "DM Serif Display", serif; font-size: 22px; color: var(--fg); letter-spacing: -0.5px; }
+
+  .chrome {
+    position: fixed; bottom: 22px; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 28px;
+    font-size: 12px; color: var(--subtle);
+    pointer-events: none;
+  }
+  .chrome-dots { display: flex; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--border); }
+  .dot.active { background: var(--primary); }
+
+  .eyebrow { font-size: 12px; color: var(--primary); font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 14px; }
+  h2 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(32px, 4.2vw, 54px);
+    line-height: 1.08; letter-spacing: -0.8px; color: var(--fg);
+    margin-bottom: 14px; max-width: 28ch;
+  }
+  .lead { font-size: 18px; color: var(--muted); line-height: 1.55; max-width: 880px; margin-bottom: 8px; }
+  .lead strong { color: var(--fg); font-weight: 600; }
+
+  /* TITLE */
+  .s-title { justify-content: center; align-items: center; text-align: center; }
+  .s-title .hero-logo { height: 130px; margin-bottom: 14px; margin-top: -6vh; }
+  .s-title h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 1.05; letter-spacing: -1.2px; color: var(--fg);
+    margin-bottom: 18px; max-width: 18ch;
+  }
+  .s-title h1 em { font-style: italic; color: var(--primary); }
+  .s-title .tagline { font-size: 22px; color: var(--muted); font-weight: 400; max-width: 760px; line-height: 1.4; }
+  .s-title .byline { margin-top: 36px; font-size: 13px; color: var(--subtle); letter-spacing: 2px; text-transform: uppercase; }
+
+  /* RASKIN */
+  .s-raskin { justify-content: center; align-items: flex-start; }
+  .s-raskin .raskin-eyebrow {
+    font-size: 12px; color: var(--primary); font-weight: 600;
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 28px;
+  }
+  .s-raskin .raskin-line {
+    display: flex; align-items: baseline; gap: 18px;
+    font-family: "DM Serif Display", serif; font-size: clamp(40px, 4.6vw, 68px);
+    line-height: 1.15; letter-spacing: -0.8px; margin-bottom: 10px;
+  }
+  .s-raskin .raskin-line em { font-style: italic; color: var(--primary); }
+  .s-raskin .raskin-when {
+    font-family: "Inter", sans-serif; font-weight: 700; font-size: 14px;
+    color: var(--accent); letter-spacing: 2px; text-transform: uppercase;
+    flex-shrink: 0; min-width: 110px;
+  }
+  .s-raskin .raskin-foot {
+    margin-top: 32px; font-size: 19px; color: var(--muted); line-height: 1.5; max-width: 64ch;
+  }
+
+  /* EXEC SUMMARY */
+  .exec-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 20px; max-width: 1200px; margin-top: 12px;
+  }
+  .exec-block {
+    padding: 22px 24px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  .exec-block .ex-tag {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 8px;
+  }
+  .exec-block .ex-h {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: 22px; letter-spacing: -0.4px; margin-bottom: 8px;
+  }
+  .exec-block p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .exec-block p strong { color: var(--fg); font-weight: 600; }
+
+  /* PROBLEM */
+  .quote-inline { margin: 0 0 22px; border-left: 4px solid var(--accent); padding-left: 20px; max-width: 900px; }
+  .quote-inline p {
+    font-family: "DM Serif Display", serif; font-style: italic; font-weight: 400;
+    font-size: clamp(18px, 1.7vw, 24px); line-height: 1.32; color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .quote-inline cite { font-style: normal; font-size: 13px; color: var(--muted); letter-spacing: 0.3px; font-weight: 500; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 4px; max-width: 1100px; }
+  .stat-block { padding: 22px 24px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .stat-big { font-family: "DM Serif Display", serif; font-size: clamp(40px, 5.2vw, 68px); color: var(--primary); line-height: 1; margin-bottom: 10px; }
+  .stat-copy { font-size: 15px; color: var(--fg); line-height: 1.4; }
+  .stat-copy em { color: var(--muted); font-style: italic; }
+
+  /* WHY NOW / 3-COL */
+  .why-now, .lanes, .pos-grid, .solution-grid {
+    display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 22px; max-width: 1200px;
+  }
+  .wn { padding: 24px 24px; border-left: 3px solid var(--accent); background: var(--card); border-radius: 0 12px 12px 0; }
+  .wn h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .wn p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* SOLUTION */
+  .sol { padding: 28px 24px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .sol .sol-num {
+    display: inline-block; width: 32px; height: 32px; border-radius: 9999px;
+    background: var(--primary); color: white; text-align: center; line-height: 32px;
+    font-weight: 700; font-size: 14px; margin-bottom: 12px;
+  }
+  .sol h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 26px; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .sol p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* SCREENS */
+  .screens-row {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 36px; margin-top: 22px; max-width: 1200px;
+    align-items: start; justify-items: center;
+  }
+  .screen { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; }
+  .phone {
+    position: relative; width: 100%; max-width: 240px;
+    border-radius: 36px; overflow: hidden; background: #000;
+    border: 2px solid #1A1F2B;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.6) inset,
+      0 28px 46px -22px rgba(26, 31, 43, 0.32),
+      0 8px 16px -6px rgba(26, 31, 43, 0.18);
+    aspect-ratio: 9 / 19.5;
+  }
+  .phone img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .screen .cap { text-align: center; }
+  .screen .cap-tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    color: var(--primary); background: var(--primary-light);
+    padding: 4px 10px; border-radius: 9999px; letter-spacing: 1.4px;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .screen .cap-title { font-family: "DM Serif Display", serif; font-size: 20px; letter-spacing: -0.4px; margin-bottom: 4px; }
+  .screen .cap-sub { font-size: 13px; color: var(--muted); line-height: 1.45; max-width: 30ch; margin: 0 auto; }
+
+  /* PROOF */
+  .proof-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; max-width: 1300px; }
+  .proof { padding: 22px 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); display: flex; flex-direction: column; gap: 10px; }
+  .proof.hero { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .proof .num { font-family: "DM Serif Display", serif; font-size: clamp(40px, 4.6vw, 64px); line-height: 1; color: var(--primary); letter-spacing: -1px; }
+  .proof.hero .num { color: var(--accent); }
+  .proof .label { font-size: 13px; line-height: 1.45; color: var(--muted); font-weight: 500; }
+  .proof.hero .label { color: rgba(255,255,255,0.85); }
+  .proof .label em { font-style: italic; color: var(--subtle); font-weight: 400; }
+  .proof.hero .label em { color: rgba(255,255,255,0.65); }
+  .proof-foot {
+    margin-top: 20px; font-family: "DM Serif Display", serif; font-style: italic;
+    font-size: clamp(18px, 1.6vw, 24px); color: var(--fg); max-width: 64ch; line-height: 1.35;
+  }
+  .proof-foot strong { font-style: normal; color: var(--primary); font-weight: 600; }
+
+  /* TASTE-GRAPH (algorithm) — flow */
+  .flow {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px; max-width: 1200px; margin-top: 18px;
+  }
+  .flow-col {
+    padding: 24px 22px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 14px;
+  }
+  .flow-col h3 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: 22px; letter-spacing: -0.4px; margin-bottom: 10px;
+  }
+  .flow-col h3 .step {
+    display: inline-block; font-family: "Inter"; font-weight: 700;
+    font-size: 11px; color: var(--accent); letter-spacing: 1.6px;
+    text-transform: uppercase; margin-bottom: 6px; display: block;
+  }
+  .flow-col ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .flow-col li { font-size: 14px; color: var(--fg); line-height: 1.45; padding-left: 18px; position: relative; }
+  .flow-col li::before {
+    content: ""; width: 6px; height: 6px; background: var(--primary);
+    border-radius: 9999px; position: absolute; left: 4px; top: 8px;
+  }
+  .flow-col li em { color: var(--muted); font-style: italic; }
+
+  /* COMPETITION */
+  .matrix {
+    margin-top: 18px; max-width: 1200px;
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    background: var(--card);
+  }
+  .matrix-row {
+    display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .matrix-row:last-child { border-bottom: 0; }
+  .matrix-row > div {
+    padding: 14px 18px; font-size: 14px; color: var(--fg);
+    display: flex; align-items: center; line-height: 1.4;
+  }
+  .matrix-row.head > div {
+    background: var(--bg); font-size: 12px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted);
+  }
+  .matrix-row.head .col-us { color: var(--primary); }
+  .matrix-row > .col-label { font-weight: 600; color: var(--fg); background: var(--bg); }
+  .matrix-row > .col-us { background: var(--primary-light); color: var(--fg); font-weight: 500; }
+  .check-y { color: var(--good); font-weight: 700; }
+  .check-n { color: var(--subtle); font-weight: 500; }
+
+  /* TRACTION timeline */
+  .timeline { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 18px; max-width: 1300px; }
+  .tl { padding: 22px 22px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .tl .when { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 1.4px; text-transform: uppercase; }
+  .tl h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; margin-top: 8px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .tl p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* LANES (biz model) */
+  .lane { padding: 26px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+  .lane .tag {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    color: var(--primary); background: var(--primary-light);
+    padding: 4px 10px; border-radius: 9999px; letter-spacing: 1px; margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+  .lane h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .lane p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* MARKET CHAIN */
+  .market-chain {
+    display: flex; flex-direction: column; gap: 0;
+    margin-top: 18px; max-width: 1100px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  }
+  .market-row {
+    display: grid; grid-template-columns: 220px 1fr 200px;
+    align-items: center; gap: 16px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .market-row:last-child { border-bottom: 0; background: var(--primary-light); }
+  .market-row .step {
+    font-size: 12px; font-weight: 700; color: var(--accent);
+    letter-spacing: 1.6px; text-transform: uppercase;
+  }
+  .market-row .desc { font-size: 15px; color: var(--fg); line-height: 1.4; }
+  .market-row .desc em { color: var(--muted); font-style: italic; }
+  .market-row .value {
+    font-family: "DM Serif Display", serif; font-size: 28px;
+    color: var(--primary); text-align: right; letter-spacing: -0.5px; line-height: 1;
+  }
+  .market-row.total .value { font-size: 36px; }
+  .market-row.total .step { color: var(--primary); }
+
+  /* GTM — channels */
+  .gtm-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 18px; max-width: 1200px; margin-top: 18px;
+  }
+  .gtm {
+    padding: 24px; border-radius: 14px; background: var(--card);
+    border: 1px solid var(--border);
+  }
+  .gtm .phase {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 8px;
+  }
+  .gtm h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; letter-spacing: -0.4px; margin-bottom: 10px; }
+  .gtm ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .gtm li { font-size: 14px; color: var(--muted); line-height: 1.5; padding-left: 16px; position: relative; }
+  .gtm li::before { content: ""; width: 5px; height: 5px; background: var(--primary); border-radius: 9999px; position: absolute; left: 2px; top: 9px; }
+  .gtm .target {
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+    font-size: 13px; color: var(--fg);
+  }
+  .gtm .target strong { color: var(--primary); font-weight: 700; }
+
+  /* ROADMAP */
+  .roadmap {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px; max-width: 1300px; margin-top: 18px;
+  }
+  .rm {
+    padding: 22px 20px; border-radius: 14px; background: var(--card);
+    border: 1px solid var(--border); position: relative;
+  }
+  .rm .q {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 8px;
+  }
+  .rm h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 20px; letter-spacing: -0.3px; margin-bottom: 10px; line-height: 1.2; }
+  .rm ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .rm li { font-size: 13px; color: var(--muted); line-height: 1.45; padding-left: 14px; position: relative; }
+  .rm li::before { content: "→"; color: var(--primary); position: absolute; left: 0; }
+
+  /* RISKS */
+  .risks {
+    display: grid; grid-template-columns: 1fr; gap: 14px;
+    max-width: 1100px; margin-top: 18px;
+  }
+  .risk {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0; background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden;
+  }
+  .risk-side {
+    padding: 20px 24px;
+  }
+  .risk-side.problem {
+    background: var(--accent-soft);
+    border-right: 1px solid var(--border);
+  }
+  .risk-side.fix {
+    background: var(--card);
+  }
+  .risk-side .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.6px;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .risk-side.problem .label { color: var(--warn); }
+  .risk-side.fix .label { color: var(--good); }
+  .risk-side h4 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: 18px; letter-spacing: -0.3px; margin-bottom: 6px;
+  }
+  .risk-side p { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+
+  /* USE OF FUNDS */
+  .funds {
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px;
+    max-width: 1200px; margin-top: 18px; align-items: start;
+  }
+  .funds-list { display: flex; flex-direction: column; gap: 12px; }
+  .fund-row {
+    display: grid; grid-template-columns: 70px 1fr 70px;
+    align-items: center; gap: 18px;
+    padding: 16px 18px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px;
+  }
+  .fund-row .pct {
+    font-family: "DM Serif Display", serif; font-size: 28px;
+    color: var(--primary); line-height: 1; letter-spacing: -0.6px;
+  }
+  .fund-row .what {
+    font-size: 14px; color: var(--fg); line-height: 1.4;
+  }
+  .fund-row .what strong { font-weight: 600; }
+  .fund-row .what em { color: var(--muted); font-style: italic; font-size: 13px; }
+  .fund-row .amt {
+    font-family: "DM Serif Display", serif; font-size: 18px;
+    text-align: right; color: var(--muted);
+  }
+  .funds-side {
+    padding: 24px; background: var(--primary-light);
+    border: 1px solid var(--primary-ring); border-radius: 14px;
+  }
+  .funds-side h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 24px; margin-bottom: 12px; letter-spacing: -0.4px; }
+  .funds-side ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .funds-side li { font-size: 14px; color: var(--fg); line-height: 1.45; padding-left: 18px; position: relative; }
+  .funds-side li::before { content: "✓"; color: var(--good); font-weight: 700; position: absolute; left: 0; }
+
+  /* TEAM */
+  .team-row { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; margin-top: 18px; max-width: 1100px; }
+  .team-row.team-grid-4 { grid-template-columns: repeat(4,1fr); max-width: 1300px; }
+  .person { padding: 28px 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); display: flex; align-items: center; justify-content: center; min-height: 140px; }
+  .person h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: clamp(20px, 1.8vw, 26px); letter-spacing: -0.5px; text-align: center; line-height: 1.15; }
+
+  /* CLOSE */
+  .s-close { justify-content: center; align-items: center; text-align: center; }
+  .s-close h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(48px, 6.4vw, 88px); letter-spacing: -1px; line-height: 1.05;
+    max-width: 18ch; margin-bottom: 22px;
+  }
+  .s-close h1 em { font-style: italic; color: var(--primary); }
+  .s-close .ask { font-size: 18px; color: var(--muted); max-width: 64ch; line-height: 1.55; }
+  .s-close .ask strong { color: var(--fg); font-weight: 600; }
+  .s-close .ask + .ask { margin-top: 14px; }
+  .s-close .sub { margin-top: 5vh; font-size: 13px; color: var(--subtle); letter-spacing: 2px; text-transform: uppercase; }
+
+  @page { size: 13.333in 7.5in; margin: 0; }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    html, body { height: auto; overflow: visible; background: var(--bg) !important; }
+    .chrome { display: none !important; }
+    .slide {
+      position: relative; inset: auto; opacity: 1 !important; pointer-events: auto;
+      page-break-after: always; break-after: page;
+      width: 13.333in; height: 7.5in;
+      box-sizing: border-box; background: var(--bg) !important;
+    }
+    .slide:last-child { page-break-after: auto; break-after: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- 1. TITLE -->
+  <section class="slide s-title active" data-slide="1">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift">
+    <h1>NYC events, <em>sifted</em> just for you.</h1>
+    <p class="tagline">A taste-first event app for young New Yorkers — curated, swipeable, and gets sharper every weekend.</p>
+    <p class="byline">The Sift Team · Spring 2026 · seed leave-behind</p>
+  </section>
+
+  <!-- 2. EXECUTIVE SUMMARY -->
+  <section class="slide" data-slide="2">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">01 · Executive summary</p>
+    <h2>Sift is a taste-first event app for young NYC. Already shipping, already learning.</h2>
+
+    <div class="exec-grid">
+      <div class="exec-block">
+        <div class="ex-tag">The problem</div>
+        <div class="ex-h">Discovery is broken in NYC.</div>
+        <p>87% of 18–35 New Yorkers use 3+ apps to find things to do. Across 20 user interviews, the recurring theme: <strong>"I don't want another social media app — I just want to know what's good this weekend."</strong></p>
+      </div>
+      <div class="exec-block">
+        <div class="ex-tag">Our solution</div>
+        <div class="ex-h">A taste graph for events.</div>
+        <p>Sift curates with AI + an editor (rejects 85% of incoming inventory), users swipe one card at a time, and the deck re-ranks in real time. Not a feed. Not a follow graph. <strong>Taste, swipe, plan.</strong></p>
+      </div>
+      <div class="exec-block">
+        <div class="ex-tag">Where we are</div>
+        <div class="ex-h">Live, in production, today.</div>
+        <p><strong>120+ hand-qualified NYC events</strong>, refreshed weekly from 6 tastemaker sources. <strong>23 real users</strong> swiping daily — friends-of-friends, organic, zero spend. Built in 6 weeks.</p>
+      </div>
+      <div class="exec-block">
+        <div class="ex-tag">The ask</div>
+        <div class="ex-h">$750K SAFE · 18 months.</div>
+        <p>Funds iOS &amp; Android launch, push-notification engine, Sift Pro tier, and curator/creator partnerships. NYC end-to-end before any second city. <strong>$345M ARR opportunity in NYC alone.</strong></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. THE CHANGE -->
+  <section class="slide s-raskin" data-slide="3">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="raskin-eyebrow">02 · The change</p>
+    <div class="raskin-line"><span class="raskin-when">Today</span><span>You open <em style="font-style:italic;color:var(--muted);">six apps</em> and stay home.</span></div>
+    <div class="raskin-line"><span class="raskin-when">Tomorrow</span><span>You open Sift and <em>your night plans itself.</em></span></div>
+    <p class="raskin-foot">NYC's event industry is enormous and the discovery problem is unsolved. The first taste graph for events wins the city — and the category.</p>
+  </section>
+
+  <!-- 4. PROBLEM -->
+  <section class="slide" data-slide="4">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">03 · The problem</p>
+    <h2>NYC has infinite events. None of them feel like you. And nobody wants another feed.</h2>
+
+    <blockquote class="quote-inline">
+      <p>"We spend most of our time looking into activities that we end up not even going to. We just get overwhelmed and give up."</p>
+      <cite>— Sam, 23. One of 20 user interviews.</cite>
+    </blockquote>
+
+    <blockquote class="quote-inline" style="border-left-color: var(--primary); margin-bottom: 22px;">
+      <p>"Honestly? I don't want another social media app. I just want to know what's good this weekend."</p>
+      <cite>— Recurring theme across 20 interviews. Nobody asked for a feed, a follow graph, or another inbox.</cite>
+    </blockquote>
+
+    <div class="stats-row">
+      <div class="stat-block">
+        <div class="stat-big">87%</div>
+        <div class="stat-copy">use 3+ apps to find things to do <em>(Eventbrite + TimeOut + IG + Resy + …)</em></div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-big">#1</div>
+        <div class="stat-copy">complaint heard: <em>"too many options, not enough good ones."</em></div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-big">0</div>
+        <div class="stat-copy">interview subjects asked for <em>another social feed</em> — they want answers, not another timeline.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. WHY NOW -->
+  <section class="slide" data-slide="5">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">04 · Why now</p>
+    <h2>The conditions for a taste graph just landed. The window is open today.</h2>
+    <p class="lead">Three shifts converge in 2026. None of them existed five years ago — and the incumbents haven't responded.</p>
+
+    <div class="why-now">
+      <div class="wn">
+        <h3>AI curation got cheap</h3>
+        <p>An LLM rubric that scores 1,000 events for audience fit costs &lt;$5/wk. The same job needed a five-person editorial team in 2020. We have it running today.</p>
+      </div>
+      <div class="wn">
+        <h3>Taste graphs went mainstream</h3>
+        <p>Beli (restaurants), TikTok (video), and Spotify (music) trained a generation to swipe-rate-share. Users now <em>expect</em> recs to learn from them. Events haven't caught up.</p>
+      </div>
+      <div class="wn">
+        <h3>Aggregators are stale</h3>
+        <p>Eventbrite hasn't shipped a meaningful UX change in 5 years. Editorial sites still publish by hand. None personalize. The window is open <em>now</em>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. SOLUTION -->
+  <section class="slide" data-slide="6">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">05 · The solution</p>
+    <h2>Sift curates. You swipe. It learns. Not a feed, not a follow graph.</h2>
+    <p class="lead">Three behaviors, one app. A taste-maker built and tuned for you — one swipe at a time. Zero social pressure, zero infinite scroll.</p>
+
+    <div class="solution-grid">
+      <div class="sol">
+        <span class="sol-num">1</span>
+        <h3>Discover</h3>
+        <p>One curated card at a time. Right = going. Left = pass. No infinite feed, no FOMO doom-scroll, no "follow your friends to see what they did."</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">2</span>
+        <h3>Learn</h3>
+        <p>Every swipe, save, and "more like this" tunes the deck instantly. No nightly batch, no cold-start wait. The model is the moat.</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">3</span>
+        <h3>Plan</h3>
+        <p>Save, sequence the night, one tap to Apple Calendar with the venue address. From swipe to "added to my Saturday" in &lt;30 seconds.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. INSIDE THE APP -->
+  <section class="slide" data-slide="7">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">06 · Inside the app</p>
+    <h2>Open it. Tell it your vibe. Swipe. Three screens, three taps.</h2>
+
+    <div class="screens-row">
+      <div class="screen">
+        <div class="phone"><img src="screens/splash.png" alt="Sift splash"></div>
+        <div class="cap">
+          <span class="cap-tag">Open</span>
+          <div class="cap-title">Find your vibe</div>
+          <div class="cap-sub">A taste-first event app, built for NYC.</div>
+        </div>
+      </div>
+      <div class="screen">
+        <div class="phone"><img src="screens/mood.png" alt="Mood chooser"></div>
+        <div class="cap">
+          <span class="cap-tag">Tune</span>
+          <div class="cap-title">Pick a mood</div>
+          <div class="cap-sub">One tap seeds the deck. Or "anything works" — the swipes do the rest.</div>
+        </div>
+      </div>
+      <div class="screen">
+        <div class="phone"><img src="screens/discover.png" alt="Discover card"></div>
+        <div class="cap">
+          <span class="cap-tag">Swipe</span>
+          <div class="cap-title">One curated card</div>
+          <div class="cap-sub">Real NYC events — Frieze, not "salsa night at a hotel bar."</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. PRODUCT PROOF -->
+  <section class="slide" data-slide="8">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">07 · The product — this isn't a mock</p>
+    <h2>Real catalog. Real users. Real swipes. Already in production.</h2>
+
+    <div class="proof-grid">
+      <div class="proof hero">
+        <div class="num">120+</div>
+        <div class="label">hand-qualified NYC events live in production right now — refreshed weekly.</div>
+      </div>
+      <div class="proof">
+        <div class="num">85%</div>
+        <div class="label">of ingested events <em>rejected</em> by our AI rubric + human review.</div>
+      </div>
+      <div class="proof">
+        <div class="num">6</div>
+        <div class="label">tastemaker sources — Ticketmaster, Eater, Infatuation, TimeOut, Resy Hit List, Dice.</div>
+      </div>
+      <div class="proof">
+        <div class="num">23</div>
+        <div class="label">real users with real taste profiles — swiping right now, not a waitlist.</div>
+      </div>
+    </div>
+
+    <p class="proof-foot">
+      The hard part — <strong>a curated NYC catalog</strong> — already exists. The taste loop on top of it is what scales the rest of the city.
+    </p>
+  </section>
+
+  <!-- 9. HOW THE TASTE GRAPH WORKS -->
+  <section class="slide" data-slide="9">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">08 · How the taste graph works</p>
+    <h2>Curate hard. Score every signal. Re-rank in real time. The model compounds.</h2>
+
+    <div class="flow">
+      <div class="flow-col">
+        <span class="step">Step 1 · Curate</span>
+        <h3>Reject 85% before it touches a user.</h3>
+        <ul>
+          <li>AI ingest from 6 tastemaker sources <em>(Ticketmaster, Eater, Infatuation, TimeOut, Resy, Dice)</em></li>
+          <li>LLM rubric scores audience fit, venue quality, verified dates, real prices</li>
+          <li>Human editor reviews keep-pile weekly — no fabricated listings</li>
+          <li><em>Eventbrite structurally can't do this — their model needs the firehose.</em></li>
+        </ul>
+      </div>
+      <div class="flow-col">
+        <span class="step">Step 2 · Signal</span>
+        <h3>Three signals, three weights.</h3>
+        <ul>
+          <li><strong>Swipe</strong> — soft signal. Right boosts category, left dampens.</li>
+          <li><strong>Feedback sheet</strong> — explicit "more / less like this" retunes a whole vibe.</li>
+          <li><strong>Save / Going</strong> — beacon. Similar events climb the deck immediately.</li>
+          <li>No nightly batch. No cold-start wait. Re-rank in &lt;200ms.</li>
+        </ul>
+      </div>
+      <div class="flow-col">
+        <span class="step">Step 3 · Compound</span>
+        <h3>The model is the moat.</h3>
+        <ul>
+          <li>~20 swipes warms a profile — one session.</li>
+          <li>Every swipe across every user makes the next swipe smarter.</li>
+          <li>City-agnostic: same rubric, swap the editorial lead, repeat.</li>
+          <li>By month 6 the taste graph is the asset — not the catalog.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. COMPETITION -->
+  <section class="slide" data-slide="10">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">09 · Competition &amp; status quo</p>
+    <h2>Volume vs. editorial vs. taste. Sift is the only taste play — and the only one with a learning loop.</h2>
+
+    <div class="matrix">
+      <div class="matrix-row head">
+        <div></div>
+        <div>Eventbrite / Dice</div>
+        <div>TimeOut / Infatuation</div>
+        <div>Group chat <em style="text-transform:none;letter-spacing:0;color:var(--subtle);font-style:italic;font-weight:500;">(status quo)</em></div>
+        <div class="col-us">Sift</div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Curated</div>
+        <div><span class="check-n">✗ firehose</span></div>
+        <div><span class="check-y">✓ static</span></div>
+        <div><span class="check-y">✓ by friends</span></div>
+        <div class="col-us"><span class="check-y">✓ AI + editor</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Personalized</div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div class="col-us"><span class="check-y">✓ real-time</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">One-tap to plan</div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗ texts</span></div>
+        <div class="col-us"><span class="check-y">✓ calendar export</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Why we win</div>
+        <div><em>Their model needs the firehose</em></div>
+        <div><em>Editorial can't scale to 1:1</em></div>
+        <div><em>Doesn't fix "what to do?"</em></div>
+        <div class="col-us"><strong>Reject 85%. Re-rank in real time.</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. TRACTION -->
+  <section class="slide" data-slide="11">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">10 · Traction — the slope</p>
+    <h2>Zero to live app, full taste loop, 23 real users — in six weeks.</h2>
+
+    <div class="timeline">
+      <div class="tl">
+        <div class="when">Week 1–2</div>
+        <h3>Catalog pipeline</h3>
+        <p>AI ingest from 6 sources, dedupe, scoring rubric, human review queue. 0 → 120 events.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 3–4</div>
+        <h3>Swipe + taste model</h3>
+        <p>Real-time re-rank, explicit feedback sheet, undo. The aha-loop in production.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 5</div>
+        <h3>Plan + calendar</h3>
+        <p>Going/saved sync, day-by-day plan, one-tap iOS calendar with venue address.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 6 — now</div>
+        <h3>23 real users</h3>
+        <p>Friends-of-friends, organic, zero spend. Onboarding polish + push notifications next.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. BUSINESS MODEL -->
+  <section class="slide" data-slide="12">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">11 · Business model</p>
+    <h2>Three revenue lanes. The taste-data asset sits underneath all three.</h2>
+
+    <div class="lanes">
+      <div class="lane">
+        <span class="tag">Near-term</span>
+        <h3>Booking referrals</h3>
+        <p>Resy, Ticketmaster, Dice affiliate fees on tickets and reservations. 5–15% per booking, zero ad inventory required, paid only on conversion.</p>
+      </div>
+      <div class="lane">
+        <span class="tag">Mid-term</span>
+        <h3>Curator placement</h3>
+        <p>Eater, Infatuation, top NYC creators run their own Sift lists. Brands and venues pay for placement inside curated decks. Native, not banner.</p>
+      </div>
+      <div class="lane">
+        <span class="tag">Long-term</span>
+        <h3>Sift Pro</h3>
+        <p>Free: 10 daily picks. Pro at $9/mo: unlimited deck, early access to drops, exclusive curator lists, priority booking. Margin lane, not volume.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. MARKET -->
+  <section class="slide" data-slide="13">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">12 · Market size — bottom-up, NYC only</p>
+    <h2>$345M ARR in NYC alone. The same playbook unlocks every other major city.</h2>
+
+    <div class="market-chain">
+      <div class="market-row">
+        <div class="step">Step 1</div>
+        <div class="desc">NYC residents aged 18–35 <em>(US Census, 2023)</em></div>
+        <div class="value">3.0M</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 2</div>
+        <div class="desc">× 50% in our target band <em>(active social spenders, post-college)</em></div>
+        <div class="value">1.5M</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 3</div>
+        <div class="desc">× 30% reachable in 5 yrs <em>(reasonable share of category)</em></div>
+        <div class="value">450K</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 4</div>
+        <div class="desc">× $200/wk going-out spend <em>(survey + Beli/Resy benchmarks)</em></div>
+        <div class="value">$4.7B GMV</div>
+      </div>
+      <div class="market-row total">
+        <div class="step">SOM</div>
+        <div class="desc">× ~7% blended take <em>(referrals + sponsored + Pro)</em> = <strong>annual revenue, NYC</strong></div>
+        <div class="value">$345M</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. GO-TO-MARKET -->
+  <section class="slide" data-slide="14">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">13 · Go-to-market</p>
+    <h2>Three phases. Each one earns the right to the next. CAC stays under $8 through phase 2.</h2>
+
+    <div class="gtm-grid">
+      <div class="gtm">
+        <div class="phase">Phase 1 · Now → Q3 2026</div>
+        <h3>NYC core</h3>
+        <ul>
+          <li>Friends-of-friends + creator seeding (Tier-2 NYC TikTok)</li>
+          <li>Curator partnerships — Eater + Infatuation lists inside the app</li>
+          <li>Referral loop: invite a friend, both unlock a list</li>
+          <li>Press: NY Mag, The Cut, Brooklyn Mag launch coverage</li>
+        </ul>
+        <div class="target">Target: <strong>10K MAU, 30% W4 retention, &lt;$3 CAC.</strong></div>
+      </div>
+      <div class="gtm">
+        <div class="phase">Phase 2 · Q4 2026 → Q1 2027</div>
+        <h3>NYC scale + revenue</h3>
+        <ul>
+          <li>Push-notification engine — weekend pickups + drop alerts</li>
+          <li>Paid social on validated creator content (LTV/CAC &gt; 3)</li>
+          <li>Booking-referral revenue turns on (Resy + Ticketmaster live)</li>
+          <li>Sift Pro tier in paid beta with NYC power users</li>
+        </ul>
+        <div class="target">Target: <strong>75K MAU NYC, 30% W4 retention, $40K MRR.</strong></div>
+      </div>
+      <div class="gtm">
+        <div class="phase">Phase 3 · 2027+</div>
+        <h3>Own NYC, then second city</h3>
+        <ul>
+          <li>Pro tier scales — $9/mo, target 5% paid conversion</li>
+          <li>NYC fully owned: 250K MAU, deep editorial moat</li>
+          <li>Second-city playbook scoped <em>only after NYC unit economics prove</em></li>
+          <li>Taste-graph API conversations with venues + ticketers</li>
+        </ul>
+        <div class="target">Target: <strong>NYC dominance · $4M ARR run-rate.</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. ROADMAP -->
+  <section class="slide" data-slide="15">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">14 · 18-month roadmap</p>
+    <h2>Quarter-by-quarter plan. Funded entirely by this round.</h2>
+
+    <div class="roadmap">
+      <div class="rm">
+        <div class="q">Q2 2026 · Now</div>
+        <h3>Polish &amp; pipeline</h3>
+        <ul>
+          <li>Onboarding polish + share loops</li>
+          <li>Push-notification engine v1</li>
+          <li>Automated weekly catalog refresh</li>
+          <li>23 → 1K NYC users</li>
+        </ul>
+      </div>
+      <div class="rm">
+        <div class="q">Q3 2026</div>
+        <h3>Android &amp; revenue</h3>
+        <ul>
+          <li>Android app launch</li>
+          <li>Resy + Ticketmaster booking referrals live</li>
+          <li>Hire NYC editorial + growth lead</li>
+          <li>1K → 10K NYC users</li>
+        </ul>
+      </div>
+      <div class="rm">
+        <div class="q">Q4 2026</div>
+        <h3>NYC depth + Pro</h3>
+        <ul>
+          <li>Sift Pro tier in beta with paid users</li>
+          <li>First sponsored curator placements</li>
+          <li>Booking-referral revenue compounding</li>
+          <li>75K MAU NYC, $40K MRR</li>
+        </ul>
+      </div>
+      <div class="rm">
+        <div class="q">Q1–Q2 2027</div>
+        <h3>Own NYC + Series A</h3>
+        <ul>
+          <li>NYC editorial moat — Eater + Infatuation native</li>
+          <li>Pro at 5% paid conversion</li>
+          <li>$4M ARR run-rate, A-ready metrics</li>
+          <li>Series A target: $5–8M to fund the second city</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. RISKS -->
+  <section class="slide" data-slide="16">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">15 · Risks &amp; mitigations</p>
+    <h2>What could break this — and exactly what we do about it.</h2>
+
+    <div class="risks">
+      <div class="risk">
+        <div class="risk-side problem">
+          <div class="label">Risk 01 · Distribution</div>
+          <h4>Cold-start beyond friends-of-friends.</h4>
+          <p>Every event app that's tried social has died bootstrapping the network. Paid acquisition without payback kills runway.</p>
+        </div>
+        <div class="risk-side fix">
+          <div class="label">Mitigation</div>
+          <h4>Creator + curator seeding, not paid social.</h4>
+          <p>Eater and Infatuation curate inside the app — their audience is already ours. Referral unlocks lists. Paid social only after LTV/CAC &gt; 3 on validated creator content.</p>
+        </div>
+      </div>
+
+      <div class="risk">
+        <div class="risk-side problem">
+          <div class="label">Risk 02 · Catalog scaling</div>
+          <h4>Hand-curation doesn't scale to 5 cities.</h4>
+          <p>The 85% reject rate depends on a human reviewer. Hiring 5 editorial leads is slow and expensive.</p>
+        </div>
+        <div class="risk-side fix">
+          <div class="label">Mitigation</div>
+          <h4>One editorial lead per city — same playbook.</h4>
+          <p>The AI rubric does 90% of the cut; the human reviews the keep-pile (~30 min/wk). One lead per city is the model. City-agnostic rubric is the moat.</p>
+        </div>
+      </div>
+
+      <div class="risk">
+        <div class="risk-side problem">
+          <div class="label">Risk 03 · Incumbent response</div>
+          <h4>Eventbrite or TikTok ships a "for you" feed.</h4>
+          <p>If a giant copies the loop, our window closes.</p>
+        </div>
+        <div class="risk-side fix">
+          <div class="label">Mitigation</div>
+          <h4>Their model can't reject the firehose.</h4>
+          <p>Eventbrite's economics need 100% inventory live. TikTok ranks creators, not events. The taste graph compounds — by month 6 the model is the moat, not the catalog.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. TEAM -->
+  <section class="slide" data-slide="17">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">16 · Team</p>
+    <h2>Builders who live the problem. Target demographic, in the product daily.</h2>
+    <p class="lead">Built solo so far — full-stack mobile, AI ingest pipeline, and editorial system. This round buys focused product velocity: iOS &amp; Android launch, push notifications, Sift Pro, and the curator/creator partnerships that drive growth.</p>
+
+    <div class="team-row team-grid-4">
+      <div class="person"><h3>Yi-Jie Cheng</h3></div>
+      <div class="person"><h3>Jary Tolentino</h3></div>
+      <div class="person"><h3>Irene Nam</h3></div>
+      <div class="person"><h3>Jerry Anthony Gu</h3></div>
+    </div>
+  </section>
+
+  <!-- 18. USE OF FUNDS -->
+  <section class="slide" data-slide="18">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">17 · Use of funds</p>
+    <h2>$750K SAFE. 18 months runway. Every dollar is line-itemed.</h2>
+
+    <div class="funds">
+      <div class="funds-list">
+        <div class="fund-row">
+          <div class="pct">40%</div>
+          <div class="what"><strong>Engineering + product</strong> — iOS &amp; Android launch, push-notification engine, automated ingest, Sift Pro infra.</div>
+          <div class="amt">$300K</div>
+        </div>
+        <div class="fund-row">
+          <div class="pct">30%</div>
+          <div class="what"><strong>Catalog + curation</strong> — content licensing, weekly curator stipends, editorial review tooling.</div>
+          <div class="amt">$225K</div>
+        </div>
+        <div class="fund-row">
+          <div class="pct">20%</div>
+          <div class="what"><strong>Marketing + growth</strong> — creator seeding, app-store assets, referral mechanics. <em>No paid social until LTV/CAC &gt; 3.</em></div>
+          <div class="amt">$150K</div>
+        </div>
+        <div class="fund-row">
+          <div class="pct">10%</div>
+          <div class="what"><strong>Operations</strong> — legal, infra, accounting, contractor coverage.</div>
+          <div class="amt">$75K</div>
+        </div>
+      </div>
+      <div class="funds-side">
+        <h3>What this round buys</h3>
+        <ul>
+          <li>NYC: 23 → 75K MAU</li>
+          <li>iOS &amp; Android live</li>
+          <li>Booking-referral revenue compounding</li>
+          <li>Sift Pro in paid beta</li>
+          <li>$40K MRR run-rate</li>
+          <li>A-round-ready metrics by Q2 2027</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. THE ASK / CLOSE -->
+  <section class="slide s-close" data-slide="19">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift" style="height: 56px; margin-bottom: 28px;">
+    <h1>$750K to make NYC <em>unmissable.</em></h1>
+    <p class="ask">
+      <strong>$750K SAFE</strong> · 18 months runway · funds iOS &amp; Android launch, push-notification engine, Sift Pro tier, and owning NYC end-to-end before any second city.
+    </p>
+    <p class="ask">NYC's event industry is enormous and the discovery problem is unsolved. Sift makes sure you actually go to the right ones — and is the first taste graph for events.</p>
+    <p class="sub">Thank you · questions?</p>
+  </section>
+
+</div>
+
+<div class="chrome">
+  <div>Sift · Leave-behind · Spring 2026</div>
+  <div class="chrome-dots" id="dots"></div>
+  <div>← → · F fullscreen · P print</div>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const dotsContainer = document.getElementById('dots');
+  let index = 0;
+
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    dotsContainer.appendChild(d);
+  });
+  const dots = Array.from(dotsContainer.querySelectorAll('.dot'));
+
+  function goTo(i) {
+    index = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === index));
+    dots.forEach((d, idx) => d.classList.toggle('active', idx === index));
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'n') goTo(index + 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'p') goTo(index - 1);
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    } else if (e.key === 'Home') goTo(0);
+    else if (e.key === 'End') goTo(slides.length - 1);
+    else if (e.key === 'P') window.print();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    goTo(index + 1);
+  });
+</script>
+</body>
+</html>

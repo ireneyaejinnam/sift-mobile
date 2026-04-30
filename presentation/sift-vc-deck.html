@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sift — VC pitch deck</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAF9F7;
+    --fg: #1A1F2B;
+    --muted: #6B6F76;
+    --subtle: #8E9196;
+    --border: #E8E6E3;
+    --primary: #5A7BAF;
+    --primary-light: rgba(90, 123, 175, 0.10);
+    --primary-ring: rgba(90, 123, 175, 0.32);
+    --accent: #E8AA6A;
+    --accent-soft: rgba(232, 170, 106, 0.14);
+    --good: #4F8A65;
+    --card: #FFFFFF;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .deck { position: relative; width: 100vw; height: 100vh; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 5vh 7vw;
+    opacity: 0; pointer-events: none;
+    transition: opacity 360ms ease;
+    overflow: hidden;
+  }
+  .slide.active { opacity: 1; pointer-events: auto; }
+
+  /* brand mark */
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 2.5vh; }
+  .brand img { height: 38px; width: auto; }
+  .brand-name { font-family: "DM Serif Display", serif; font-size: 22px; color: var(--fg); letter-spacing: -0.5px; }
+
+  /* slide numbering / chrome */
+  .chrome {
+    position: fixed; bottom: 22px; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 28px;
+    font-size: 12px; color: var(--subtle);
+    pointer-events: none;
+  }
+  .chrome-dots { display: flex; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--border); }
+  .dot.active { background: var(--primary); }
+
+  /* eyebrow + headline */
+  .eyebrow { font-size: 12px; color: var(--primary); font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 14px; }
+  h2 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(34px, 4.6vw, 60px);
+    line-height: 1.08; letter-spacing: -0.8px; color: var(--fg);
+    margin-bottom: 18px; max-width: 22ch;
+  }
+  .lead { font-size: 20px; color: var(--muted); line-height: 1.5; max-width: 760px; }
+
+  /* TITLE */
+  .s-title { justify-content: center; align-items: center; text-align: center; }
+  .s-title .hero-logo { height: 130px; margin-bottom: 14px; margin-top: -6vh; }
+  .s-title h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 1.05; letter-spacing: -1.2px; color: var(--fg);
+    margin-bottom: 18px; max-width: 18ch;
+  }
+  .s-title h1 em { font-style: italic; color: var(--primary); }
+  .s-title .tagline { font-size: 22px; color: var(--muted); font-weight: 400; max-width: 760px; line-height: 1.4; }
+  .s-title .byline { margin-top: 36px; font-size: 13px; color: var(--subtle); letter-spacing: 2px; text-transform: uppercase; }
+
+  /* PROBLEM — quote + stats */
+  .quote-inline { margin: 0 0 22px; border-left: 4px solid var(--accent); padding-left: 20px; max-width: 900px; }
+  .quote-inline p {
+    font-family: "DM Serif Display", serif; font-style: italic; font-weight: 400;
+    font-size: clamp(20px, 2vw, 28px); line-height: 1.32; color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .quote-inline cite { font-style: normal; font-size: 13px; color: var(--muted); letter-spacing: 0.3px; font-weight: 500; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 4px; max-width: 1100px; }
+  .stat-block { padding: 22px 24px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .stat-big { font-family: "DM Serif Display", serif; font-size: clamp(40px, 5.2vw, 68px); color: var(--primary); line-height: 1; margin-bottom: 10px; }
+  .stat-copy { font-size: 15px; color: var(--fg); line-height: 1.4; }
+  .stat-copy em { color: var(--muted); font-style: italic; }
+
+  /* INSIGHT — three columns */
+  .pos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 22px; max-width: 1200px; }
+  .pos {
+    padding: 26px 24px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .pos.us { background: var(--primary-light); border-color: var(--primary-ring); }
+  .pos .who {
+    font-size: 12px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .pos.us .who { color: var(--primary); }
+  .pos h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 26px; margin-bottom: 10px; letter-spacing: -0.5px; }
+  .pos p { font-size: 15px; color: var(--muted); line-height: 1.5; }
+  .pos.us p { color: var(--fg); }
+  .pos p strong { color: var(--primary); font-weight: 600; }
+
+  /* SOLUTION — three pillars */
+  .solution-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 26px; max-width: 1200px; }
+  .sol { padding: 30px 26px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .sol .sol-num {
+    display: inline-block; width: 34px; height: 34px; border-radius: 9999px;
+    background: var(--primary); color: white; text-align: center; line-height: 34px;
+    font-weight: 700; font-size: 14px; margin-bottom: 14px;
+  }
+  .sol h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 28px; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .sol p { font-size: 15px; color: var(--muted); line-height: 1.5; }
+
+  /* PROOF — the aha slide */
+  .proof-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; max-width: 1300px; }
+  .proof { padding: 24px 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); display: flex; flex-direction: column; gap: 10px; }
+  .proof.hero { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .proof .num { font-family: "DM Serif Display", serif; font-size: clamp(40px, 4.6vw, 64px); line-height: 1; color: var(--primary); letter-spacing: -1px; }
+  .proof.hero .num { color: var(--accent); }
+  .proof .label { font-size: 13px; line-height: 1.45; color: var(--muted); font-weight: 500; }
+  .proof.hero .label { color: rgba(255,255,255,0.85); }
+  .proof .label em { font-style: italic; color: var(--subtle); font-weight: 400; }
+  .proof.hero .label em { color: rgba(255,255,255,0.65); }
+  .proof .delta { font-size: 13px; font-weight: 600; color: var(--good); letter-spacing: 0.4px; }
+
+  .proof-foot {
+    margin-top: 22px; font-family: "DM Serif Display", serif; font-style: italic; font-weight: 400;
+    font-size: clamp(20px, 1.8vw, 28px); color: var(--fg); max-width: 64ch; line-height: 1.35;
+  }
+  .proof-foot strong { font-style: normal; color: var(--primary); font-weight: 600; }
+
+  /* EDGE 1 */
+  .edge-wrap { display: grid; grid-template-columns: 1.3fr 1fr; gap: 44px; margin-top: 18px; max-width: 1200px; align-items: start; }
+  .edge-main p.lead { margin-bottom: 14px; }
+  .edge-list { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+  .edge-list li { display: flex; gap: 14px; font-size: 16px; color: var(--fg); align-items: flex-start; line-height: 1.45; }
+  .edge-list li::before { content: ""; width: 6px; height: 6px; background: var(--accent); border-radius: 9999px; margin-top: 9px; flex-shrink: 0; }
+  .edge-stat {
+    background: var(--primary-light); border: 1px solid var(--primary-ring);
+    border-radius: 16px; padding: 28px 26px;
+  }
+  .edge-stat .stat-num { font-family: "DM Serif Display", serif; font-size: clamp(60px, 7vw, 100px); color: var(--primary); line-height: 0.9; margin-bottom: 12px; letter-spacing: -2px; }
+  .edge-stat .stat-label { font-size: 15px; color: var(--fg); font-weight: 500; line-height: 1.45; }
+  .edge-stat .stat-label em { font-style: italic; color: var(--muted); font-weight: 400; }
+
+  /* EDGE 2 — signals */
+  .signals-list { display: flex; flex-direction: column; gap: 14px; margin-top: 22px; max-width: 1100px; }
+  .signal-row {
+    display: grid; grid-template-columns: 340px 36px 1fr;
+    align-items: center; gap: 18px;
+    padding: 18px 24px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  }
+  .signal-action { font-size: 16px; font-weight: 600; color: var(--fg); }
+  .signal-arrow { font-size: 20px; color: var(--accent); font-weight: 500; text-align: center; }
+  .signal-effect { font-size: 16px; color: var(--muted); line-height: 1.4; }
+
+  /* SCREENS — phone mocks */
+  .screens-row {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 36px; margin-top: 26px; max-width: 1200px;
+    align-items: start; justify-items: center;
+  }
+  .screen {
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+    width: 100%;
+  }
+  .screen .phone {
+    position: relative; width: 100%; max-width: 260px;
+    border-radius: 38px; overflow: hidden;
+    background: #000;
+    border: 2px solid #1A1F2B;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.6) inset,
+      0 30px 50px -20px rgba(26, 31, 43, 0.35),
+      0 8px 18px -6px rgba(26, 31, 43, 0.18);
+    aspect-ratio: 9 / 19.5;
+  }
+  .screen .phone img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .screen .cap { text-align: center; }
+  .screen .cap-tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    color: var(--primary); background: var(--primary-light);
+    padding: 4px 10px; border-radius: 9999px; letter-spacing: 1.4px;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .screen .cap-title { font-family: "DM Serif Display", serif; font-size: 22px; letter-spacing: -0.4px; margin-bottom: 4px; }
+  .screen .cap-sub { font-size: 13px; color: var(--muted); line-height: 1.45; max-width: 28ch; margin: 0 auto; }
+
+  /* DEMO transition */
+  .s-demo { justify-content: center; align-items: center; text-align: center; }
+  .s-demo h2 { margin-bottom: 14px; max-width: none; }
+  .s-demo .demo-caption { font-size: 22px; color: var(--muted); margin-bottom: 44px; font-weight: 400; max-width: 56ch; }
+  .demo-pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 16px 28px; border-radius: 9999px;
+    background: var(--primary); color: white;
+    font-size: 17px; font-weight: 500; letter-spacing: 0.3px;
+  }
+  .demo-pill::before {
+    content: ""; width: 9px; height: 9px; border-radius: 9999px; background: #7DE37A;
+    box-shadow: 0 0 12px rgba(125,227,122,0.7);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+
+  /* TRACTION timeline */
+  .timeline { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 22px; max-width: 1300px; }
+  .tl { padding: 22px 22px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); }
+  .tl .when { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 1.4px; text-transform: uppercase; }
+  .tl h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; margin-top: 8px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .tl p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* MARKET / WHY NOW */
+  .why-now { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 22px; max-width: 1200px; }
+  .wn { padding: 26px 24px; border-left: 3px solid var(--accent); background: var(--card); border-radius: 0 12px 12px 0; }
+  .wn h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 22px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .wn p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* BIZ — revenue lanes */
+  .lanes { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 22px; max-width: 1200px; }
+  .lane { padding: 26px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+  .lane .tag {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    color: var(--primary); background: var(--primary-light);
+    padding: 4px 10px; border-radius: 9999px; letter-spacing: 1px; margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+  .lane h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 24px; margin-bottom: 8px; letter-spacing: -0.4px; }
+  .lane p { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+  /* TEAM */
+  .team-row { display: grid; grid-template-columns: repeat(2,1fr); gap: 22px; margin-top: 22px; max-width: 1100px; }
+  .team-row.team-grid-4 { grid-template-columns: repeat(4,1fr); max-width: 1300px; gap: 18px; }
+  .person { padding: 36px 28px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); display: flex; align-items: center; justify-content: center; min-height: 160px; }
+  .person h3 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: clamp(24px, 2.2vw, 32px); letter-spacing: -0.5px; text-align: center; line-height: 1.15; }
+  .person .role { font-size: 12px; color: var(--primary); letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; margin-top: 6px; }
+  .person p { font-size: 15px; color: var(--muted); line-height: 1.5; margin-top: 14px; }
+
+  /* CLOSE */
+  .s-close { justify-content: center; align-items: center; text-align: center; }
+  .s-close h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(52px, 7vw, 96px); letter-spacing: -1px; line-height: 1.05;
+    max-width: 16ch; margin-bottom: 24px;
+  }
+  .s-close h1 em { font-style: italic; color: var(--primary); }
+  .s-close .ask { font-size: 19px; color: var(--muted); max-width: 64ch; line-height: 1.5; }
+  .s-close .ask strong { color: var(--fg); font-weight: 600; }
+  .s-close .ask + .ask { margin-top: 16px; }
+  .s-close .sub { margin-top: 5vh; font-size: 14px; color: var(--subtle); letter-spacing: 2px; text-transform: uppercase; }
+
+  /* RASKIN — change statement */
+  .s-raskin { justify-content: center; align-items: flex-start; }
+  .s-raskin .raskin-eyebrow {
+    font-size: 12px; color: var(--primary); font-weight: 600;
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 28px;
+  }
+  .s-raskin h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(44px, 5.4vw, 80px); line-height: 1.1; letter-spacing: -1.2px;
+    max-width: 22ch; margin-bottom: 20px;
+  }
+  .s-raskin h1 em { font-style: italic; color: var(--primary); }
+  .s-raskin .raskin-line {
+    display: flex; align-items: baseline; gap: 18px;
+    font-family: "DM Serif Display", serif; font-size: clamp(40px, 4.6vw, 68px);
+    line-height: 1.15; letter-spacing: -0.8px; margin-bottom: 10px;
+  }
+  .s-raskin .raskin-when {
+    font-family: "Inter", sans-serif; font-weight: 700; font-size: 14px;
+    color: var(--accent); letter-spacing: 2px; text-transform: uppercase;
+    flex-shrink: 0; min-width: 110px;
+  }
+  .s-raskin .raskin-foot {
+    margin-top: 32px; font-size: 19px; color: var(--muted); line-height: 1.5; max-width: 64ch;
+  }
+
+  /* COMPETITION — matrix */
+  .matrix {
+    margin-top: 22px; max-width: 1200px;
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    background: var(--card);
+  }
+  .matrix-row {
+    display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .matrix-row:last-child { border-bottom: 0; }
+  .matrix-row > div {
+    padding: 16px 18px; font-size: 14px; color: var(--fg);
+    display: flex; align-items: center; line-height: 1.4;
+  }
+  .matrix-row.head > div {
+    background: var(--bg); font-size: 12px; font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted);
+  }
+  .matrix-row.head .col-us { color: var(--primary); }
+  .matrix-row > .col-label { font-weight: 600; color: var(--fg); background: var(--bg); }
+  .matrix-row > .col-us { background: var(--primary-light); color: var(--fg); font-weight: 500; }
+  .check-y { color: var(--good); font-weight: 700; }
+  .check-n { color: var(--subtle); font-weight: 500; }
+
+  /* MARKET — bottom-up math chain */
+  .market-chain {
+    display: flex; flex-direction: column; gap: 0;
+    margin-top: 22px; max-width: 1100px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  }
+  .market-row {
+    display: grid; grid-template-columns: 240px 1fr 220px;
+    align-items: center; gap: 16px;
+    padding: 22px 26px;
+    border-bottom: 1px solid var(--border);
+  }
+  .market-row:last-child { border-bottom: 0; background: var(--primary-light); }
+  .market-row.total { background: var(--primary-light); }
+  .market-row .step {
+    font-size: 12px; font-weight: 700; color: var(--accent);
+    letter-spacing: 1.6px; text-transform: uppercase;
+  }
+  .market-row .desc { font-size: 16px; color: var(--fg); line-height: 1.4; }
+  .market-row .desc em { color: var(--muted); font-style: italic; }
+  .market-row .value {
+    font-family: "DM Serif Display", serif; font-size: 32px;
+    color: var(--primary); text-align: right; letter-spacing: -0.5px; line-height: 1;
+  }
+  .market-row.total .value { color: var(--primary); font-size: 40px; }
+  .market-row.total .step { color: var(--primary); }
+
+  /* Print / PDF */
+  @page { size: 13.333in 7.5in; margin: 0; }
+  @media print {
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    html, body { height: auto; overflow: visible; background: var(--bg) !important; }
+    .chrome { display: none !important; }
+    .slide {
+      position: relative; inset: auto; opacity: 1 !important; pointer-events: auto;
+      page-break-after: always; break-after: page;
+      width: 13.333in; height: 7.5in;
+      box-sizing: border-box; background: var(--bg) !important;
+    }
+    .slide:last-child { page-break-after: auto; break-after: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- 1. TITLE / COVER -->
+  <section class="slide s-title active" data-slide="1">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift">
+    <h1>NYC events, <em>sifted</em> just for you.</h1>
+    <p class="tagline">A taste-first event app for young New Yorkers — curated, swipeable, and gets sharper every weekend.</p>
+    <p class="byline">The Sift Team · Spring 2026 · seed</p>
+  </section>
+
+  <!-- 2. RASKIN OPENING — change statement -->
+  <section class="slide s-raskin" data-slide="2">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="raskin-eyebrow">01 · The change</p>
+    <div class="raskin-line"><span class="raskin-when">Today</span><span>You open <em style="font-style:italic;color:var(--muted);">six apps</em> and stay home.</span></div>
+    <div class="raskin-line"><span class="raskin-when">Tomorrow</span><span>You open Sift and <em>your night plans itself.</em></span></div>
+    <p class="raskin-foot">NYC's event industry is enormous and the discovery problem is unsolved. The first taste graph for events wins the city — and the category.</p>
+  </section>
+
+  <!-- 3. PROBLEM -->
+  <section class="slide" data-slide="3">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">02 · The problem</p>
+    <h2>NYC has infinite events. None of them feel like you.</h2>
+
+    <blockquote class="quote-inline">
+      <p>"We spend most of our time looking into activities that we end up not even going to. We just get overwhelmed and give up."</p>
+      <cite>— Sam, 23. One of 20 user interviews.</cite>
+    </blockquote>
+
+    <blockquote class="quote-inline" style="border-left-color: var(--primary); margin-bottom: 26px;">
+      <p>"Honestly? I don't want another social media app. I just want to know what's good this weekend."</p>
+      <cite>— Recurring theme across 20 interviews. Nobody asked for a feed, a follow graph, or another inbox.</cite>
+    </blockquote>
+
+    <div class="stats-row">
+      <div class="stat-block">
+        <div class="stat-big">87%</div>
+        <div class="stat-copy">use 3+ apps to find things to do <em>(Eventbrite + TimeOut + IG + Resy + …)</em></div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-big">#1</div>
+        <div class="stat-copy">complaint heard: <em>"too many options, not enough good ones."</em></div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-big">0</div>
+        <div class="stat-copy">interview subjects asked for <em>another social feed</em> — they want answers, not another timeline.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. WHY NOW -->
+  <section class="slide" data-slide="4">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">03 · Why now</p>
+    <h2>The conditions for a taste graph just landed.</h2>
+    <p class="lead">Three shifts converge in 2026. None of them existed five years ago.</p>
+
+    <div class="why-now">
+      <div class="wn">
+        <h3>AI curation got cheap</h3>
+        <p>An LLM rubric that scores 1,000 events for audience fit costs &lt;$5/wk. The same job needed a five-person editorial team in 2020.</p>
+      </div>
+      <div class="wn">
+        <h3>Taste graphs went mainstream</h3>
+        <p>Beli, TikTok, and Spotify trained a generation to swipe-rate-share. Users now <em>expect</em> recs to learn from them — events haven't caught up.</p>
+      </div>
+      <div class="wn">
+        <h3>Aggregators are stale</h3>
+        <p>Eventbrite hasn't shipped a meaningful UX change in 5 years. Editorial sites still publish by hand. None personalize. The window is open <em>now</em>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. SOLUTION -->
+  <section class="slide" data-slide="5">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">04 · The solution</p>
+    <h2>Sift curates. You swipe. It learns.</h2>
+    <p class="lead">Not a feed. Not a follow graph. Not another social app. A taste-maker built and tuned for you, one swipe at a time.</p>
+
+    <div class="solution-grid">
+      <div class="sol">
+        <span class="sol-num">1</span>
+        <h3>Discover</h3>
+        <p>One curated card at a time. Right = going. Left = pass. No infinite feed, no FOMO doom-scroll.</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">2</span>
+        <h3>Learn</h3>
+        <p>Every swipe, save, and "more like this" tunes the deck instantly. No nightly batch, no cold-start wait.</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">3</span>
+        <h3>Plan</h3>
+        <p>Save, sequence the night, one tap to Apple Calendar with the venue address. Done.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. PRODUCT — aha proof, sets up demo -->
+  <section class="slide" data-slide="6">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">05 · The product — this isn't a mock</p>
+    <h2>Real catalog. Real users. Real swipes.</h2>
+
+    <div class="proof-grid">
+      <div class="proof hero">
+        <div class="num">120+</div>
+        <div class="label">hand-qualified NYC events live in production right now — refreshed weekly.</div>
+      </div>
+      <div class="proof">
+        <div class="num">85%</div>
+        <div class="label">of ingested events <em>rejected</em> by our AI rubric + human review.</div>
+      </div>
+      <div class="proof">
+        <div class="num">6</div>
+        <div class="label">tastemaker sources — Ticketmaster, Eater, Infatuation, TimeOut, Resy Hit List, Dice.</div>
+      </div>
+      <div class="proof">
+        <div class="num">23</div>
+        <div class="label">real users with real taste profiles — swiping right now, not a waitlist.</div>
+      </div>
+    </div>
+
+    <p class="proof-foot">
+      The hard part — <strong>a curated NYC catalog</strong> — already exists. The next 90 seconds prove the loop on top of it works.
+    </p>
+  </section>
+
+  <!-- 7. PRODUCT — what it actually looks like -->
+  <section class="slide" data-slide="7">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">05b · Inside the app</p>
+    <h2>Open it. Tell it your vibe. Swipe.</h2>
+
+    <div class="screens-row">
+      <div class="screen">
+        <div class="phone"><img src="screens/splash.png" alt="Sift splash"></div>
+        <div class="cap">
+          <span class="cap-tag">Open</span>
+          <div class="cap-title">Find your vibe</div>
+          <div class="cap-sub">A taste-first event app, built for NYC.</div>
+        </div>
+      </div>
+      <div class="screen">
+        <div class="phone"><img src="screens/mood.png" alt="Mood chooser"></div>
+        <div class="cap">
+          <span class="cap-tag">Tune</span>
+          <div class="cap-title">Pick a mood</div>
+          <div class="cap-sub">One tap seeds the deck. Or "anything works" — the swipes do the rest.</div>
+        </div>
+      </div>
+      <div class="screen">
+        <div class="phone"><img src="screens/discover.png" alt="Discover card"></div>
+        <div class="cap">
+          <span class="cap-tag">Swipe</span>
+          <div class="cap-title">One curated card</div>
+          <div class="cap-sub">Real NYC events — Frieze, not "salsa night at a hotel bar."</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. DEMO transition -->
+  <section class="slide s-demo" data-slide="8">
+    <p class="eyebrow">Live demo · ~90 seconds</p>
+    <h2>Watch Sift think.</h2>
+    <p class="demo-caption">Cold deck → swipe right → the next three cards lean into your taste. In real time. On a real phone.</p>
+    <div class="demo-pill">Switch to device</div>
+  </section>
+
+  <!-- 9. COMPETITION (incl. status quo) -->
+  <section class="slide" data-slide="9">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">06 · Competition &amp; status quo</p>
+    <h2>Volume vs. editorial vs. taste. We're the only taste play.</h2>
+
+    <div class="matrix">
+      <div class="matrix-row head">
+        <div></div>
+        <div>Eventbrite / Dice</div>
+        <div>TimeOut / Infatuation</div>
+        <div>Group chat <em style="text-transform:none;letter-spacing:0;color:var(--subtle);font-style:italic;font-weight:500;">(status quo)</em></div>
+        <div class="col-us">Sift</div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Curated</div>
+        <div><span class="check-n">✗ firehose</span></div>
+        <div><span class="check-y">✓ static</span></div>
+        <div><span class="check-y">✓ by friends</span></div>
+        <div class="col-us"><span class="check-y">✓ AI + editor</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Personalized</div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div class="col-us"><span class="check-y">✓ real-time</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">One-tap to plan</div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗</span></div>
+        <div><span class="check-n">✗ texts</span></div>
+        <div class="col-us"><span class="check-y">✓ calendar export</span></div>
+      </div>
+      <div class="matrix-row">
+        <div class="col-label">Why we win</div>
+        <div><em>Their model needs the firehose</em></div>
+        <div><em>Editorial can't scale to 1:1</em></div>
+        <div><em>Doesn't fix "what to do?"</em></div>
+        <div class="col-us"><strong>Reject 85%. Re-rank in real time.</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. TRACTION (the slope) -->
+  <section class="slide" data-slide="10">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">07 · Traction — the slope</p>
+    <h2>From zero to live app in six weeks.</h2>
+
+    <div class="timeline">
+      <div class="tl">
+        <div class="when">Week 1–2</div>
+        <h3>Catalog pipeline</h3>
+        <p>AI ingest from 6 sources, dedupe, scoring rubric, human review queue. 0 → 120 events.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 3–4</div>
+        <h3>Swipe + taste model</h3>
+        <p>Real-time re-rank, explicit feedback sheet, undo. The aha-loop you just saw.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 5</div>
+        <h3>Plan + calendar</h3>
+        <p>Going/saved sync, day-by-day plan, one-tap iOS calendar with the venue address.</p>
+      </div>
+      <div class="tl">
+        <div class="when">Week 6 — now</div>
+        <h3>23 real users</h3>
+        <p>Friends-of-friends, organic, zero spend. Onboarding polish + push notifications next.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. BUSINESS MODEL -->
+  <section class="slide" data-slide="11">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">08 · Business model</p>
+    <h2>Three lanes. Taste data is the asset.</h2>
+
+    <div class="lanes">
+      <div class="lane">
+        <span class="tag">Near-term</span>
+        <h3>Booking referrals</h3>
+        <p>Resy, Ticketmaster, Dice affiliate fees on tickets and reservations. 5–15% per booking, zero ad inventory.</p>
+      </div>
+      <div class="lane">
+        <span class="tag">Mid-term</span>
+        <h3>Curator placement</h3>
+        <p>Eater, Infatuation, top NYC creators run their own Sift lists. Brands pay for placement inside curated decks.</p>
+      </div>
+      <div class="lane">
+        <span class="tag">Long-term</span>
+        <h3>Sift Pro</h3>
+        <p>Free: 10 daily picks. Pro at $9/mo: unlimited deck, early access to drops, exclusive curator lists.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. MARKET SIZE — bottom-up -->
+  <section class="slide" data-slide="12">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">09 · Market size — bottom-up, NYC only</p>
+    <h2>$345M ARR opportunity in NYC alone.</h2>
+
+    <div class="market-chain">
+      <div class="market-row">
+        <div class="step">Step 1</div>
+        <div class="desc">NYC residents aged 18–35 <em>(US Census, 2023)</em></div>
+        <div class="value">3.0M</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 2</div>
+        <div class="desc">× 50% in our target band <em>(active social spenders, post-college)</em></div>
+        <div class="value">1.5M</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 3</div>
+        <div class="desc">× 30% reachable in 5 yrs <em>(reasonable share of category)</em></div>
+        <div class="value">450K</div>
+      </div>
+      <div class="market-row">
+        <div class="step">Step 4</div>
+        <div class="desc">× $200/wk going-out spend <em>(survey + Beli/Resy benchmarks)</em></div>
+        <div class="value">$4.7B GMV</div>
+      </div>
+      <div class="market-row total">
+        <div class="step">SOM</div>
+        <div class="desc">× ~7% blended take <em>(referrals + sponsored + Pro)</em> = <strong>annual revenue, NYC</strong></div>
+        <div class="value">$345M</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. TEAM -->
+  <section class="slide" data-slide="13">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">10 · Team</p>
+    <h2>Builders who live the problem.</h2>
+
+    <div class="team-row team-grid-4">
+      <div class="person"><h3>Yi-Jie Cheng</h3></div>
+      <div class="person"><h3>Jary Tolentino</h3></div>
+      <div class="person"><h3>Irene Nam</h3></div>
+      <div class="person"><h3>Jerry Anthony Gu</h3></div>
+    </div>
+  </section>
+
+  <!-- 14. THE ASK -->
+  <section class="slide s-close" data-slide="14">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift" style="height: 56px; margin-bottom: 28px;">
+    <h1>$750K to make NYC <em>unmissable.</em></h1>
+    <p class="ask">
+      <strong>$750K SAFE</strong> · 18 months runway · funds iOS &amp; Android launch, push-notification engine, Sift Pro tier, and owning NYC end-to-end before any second city.
+    </p>
+    <p class="ask">NYC has more events than ever. Sift makes sure you actually go to the right ones.</p>
+    <p class="sub">Thank you · questions?</p>
+  </section>
+
+</div>
+
+<div class="chrome">
+  <div>Sift · VC pitch · Spring 2026</div>
+  <div class="chrome-dots" id="dots"></div>
+  <div>← → · F fullscreen · P print</div>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const dotsContainer = document.getElementById('dots');
+  let index = 0;
+
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    dotsContainer.appendChild(d);
+  });
+  const dots = Array.from(dotsContainer.querySelectorAll('.dot'));
+
+  function goTo(i) {
+    index = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === index));
+    dots.forEach((d, idx) => d.classList.toggle('active', idx === index));
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'n') goTo(index + 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'p') goTo(index - 1);
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    } else if (e.key === 'Home') goTo(0);
+    else if (e.key === 'End') goTo(slides.length - 1);
+    else if (e.key === 'P') window.print();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    goTo(index + 1);
+  });
+</script>
+</body>
+</html>

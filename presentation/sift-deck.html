@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sift — NYC, curated for you.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAF9F7;
+    --fg: #1A1F2B;
+    --muted: #6B6F76;
+    --subtle: #8E9196;
+    --border: #E8E6E3;
+    --primary: #5A7BAF;
+    --primary-light: rgba(90, 123, 175, 0.1);
+    --accent: #E8AA6A;
+    --card: #FFFFFF;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; background: var(--bg); color: var(--fg); font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
+
+  .deck { position: relative; width: 100vw; height: 100vh; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 5vh 7vw;
+    opacity: 0; pointer-events: none;
+    transition: opacity 360ms ease;
+    overflow: hidden;
+  }
+  .slide.active { opacity: 1; pointer-events: auto; }
+
+  /* brand mark */
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 2.5vh; }
+  .brand img { height: 38px; width: auto; }
+  .brand-name { font-family: "DM Serif Display", serif; font-size: 22px; color: var(--fg); letter-spacing: -0.5px; }
+
+  /* slide numbering / chrome */
+  .chrome {
+    position: fixed; bottom: 22px; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 28px;
+    font-size: 12px; color: var(--subtle);
+    pointer-events: none;
+  }
+  .chrome-dots { display: flex; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--border); }
+  .dot.active { background: var(--primary); }
+
+  /* ==== Slide 1 — Title ==== */
+  .s-title { justify-content: center; align-items: center; text-align: center; }
+  .s-title .hero-logo { height: 160px; margin-bottom: 12px; margin-top: -8vh; }
+  .s-title h1 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 1.05; letter-spacing: -1.2px; color: var(--fg);
+    margin-bottom: 18px;
+  }
+  .s-title .tagline { font-size: 22px; color: var(--muted); font-weight: 400; max-width: 760px; line-height: 1.4; }
+  .s-title .byline { margin-top: 36px; font-size: 14px; color: var(--subtle); letter-spacing: 2px; text-transform: uppercase; }
+
+  /* ==== General slide headers ==== */
+  .eyebrow { font-size: 12px; color: var(--primary); font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 14px; }
+  h2 {
+    font-family: "DM Serif Display", serif; font-weight: 400;
+    font-size: clamp(34px, 4.6vw, 60px);
+    line-height: 1.1; letter-spacing: -0.8px; color: var(--fg);
+    margin-bottom: 20px; max-width: 18ch;
+  }
+  .lead { font-size: 20px; color: var(--muted); line-height: 1.5; max-width: 760px; }
+
+  /* ==== Quotes slide ==== */
+  .quotes-wrap { display: flex; flex-direction: column; gap: 24px; margin-top: 14px; }
+  .quote {
+    background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    padding: 24px 28px; border-radius: 10px;
+    max-width: 860px;
+  }
+  .quote p {
+    font-family: "DM Serif Display", serif; font-style: italic; font-weight: 400;
+    font-size: 24px; line-height: 1.35; color: var(--fg); margin-bottom: 10px;
+  }
+  .quote cite { font-style: normal; font-size: 13px; color: var(--subtle); letter-spacing: 0.5px; }
+
+  /* ==== Inline quote (under the problem headline) ==== */
+  .quote-inline {
+    margin: 0 0 22px;
+    border-left: 4px solid var(--accent);
+    padding-left: 20px;
+    max-width: 900px;
+  }
+  .quote-inline p {
+    font-family: "DM Serif Display", serif; font-style: italic; font-weight: 400;
+    font-size: clamp(18px, 1.9vw, 24px); line-height: 1.35; color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .quote-inline cite {
+    font-style: normal; font-size: 13px; color: var(--muted);
+    letter-spacing: 0.3px; font-weight: 500;
+  }
+
+  /* ==== Stats row (problem slide) ==== */
+  .stats-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    margin-top: 4px; max-width: 1000px;
+  }
+  .stat-block {
+    padding: 22px 24px; border-radius: 14px;
+    background: var(--card); border: 1px solid var(--border);
+  }
+  .stat-big {
+    font-family: "DM Serif Display", serif;
+    font-size: clamp(40px, 5.5vw, 72px); color: var(--primary);
+    line-height: 1; margin-bottom: 10px;
+  }
+  .stat-copy {
+    font-size: 16px; color: var(--fg); line-height: 1.4;
+  }
+  .stat-copy em {
+    color: var(--muted); font-style: italic;
+  }
+
+  /* ==== Signals list (edge 2) ==== */
+  .signals-list {
+    display: flex; flex-direction: column; gap: 14px; margin-top: 6px;
+  }
+  .signals-list-wide { margin-top: 30px; max-width: 1100px; }
+  .signal-row {
+    display: grid; grid-template-columns: 320px 36px 1fr;
+    align-items: center; gap: 18px;
+    padding: 18px 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .signal-action {
+    font-size: 16px; font-weight: 600; color: var(--fg);
+  }
+  .signal-arrow {
+    font-size: 20px; color: var(--accent); font-weight: 500; text-align: center;
+  }
+  .signal-effect {
+    font-size: 16px; color: var(--muted); line-height: 1.4;
+  }
+
+  /* ==== Problem slide ==== */
+  .problems { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 20px; max-width: 1100px; }
+  .problem { padding: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .problem .p-head { font-size: 13px; font-weight: 600; color: var(--primary); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
+  .problem h3 { font-size: 22px; font-weight: 600; margin-bottom: 10px; color: var(--fg); line-height: 1.25; }
+  .problem p { font-size: 15px; color: var(--muted); line-height: 1.5; }
+  .problem-footer { margin-top: 40px; font-size: 24px; color: var(--fg); font-weight: 500; max-width: 860px; }
+  .problem-footer strong { color: var(--accent); }
+
+  /* ==== Solution slide ==== */
+  .solution-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 28px; max-width: 1100px; }
+  .sol {
+    padding: 32px 24px; border-radius: 14px; background: var(--card);
+    border: 1px solid var(--border); text-align: left;
+  }
+  .sol .sol-num {
+    display: inline-block; width: 34px; height: 34px; border-radius: 9999px;
+    background: var(--primary); color: white;
+    text-align: center; line-height: 34px; font-weight: 700; font-size: 14px; margin-bottom: 16px;
+  }
+  .sol h3 { font-size: 24px; font-weight: 600; margin-bottom: 8px; color: var(--fg); }
+  .sol p { font-size: 15px; color: var(--muted); line-height: 1.5; }
+
+  /* ==== Edge slides ==== */
+  .edge-wrap { display: flex; gap: 48px; align-items: flex-start; margin-top: 18px; max-width: 1100px; }
+  .edge-main { flex: 1; }
+  .edge-main h3 { font-size: 34px; font-weight: 600; line-height: 1.2; margin-bottom: 20px; color: var(--fg); max-width: 16ch; }
+  .edge-main p { font-size: 17px; color: var(--muted); line-height: 1.55; margin-bottom: 16px; max-width: 56ch; }
+  .edge-stat {
+    background: var(--primary-light); border: 1px solid rgba(90,123,175,0.3);
+    border-radius: 14px; padding: 22px; margin-top: 12px; max-width: 60ch;
+  }
+  .edge-stat .stat-num { font-family: "DM Serif Display", serif; font-size: 48px; color: var(--primary); line-height: 1; margin-bottom: 6px; }
+  .edge-stat .stat-label { font-size: 14px; color: var(--fg); font-weight: 500; line-height: 1.4; }
+
+  .edge-list { list-style: none; display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+  .edge-list li { display: flex; gap: 14px; font-size: 17px; color: var(--fg); align-items: flex-start; }
+  .edge-list li::before {
+    content: ""; width: 6px; height: 6px; background: var(--accent);
+    border-radius: 9999px; margin-top: 11px; flex-shrink: 0;
+  }
+
+  /* ==== Demo slide ==== */
+  .s-demo { justify-content: center; align-items: center; text-align: center; }
+  .s-demo h2 { margin-bottom: 16px; max-width: none; }
+  .s-demo .demo-caption { font-size: 22px; color: var(--muted); margin-bottom: 48px; font-weight: 400; }
+  .demo-pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 16px 28px; border-radius: 9999px;
+    background: var(--primary); color: white;
+    font-size: 17px; font-weight: 500; letter-spacing: 0.3px;
+  }
+  .demo-pill::before {
+    content: ""; width: 9px; height: 9px; border-radius: 9999px; background: #7DE37A;
+    box-shadow: 0 0 12px rgba(125,227,122,0.7);
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+
+  /* ==== Close slide ==== */
+  .s-close { justify-content: center; align-items: center; text-align: center; }
+  .s-close h1 {
+    font-family: "DM Serif Display", serif;
+    font-size: clamp(52px, 7vw, 96px); letter-spacing: -1px; line-height: 1.05;
+    max-width: 14ch; margin-bottom: 32px;
+  }
+  .s-close .sub { font-size: 20px; color: var(--muted); }
+
+  /* ==== Print styles for PDF export ==== */
+  @page {
+    size: 13.333in 7.5in;  /* 1920×1080 at 144dpi — standard slide aspect */
+    margin: 0;
+  }
+  @media print {
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    html, body {
+      height: auto;
+      overflow: visible;
+      background: var(--bg) !important;
+    }
+    .chrome { display: none !important; }
+    .slide {
+      position: relative;
+      inset: auto;
+      opacity: 1 !important;
+      pointer-events: auto;
+      page-break-after: always;
+      break-after: page;
+      width: 13.333in;
+      height: 7.5in;
+      box-sizing: border-box;
+      background: var(--bg) !important;
+    }
+    .slide:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- ============================================== -->
+  <!-- SLIDE 1 — Title                                -->
+  <!-- ============================================== -->
+  <section class="slide s-title active" data-slide="1">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift">
+    <h1>NYC events, sifted just for you.</h1>
+    <p class="tagline">The place to find what's worth doing in New York City.</p>
+    <p class="byline">The Sift Team · Spring 2026</p>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 2 — Problem + quote (merged)             -->
+  <!-- ============================================== -->
+  <section class="slide" data-slide="2">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">The problem</p>
+    <h2>NYC has infinite events. None of them feel like you.</h2>
+
+    <blockquote class="quote-inline">
+      <p>"We spend most of our time looking into activities that we end up not even going to anymore. We just get overwhelmed and kind of give up."</p>
+      <cite>— Sam, 23</cite>
+    </blockquote>
+
+    <div class="stats-row">
+      <div class="stat-block">
+        <div class="stat-big">87%</div>
+        <div class="stat-copy">use 3+ platforms to find things to do</div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-big">#1</div>
+        <div class="stat-copy">pain point: <em>"too many options, not enough good ones"</em></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 3 — Solution                             -->
+  <!-- ============================================== -->
+  <section class="slide" data-slide="3">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">Our solution</p>
+    <h2>Sift curates. You swipe. It learns.</h2>
+    <p class="lead">A taste-maker — built and tuned for you one swipe at a time.</p>
+
+    <div class="solution-grid">
+      <div class="sol">
+        <span class="sol-num">1</span>
+        <h3>Discover</h3>
+        <p>Swipe through events hand-picked for young New Yorkers. No underground firehose. No generic Top 10.</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">2</span>
+        <h3>Plan</h3>
+        <p>Save the ones you want, sequence the night, one tap to Apple Calendar. Done.</p>
+      </div>
+      <div class="sol">
+        <span class="sol-num">3</span>
+        <h3>Learn</h3>
+        <p>Every swipe sharpens tomorrow's feed. By swipe 20 the app looks nothing like anyone else's.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 4 — Our edge #1 — Curated catalog        -->
+  <!-- ============================================== -->
+  <section class="slide" data-slide="4">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">Our edge · 1 of 2</p>
+    <h2>A curated catalog.</h2>
+    <p class="lead">Goodbye, noise. We ingest everything — then reject 85% for you.</p>
+
+    <div class="edge-wrap">
+      <div class="edge-main">
+        <p>Our AI applies an editorial rubric — audience fit, venue quality, verified dates and prices, no fabricated events — across Ticketmaster, Eater, The Infatuation, TimeOut, Resy Hit List, and Dice.</p>
+        <ul class="edge-list">
+          <li>120+ hand-qualified NYC events, always current</li>
+          <li>Refreshed weekly from six tastemaker sources</li>
+          <li>Zero underground filler — every event fits the 18–35 NYC young-professional crowd</li>
+        </ul>
+      </div>
+      <div class="edge-stat">
+        <div class="stat-num">85%</div>
+        <div class="stat-label">of ingested events get rejected — <br>the constraint <em>is</em> the product.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 5 — Our edge #2 — Learning recs          -->
+  <!-- ============================================== -->
+  <section class="slide" data-slide="5">
+    <div class="brand"><img src="../assets/sift-logo-v3.png" alt=""><span class="brand-name">Sift</span></div>
+    <p class="eyebrow">Our edge · 2 of 2</p>
+    <h2>An algorithm that learns your taste.</h2>
+    <p class="lead">Every signal tunes the deck in real time — no nightly batch, no cold waiting period.</p>
+
+    <div class="signals-list signals-list-wide">
+      <div class="signal-row">
+        <div class="signal-action">Swipe left / right</div>
+        <div class="signal-arrow">→</div>
+        <div class="signal-effect">drop or save this event; nudge the vibe.</div>
+      </div>
+      <div class="signal-row">
+        <div class="signal-action">"More like this" / "Not my thing"</div>
+        <div class="signal-arrow">→</div>
+        <div class="signal-effect">explicit vibe tuning on the whole category.</div>
+      </div>
+      <div class="signal-row">
+        <div class="signal-action">Save or mark going</div>
+        <div class="signal-arrow">→</div>
+        <div class="signal-effect">boost similar events to the top of the deck.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 6 — Demo transition                      -->
+  <!-- ============================================== -->
+  <section class="slide s-demo" data-slide="6">
+    <p class="eyebrow">Live demo</p>
+    <h2>Watch Sift think.</h2>
+    <p class="demo-caption">Curation, swipe learning, plan, export — under two minutes.</p>
+    <div class="demo-pill">Switch to device</div>
+  </section>
+
+  <!-- ============================================== -->
+  <!-- SLIDE 7 — Close / thanks                       -->
+  <!-- ============================================== -->
+  <section class="slide s-close" data-slide="7">
+    <img class="hero-logo" src="../assets/sift-logo-v3.png" alt="Sift" style="height: 64px; margin-bottom: 32px;">
+    <h1>NYC shouldn't take six apps to plan.</h1>
+    <p class="sub">Thanks. Questions?</p>
+  </section>
+
+</div>
+
+<!-- chrome / slide indicator -->
+<div class="chrome">
+  <div>Sift · Spring 2026</div>
+  <div class="chrome-dots" id="dots"></div>
+  <div>Arrow keys · F for fullscreen</div>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const dotsContainer = document.getElementById('dots');
+  let index = 0;
+
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    dotsContainer.appendChild(d);
+  });
+  const dots = Array.from(dotsContainer.querySelectorAll('.dot'));
+
+  function goTo(i) {
+    index = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === index));
+    dots.forEach((d, idx) => d.classList.toggle('active', idx === index));
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'n') goTo(index + 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'p') goTo(index - 1);
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    } else if (e.key === 'Home') goTo(0);
+    else if (e.key === 'End') goTo(slides.length - 1);
+  });
+
+  // click to advance
+  document.addEventListener('click', (e) => {
+    // don't advance when clicking a link
+    if (e.target.closest('a')) return;
+    goTo(index + 1);
+  });
+</script>
+</body>
+</html>
