@@ -130,7 +130,6 @@ async function main() {
     .from('events')
     .select('id, title, description, category, venue_name, source, price_min, is_free')
     .eq('vibe_checked', false)
-    .eq('is_suppressed', false)
     .eq('source_type', 'scraper')
     .limit(limit);
 
@@ -159,7 +158,7 @@ async function main() {
       const event = batch[s.index];
       if (!event) continue;
 
-      const suppress = s.is_suppressed || s.vibe_score < 4;
+      const suppress = s.is_suppressed || s.vibe_score < 5;
 
       if (dryRun) {
         console.log(`    ${event.title.slice(0, 50)} → ${s.vibe_score}/10 ${suppress ? 'SUPPRESS' : 'KEEP'} (${s.reason})`);
