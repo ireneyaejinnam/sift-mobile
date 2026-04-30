@@ -61,7 +61,10 @@ export type AnalyticsEventType =
   | "guest_started"
   | "sign_in_completed"
   | "onboarding_step_4_complete"
-  | "feedback_submitted";
+  | "feedback_submitted"
+  | "external_event_extracted"
+  | "external_event_added"
+  | "share_intent_received";
 
 interface AnalyticsEvent {
   event_type: AnalyticsEventType;

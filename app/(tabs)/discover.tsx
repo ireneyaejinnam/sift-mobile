@@ -30,6 +30,7 @@ import {
   Moon,
   Music,
   Palette,
+  Plus,
   RotateCcw,
   ShoppingBag,
   Sparkles,
@@ -690,6 +691,11 @@ export default function DiscoverScreen() {
       <View style={s.choicePage}>
         <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
           <Text style={s.stickyHeading}>Discover</Text>
+          <View style={[s.headerActions, { top: insets.top + 14 }]}>
+            <Pressable onPress={() => router.push("/add-event")} style={s.addEventButton} hitSlop={8}>
+              <Plus size={16} color={colors.white} strokeWidth={2} />
+            </Pressable>
+          </View>
         </View>
         <ScrollView
           contentContainerStyle={[s.choiceScroll, { paddingTop: 18, paddingBottom: insets.bottom + 32 }]}
@@ -934,9 +940,14 @@ export default function DiscoverScreen() {
       {/* Sticky header — stays put while list scrolls */}
       <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
         <Text style={s.stickyHeading}>Discover</Text>
-        <Pressable onPress={reset} style={[s.startOverButton, { top: insets.top + 14 }]} hitSlop={8}>
-          <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
-        </Pressable>
+        <View style={[s.headerActions, { top: insets.top + 14 }]}>
+          <Pressable onPress={() => router.push("/add-event")} style={s.addEventButton} hitSlop={8}>
+            <Plus size={16} color={colors.white} strokeWidth={2} />
+          </Pressable>
+          <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
+            <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={s.resultsStage}>
@@ -1316,9 +1327,22 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
-  startOverButton: {
+  headerActions: {
     position: "absolute",
     right: spacing.page,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  addEventButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  startOverButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
