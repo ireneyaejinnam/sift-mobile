@@ -131,7 +131,8 @@ export default function AddEventScreen() {
         });
 
         // Replace current screen with event detail
-        router.replace(`/event/${data.event_id}`);
+        const source = data.match ? "matched" : "created";
+        router.replace(`/event/${data.event_id}?from=add-event&source=${source}`);
         showToast(data.match ? "Found this event in Sift" : "Event added");
       } else {
         setState("error");
