@@ -29,6 +29,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveToListSheet from "@/components/events/SaveToListSheet";
+import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
@@ -76,6 +77,7 @@ export default function SharedEventPage() {
     markCommitted,
   } = useUser();
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
+  const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
   const [dbEvent, setDbEvent] = useState<SiftEvent | null>(null);
   const [dbLoading, setDbLoading] = useState(false);
@@ -368,13 +370,19 @@ export default function SharedEventPage() {
                   return;
                 }
                 const going = isGoing(event.id);
-                toggleGoing({
-                  eventId: event.id,
-                  eventTitle: event.title,
-                  eventDate: event.startDate,
-                  eventEndDate: event.endDate,
-                });
-                if (!going) showToast("Marked as going");
+                if (going) {
+                  toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate, eventEndDate: event.endDate });
+                  return;
+                }
+                // Multi-day: show date picker
+                const isMultiDay = (event.sessions && event.sessions.length > 1) ||
+                  (!!event.endDate && event.endDate !== event.startDate);
+                if (isMultiDay) {
+                  setGoingSheetOpen(true);
+                  return;
+                }
+                toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate });
+                showToast("Marked as going");
               }}
               style={[s.goingButton, isGoing(event.id) && s.goingButtonActive]}
             >
@@ -440,6 +448,26 @@ export default function SharedEventPage() {
           eventTitle={event.title}
           eventUrl={event.eventUrl || event.link}
           onClose={() => setShareSheetOpen(false)}
+        />
+      </BottomSheet>
+      <BottomSheet
+        open={goingSheetOpen}
+        onClose={() => setGoingSheetOpen(false)}
+        title="Pick a date"
+      >
+        <GoingDateSheet
+          event={event}
+          onConfirm={(date) => {
+            toggleGoing({
+              eventId: event.id,
+              eventTitle: event.title,
+              eventDate: date,
+              eventEndDate: event.endDate,
+            });
+            setGoingSheetOpen(false);
+            showToast("Marked as going");
+          }}
+          onCancel={() => setGoingSheetOpen(false)}
         />
       </BottomSheet>
     </View>

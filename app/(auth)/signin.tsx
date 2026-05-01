@@ -103,31 +103,8 @@ export default function SignInScreen() {
     await setAuth(true, email.trim(), isCreateAccount ? (displayName.trim() || undefined) : undefined);
     setLoading(false);
 
-    if (isCreateAccount) {
-      // New account — always go through onboarding
-      router.replace("/(onboarding)/flow");
-    } else {
-      // Returning user — check if they have a profile in Supabase
-      // setAuth may have already set the flag, but double-check directly
-      let hasProfile = hasOnboardingDoneFlag();
-      if (!hasProfile && supabase) {
-        try {
-          const { data } = await supabase.auth.getUser();
-          if (data.user) {
-            const { data: profile } = await supabase
-              .from("user_profiles")
-              .select("user_id")
-              .eq("user_id", data.user.id)
-              .maybeSingle();
-            if (profile) {
-              setOnboardingDoneFlag();
-              hasProfile = true;
-            }
-          }
-        } catch {}
-      }
-      router.replace(hasProfile ? "/(tabs)/discover" : "/(onboarding)/flow");
-    }
+    // Skip onboarding — go straight to discover for both new and returning users
+    router.replace("/(tabs)/discover");
   };
 
   const handleContinueAsGuest = () => {
