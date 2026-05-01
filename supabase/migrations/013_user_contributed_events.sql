@@ -31,7 +31,5 @@ CREATE POLICY "events_contributor" ON events FOR SELECT
     WHERE ec.event_id = id AND ec.user_id = auth.uid()::text
   ));
 
--- Allow inserts/updates via service key (API routes)
-CREATE POLICY "events_insert_all" ON events FOR INSERT WITH CHECK (true);
-CREATE POLICY "events_update_all" ON events FOR UPDATE USING (true);
-CREATE POLICY "events_delete_all" ON events FOR DELETE USING (true);
+-- Write operations use service key which bypasses RLS.
+-- No INSERT/UPDATE/DELETE policies needed for anon/authenticated roles.

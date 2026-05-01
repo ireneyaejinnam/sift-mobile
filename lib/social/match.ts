@@ -27,9 +27,9 @@ export async function matchToExistingEvent(
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Query events around the same date range (+/- 3 days) to narrow candidates
-  const dateStart = shiftDate(extracted.startDate, -3);
-  const dateEnd = shiftDate(extracted.endDate ?? extracted.startDate, 3);
+  // Query events around the same date range (+/- 7 days) to catch fuzzy date extraction
+  const dateStart = shiftDate(extracted.startDate, -7);
+  const dateEnd = shiftDate(extracted.endDate ?? extracted.startDate, 7);
 
   const { data: candidates, error } = await supabase
     .from('events')
@@ -46,7 +46,7 @@ export async function matchToExistingEvent(
 
   for (const candidate of candidates) {
     const score = computeSimilarity(extracted, candidate);
-    if (score > bestScore && score > 0.6) {
+    if (score > bestScore && score > 0.5) {
       bestScore = score;
       bestMatch = {
         eventId: candidate.id,
@@ -72,12 +72,16 @@ function computeSimilarity(
     normalize(candidate.title)
   );
 
-  const dateSim =
-    extracted.startDate &&
-    candidate.start_date &&
-    extracted.startDate.slice(0, 10) === candidate.start_date.slice(0, 10)
-      ? 1.0
-      : 0.0;
+  // Fuzzy date matching: exact = 1.0, within 2 days = 0.7, within 5 days = 0.3
+  let dateSim = 0.0;
+  if (extracted.startDate && candidate.start_date) {
+    const extDate = new Date(extracted.startDate + 'T12:00:00Z').getTime();
+    const candDate = new Date(candidate.start_date.slice(0, 10) + 'T12:00:00Z').getTime();
+    const daysDiff = Math.abs(extDate - candDate) / (1000 * 60 * 60 * 24);
+    if (daysDiff === 0) dateSim = 1.0;
+    else if (daysDiff <= 2) dateSim = 0.7;
+    else if (daysDiff <= 5) dateSim = 0.3;
+  }
 
   const venueSim =
     extracted.venue && candidate.venue_name

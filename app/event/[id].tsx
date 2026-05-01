@@ -47,7 +47,10 @@ function formatEventDate(event: SiftEvent) {
 }
 
 export default function SharedEventPage() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from, source } = useLocalSearchParams<{ id: string; from?: string; source?: string }>();
+  const fromAddEvent = from === "add-event";
+  const isNewlyCreated = fromAddEvent && source === "created";
+  const isMatched = fromAddEvent && source === "matched";
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -87,8 +90,9 @@ export default function SharedEventPage() {
     }
   }, [id, localEvent]);
 
-  // Only auto-save when arriving from an external shared link (not already saved/going)
+  // Only auto-save when arriving from an external shared link (not from add-event flow)
   useEffect(() => {
+    if (fromAddEvent) return; // user-contributed events: let user choose save/going manually
     if (event && isLoggedIn) {
       const alreadySaved = getSavedListForEvent(event.id);
       const alreadyGoing = isGoing(event.id);
@@ -185,6 +189,18 @@ export default function SharedEventPage() {
           )}
 
           <View style={s.body}>
+            {/* Add-event context banners */}
+            {isNewlyCreated && (
+              <View style={s.addedBanner}>
+                <Text style={s.addedBannerText}>Event added — only visible to you</Text>
+              </View>
+            )}
+            {isMatched && (
+              <View style={s.matchedBanner}>
+                <Text style={s.matchedBannerText}>Found this event in Sift</Text>
+              </View>
+            )}
+
             {/* Pills */}
             <View style={s.pills}>
               <View style={s.pillCategory}>
@@ -447,6 +463,22 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  addedBanner: {
+    backgroundColor: "rgba(232, 170, 106, 0.15)",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    marginBottom: 12,
+  },
+  addedBannerText: { ...typography.xs, fontWeight: "500", color: "#C8844A", textAlign: "center" },
+  matchedBanner: {
+    backgroundColor: colors.primaryLight,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    marginBottom: 12,
+  },
+  matchedBannerText: { ...typography.xs, fontWeight: "500", color: colors.primary, textAlign: "center" },
   body: { padding: 20 },
   pills: {
     flexDirection: "row",

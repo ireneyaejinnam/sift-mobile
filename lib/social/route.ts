@@ -110,7 +110,21 @@ export async function routeSubmission(opts: {
   }
 
   // ── No match, confidence >= 2: create private event ──
-  const sourceId = `user-${slugify(extracted.title)}-${extracted.startDate || 'unknown'}`;
+  // Require at least a title and start_date to create an event
+  if (!extracted.title || !extracted.startDate) {
+    await supabase
+      .from('social_post_submissions')
+      .update({
+        status: 'needs_review',
+        reject_reason: 'missing_required_fields',
+        extraction_confidence: extracted.confidence,
+      })
+      .eq('id', submissionId);
+
+    return { status: 'rejected', submissionId, confidence: extracted.confidence, isPublic: false };
+  }
+
+  const sourceId = `user-${slugify(extracted.title)}-${extracted.startDate}`;
 
   const { data: newEvent, error: eventErr } = await supabase
     .from('events')
@@ -123,7 +137,7 @@ export async function routeSubmission(opts: {
       title: extracted.title,
       category: extracted.category || 'popups',
       description: extracted.description || null,
-      start_date: extracted.startDate || null,
+      start_date: extracted.startDate,
       end_date: extracted.endDate || null,
       venue_name: extracted.venue || null,
       address: extracted.address || null,
