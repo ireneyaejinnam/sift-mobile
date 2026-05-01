@@ -12,16 +12,12 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import * as WebBrowser from "expo-web-browser";
-import * as AuthSession from "expo-auth-session";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/lib/supabase";
 import { setGuestFlag, hasOnboardingDoneFlag, setOnboardingDoneFlag } from "@/lib/storage";
 import { useToast } from "@/components/ui/Toast";
 import { track } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
-
-WebBrowser.maybeCompleteAuthSession();
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -61,6 +57,8 @@ export default function SignInScreen() {
 
   useEffect(() => {
     if (isCreateAccount) track("sign_up_started");
+    // Clear display name when switching modes to prevent leaking between accounts
+    if (!isCreateAccount) setDisplayName("");
   }, [isCreateAccount]);
 
   const handleSubmit = async () => {
@@ -102,7 +100,7 @@ export default function SignInScreen() {
       return;
     }
 
-    await setAuth(true, email.trim(), displayName.trim() || undefined);
+    await setAuth(true, email.trim(), isCreateAccount ? (displayName.trim() || undefined) : undefined);
     setLoading(false);
 
     if (isCreateAccount) {
@@ -130,67 +128,6 @@ export default function SignInScreen() {
       }
       router.replace(hasProfile ? "/(tabs)/discover" : "/(onboarding)/flow");
     }
-  };
-
-  const navigateAfterAuth = async (isNew: boolean) => {
-    if (isNew) {
-      router.replace("/(onboarding)/flow");
-      return;
-    }
-    let hasProfile = hasOnboardingDoneFlag();
-    if (!hasProfile && supabase) {
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (data.user) {
-          const { data: profile } = await supabase
-            .from("user_profiles")
-            .select("user_id")
-            .eq("user_id", data.user.id)
-            .maybeSingle();
-          if (profile) { setOnboardingDoneFlag(); hasProfile = true; }
-        }
-      } catch {}
-    }
-    router.replace(hasProfile ? "/(tabs)/discover" : "/(onboarding)/flow");
-  };
-
-  const handleGoogleSignIn = async () => {
-    if (!supabase) return;
-    setLoading(true);
-    try {
-      const redirectTo = AuthSession.makeRedirectUri(
-      __DEV__ ? { path: "auth/callback" } : { scheme: "sift", path: "auth/callback" }
-    );
-    console.log("redirectTo:", redirectTo);
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo, skipBrowserRedirect: true },
-      });
-      if (error || !data.url) {
-        showToast(error?.message ?? "Google sign in failed");
-        setLoading(false);
-        return;
-      }
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-      if (result.type !== "success") {
-        setLoading(false);
-        return;
-      }
-      const { data: session, error: sessionError } =
-        await supabase.auth.exchangeCodeForSession(result.url);
-      if (sessionError || !session.user) {
-        showToast(sessionError?.message ?? "Sign in failed");
-        setLoading(false);
-        return;
-      }
-      const isNew = session.user.created_at === session.user.last_sign_in_at;
-      track(isNew ? "sign_up_completed" : "sign_in_completed", { method: "google" });
-      await setAuth(true, session.user.email ?? "", undefined);
-      await navigateAfterAuth(isNew);
-    } catch {
-      showToast("Something went wrong. Try again.");
-    }
-    setLoading(false);
   };
 
   const handleContinueAsGuest = () => {
@@ -232,26 +169,6 @@ export default function SignInScreen() {
               ? "Enter your email and we'll send you a reset link."
               : "We'll use this to save your preferences and personalize your experience."}
           </Text>
-
-          {/* Google Sign In */}
-          <Pressable
-            onPress={handleGoogleSignIn}
-            disabled={loading}
-            style={({ pressed }) => [styles.googleButton, pressed && { opacity: 0.8 }]}
-          >
-            <Image
-              source={{ uri: "https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png" }}
-              style={styles.googleIcon}
-            />
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
-          </Pressable>
-
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
 
           {/* Username — only for signup */}
           {isCreateAccount && !isForgotPassword && (

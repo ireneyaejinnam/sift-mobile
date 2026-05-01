@@ -35,6 +35,7 @@ interface SubmitResponse {
   match: { eventId: string; title: string; similarity: number } | null;
   route: string;
   is_public: boolean;
+  is_own_event?: boolean;
   error?: string;
 }
 
@@ -133,7 +134,11 @@ export default function AddEventScreen() {
         // Replace current screen with event detail
         const source = data.match ? "matched" : "created";
         router.replace(`/event/${data.event_id}?from=add-event&source=${source}`);
-        showToast(data.match ? "Found this event in Sift" : "Event added");
+        showToast(
+          data.match && data.is_own_event ? "You already added this event"
+            : data.match ? "Found this event in Sift"
+            : "Event added"
+        );
       } else {
         setState("error");
       }
@@ -159,7 +164,7 @@ export default function AddEventScreen() {
           <Text style={s.notFoundSub}>
             Create an account to submit events from Instagram, TikTok, and more.
           </Text>
-          <Pressable onPress={() => router.push("/(auth)/signin")} style={s.submitButton}>
+          <Pressable onPress={() => router.push("/(auth)/signin")} style={[s.submitButton, { minWidth: 200, marginTop: 16 }]}>
             <Text style={s.submitButtonText}>Sign in</Text>
           </Pressable>
         </View>

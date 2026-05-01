@@ -84,20 +84,12 @@ export default function AuthGate() {
               </View>
             </Animated.View>
           ) : (
-            <>
-              <Pressable
-                onPress={handleSignIn}
-                style={({ pressed }) => [styles.primaryButton, pressed && { opacity: 0.92 }]}
-              >
-                <Text style={styles.primaryButtonText}>Sign in</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleContinueAsGuest}
-                style={({ pressed }) => [styles.secondaryButton, pressed && { opacity: 0.92 }]}
-              >
-                <Text style={styles.secondaryButtonText}>Continue as guest</Text>
-              </Pressable>
-            </>
+            <Pressable
+              onPress={handleContinueAsGuest}
+              style={({ pressed }) => [styles.primaryButton, pressed && { opacity: 0.92 }]}
+            >
+              <Text style={styles.primaryButtonText}>Get started</Text>
+            </Pressable>
           )}
         </View>
       </View>

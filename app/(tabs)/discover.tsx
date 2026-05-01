@@ -44,6 +44,7 @@ import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
 import GestureTutorial from "@/components/ui/GestureTutorial";
+import HintOverlay, { HintText } from "@/components/ui/HintOverlay";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
@@ -59,6 +60,7 @@ import type { TasteProfile } from "@/lib/tasteProfile";
 import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
+import { getOrCreateDeviceId } from "@/lib/storage";
 import { colors, spacing, radius, typography, shadows } from "@/lib/theme";
 import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
@@ -112,8 +114,15 @@ export default function DiscoverScreen() {
   const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
 
   useEffect(() => {
+    // Use Supabase UID if logged in, stable device ID if guest (not email — privacy)
     if (userEmail) {
-      setTrackingUserId(userEmail);
+      import("@/lib/supabase").then(({ supabase }) => {
+        supabase?.auth.getUser().then(({ data }) => {
+          setTrackingUserId(data.user?.id ?? userEmail);
+        }).catch(() => setTrackingUserId(userEmail));
+      });
+    } else {
+      getOrCreateDeviceId().then(setTrackingUserId);
     }
     track("app_open", { has_profile: !!userProfile });
   }, []);
@@ -452,6 +461,10 @@ export default function DiscoverScreen() {
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
+    // Clear stale cards immediately before fetching new ones
+    setSlots([]);
+    setResultPool([]);
+    setDismissedIds([]);
     await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
 
@@ -949,6 +962,11 @@ export default function DiscoverScreen() {
           </Pressable>
         </View>
       </View>
+
+      {/* Contextual hint — shows swipe gestures on first results view */}
+      <HintOverlay hintKey="swipe_gestures" position="top">
+        <HintText text="Swipe right = Going · Swipe left = Skip · Tap for details" />
+      </HintOverlay>
 
       <View style={s.resultsStage}>
         <View style={s.resultsFilters}>

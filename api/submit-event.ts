@@ -133,6 +133,33 @@ export default async function handler(req: any, res: any) {
     // 3. Extract event via gpt-4o-mini
     const extracted = await extractEventFromPost(metadata);
 
+    // 3b. Validate image URL — reject blank/broken/private images
+    if (extracted.imageUrl) {
+      try {
+        const imgUrl = new URL(extracted.imageUrl);
+        const imgHost = imgUrl.hostname.toLowerCase();
+        const imgBlocked =
+          (imgUrl.protocol !== 'http:' && imgUrl.protocol !== 'https:') ||
+          imgHost === 'localhost' || imgHost === '127.0.0.1' || imgHost === '0.0.0.0' ||
+          imgHost === '::1' || imgHost === '[::1]' ||
+          imgHost.startsWith('10.') || imgHost.startsWith('172.') || imgHost.startsWith('192.168.') ||
+          imgHost.startsWith('169.254.') || imgHost.startsWith('fc') || imgHost.startsWith('fd') ||
+          imgHost.startsWith('fe80') || imgHost.endsWith('.internal') || imgHost.endsWith('.local') ||
+          /^\[.*\]$/.test(imgHost);
+        if (imgBlocked) {
+          extracted.imageUrl = null;
+        } else {
+          const imgRes = await fetch(extracted.imageUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+          const contentType = imgRes.headers.get('content-type') ?? '';
+          if (!imgRes.ok || !contentType.startsWith('image/')) {
+            extracted.imageUrl = null;
+          }
+        }
+      } catch {
+        extracted.imageUrl = null;
+      }
+    }
+
     // 4. Match against existing events
     const match = extracted.confidence >= 2
       ? await matchToExistingEvent(extracted)
@@ -159,6 +186,9 @@ export default async function handler(req: any, res: any) {
       existingEvent = data;
     }
 
+    // Check if matched event was contributed by the current user
+    const isOwnEvent = existingEvent?.contributed_by === user.id;
+
     return res.status(200).json({
       ok: true,
       submission_id: submissionId,
@@ -168,6 +198,7 @@ export default async function handler(req: any, res: any) {
       route: routeResult.status,
       existing_event: existingEvent,
       is_public: routeResult.isPublic,
+      is_own_event: isOwnEvent,
     });
   } catch (err: any) {
     console.error('[submit-event] Error:', err);
