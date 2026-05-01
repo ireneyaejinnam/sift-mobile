@@ -59,4 +59,5 @@ export interface SiftEvent {
   vibeScore?: number;           // 1–10 from Claude vibe check, undefined = not yet checked
   socialSignal?: number;        // count of linked TikTok/Instagram posts
   hookText?: string;            // AI-generated 2-sentence pitch, falls back to description
+  publicationStatus?: string;   // 'public' | 'private' — private = user-contributed, only visible to contributors
 }

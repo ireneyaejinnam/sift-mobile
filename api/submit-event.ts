@@ -138,9 +138,10 @@ export default async function handler(req: any, res: any) {
       ? await matchToExistingEvent(extracted)
       : null;
 
-    // 5. Route the submission (submissionId is guaranteed non-null after insert check above)
+    // 5. Route the submission
     const routeResult = await routeSubmission({
       submissionId,
+      userId: user.id,
       extracted,
       match,
       platform,
@@ -161,10 +162,12 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       ok: true,
       submission_id: submissionId,
+      event_id: routeResult.eventId ?? null,
       extracted,
       match: match ? { eventId: match.eventId, title: match.title, similarity: match.similarity } : null,
       route: routeResult.status,
       existing_event: existingEvent,
+      is_public: routeResult.isPublic,
     });
   } catch (err: any) {
     console.error('[submit-event] Error:', err);
