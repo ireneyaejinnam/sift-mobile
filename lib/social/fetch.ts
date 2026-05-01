@@ -42,58 +42,34 @@ const EMPTY_META = (url: string): PostMetadata => ({
 });
 
 const FETCH_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
   'Accept': 'text/html,application/xhtml+xml',
+  'Accept-Language': 'en-US,en;q=0.9',
 };
-
-const MAX_REDIRECTS = 5;
 
 /**
  * Fetch and parse metadata from a URL.
- * Uses manual redirect following to validate each hop against private/internal hosts (SSRF prevention).
+ * SSRF prevention: initial URL is validated in api/submit-event.ts before this is called.
+ * Redirects are followed normally (needed for Instagram/TikTok).
  */
 export async function fetchPostMetadata(url: string): Promise<PostMetadata> {
+  if (isPrivateUrl(url)) return EMPTY_META(url);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
 
   try {
-    let currentUrl = url;
-
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      // Validate current URL before fetching
-      if (isPrivateUrl(currentUrl)) return EMPTY_META(url);
-
-      const res = await fetch(currentUrl, {
-        signal: controller.signal,
-        redirect: 'manual',
-        headers: FETCH_HEADERS,
-      });
-
-      // Handle redirects — validate the Location before following
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('location');
-        if (!location) return EMPTY_META(url);
-
-        // Resolve relative redirects
-        try {
-          currentUrl = new URL(location, currentUrl).toString();
-        } catch {
-          return EMPTY_META(url);
-        }
-        continue; // next hop — will validate before fetching
-      }
-
-      clearTimeout(timer);
-
-      if (!res.ok) return EMPTY_META(url);
-
-      const html = await res.text();
-      return parseHtmlMetadata(html, url);
-    }
-
-    // Too many redirects
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: FETCH_HEADERS,
+      redirect: 'follow',
+    });
     clearTimeout(timer);
-    return EMPTY_META(url);
+
+    if (!res.ok) return EMPTY_META(url);
+
+    const html = await res.text();
+    return parseHtmlMetadata(html, url);
   } catch {
     clearTimeout(timer);
     return EMPTY_META(url);

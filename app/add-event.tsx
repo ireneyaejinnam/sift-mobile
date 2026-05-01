@@ -138,7 +138,8 @@ export default function AddEventScreen() {
 
       const data: SubmitResponse = await res.json();
 
-      if (!data.ok || !data.extracted) {
+      if (!res.ok || !data.ok || !data.extracted) {
+        console.error("[add-event] API error:", res.status, data);
         setState("error");
         return;
       }

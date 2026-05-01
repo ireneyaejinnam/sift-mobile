@@ -14,6 +14,8 @@ function useDeepLinkRouter() {
   const router = useRouter();
 
   const isExpoRouterOwnedUrl = useCallback((url: string) => {
+    // Share intent deeplinks — handled by ShareIntentProvider, not router
+    if (/siftShareKey|dataUrl/i.test(url)) return true;
     return (
       /^sift:\/\//i.test(url) ||
       /^https?:\/\/siftapp\.site(?:\/|$)/i.test(url)
