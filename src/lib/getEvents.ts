@@ -122,6 +122,7 @@ interface EventRow {
   tags?: string[] | null;
   vibe_score?: number | null;
   social_signal?: number | null;
+  publication_status?: string | null;
 }
 
 /** Map a DB row + its matched sessions into a frontend SiftEvent. */
@@ -202,6 +203,7 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
     vibeScore: row.vibe_score ?? undefined,
     socialSignal: row.social_signal ?? undefined,
     hookText: row.hook_text ?? undefined,
+    publicationStatus: row.publication_status ?? undefined,
   };
 }
 
@@ -288,6 +290,7 @@ export async function fetchEvents(
     .select("*")
     .in("id", matchedEventIds.slice(0, limit))
     .neq("is_suppressed", true)
+    .eq("publication_status", "public")
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null");
 
@@ -339,6 +342,7 @@ export async function fetchEvents(
     .lt("start_date", dateFrom)
     .gte("end_date", dateFrom)
     .neq("is_suppressed", true)
+    .eq("publication_status", "public")
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null");
 
@@ -441,6 +445,7 @@ export async function fetchAllUpcoming(
     .select("*")
     .or(`end_date.gte.${today},start_date.gte.${today}`)
     .neq("is_suppressed", true)
+    .eq("publication_status", "public")
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null")
     .order("start_date", { ascending: true })

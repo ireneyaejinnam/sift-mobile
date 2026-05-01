@@ -293,6 +293,13 @@ export default function EventDetail({
 
           {/* Content */}
           <View style={styles.body}>
+            {/* Private event banner */}
+            {event.publicationStatus === "private" && (
+              <View style={styles.privateBanner}>
+                <Text style={styles.privateBannerText}>Only visible to you</Text>
+              </View>
+            )}
+
             {/* Pills */}
             <View style={styles.pills}>
               <View style={styles.pillCategory}>
@@ -664,6 +671,19 @@ const styles = StyleSheet.create({
     ...typography.sm,
     fontWeight: "500",
     color: colors.foreground,
+  },
+  privateBanner: {
+    backgroundColor: "rgba(232, 170, 106, 0.15)",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    marginBottom: 12,
+  },
+  privateBannerText: {
+    ...typography.xs,
+    fontWeight: "500",
+    color: "#C8844A",
+    textAlign: "center",
   },
   body: {
     padding: 20,

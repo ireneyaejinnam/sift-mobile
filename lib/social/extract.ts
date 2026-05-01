@@ -147,7 +147,7 @@ export async function extractEventFromPost(metadata: PostMetadata): Promise<Extr
     };
   }
 
-  return {
+  const extracted: ExtractedEvent = {
     title: result.title ?? '',
     description: result.description ?? '',
     startDate: result.start_date ?? '',
@@ -165,4 +165,95 @@ export async function extractEventFromPost(metadata: PostMetadata): Promise<Extr
     imageUrl: result.image_url || metadata.image || null,
     confidence: result.confidence,
   };
+
+  // Enrich missing fields via Tavily web search
+  if (extracted.confidence >= 2 && hasMissingFields(extracted)) {
+    await enrichViaTavily(extracted);
+  }
+
+  return extracted;
+}
+
+function hasMissingFields(e: ExtractedEvent): boolean {
+  return !e.ticketUrl || !e.address || !e.borough || !e.venue;
+}
+
+async function enrichViaTavily(extracted: ExtractedEvent): Promise<void> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return;
+
+  const query = [extracted.title, extracted.venue, 'NYC'].filter(Boolean).join(' ');
+
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: 'basic',
+        include_answer: false,
+        max_results: 3,
+      }),
+    });
+    if (!res.ok) return;
+
+    const data = await res.json() as { results?: Array<{ url: string; content: string }> };
+    const results = data.results ?? [];
+    if (results.length === 0) return;
+
+    // Build context from search results
+    const context = results
+      .map((r) => `URL: ${r.url}\n${r.content}`)
+      .join('\n\n')
+      .slice(0, 6000);
+
+    // Ask gpt-4o-mini to fill missing fields using search results
+    const merged = await chatJSON<{
+      ticket_url: string | null;
+      address: string | null;
+      borough: string | null;
+      venue: string | null;
+      start_time: string | null;
+      image_url: string | null;
+    }>(
+      'gpt-4o-mini',
+      [
+        {
+          role: 'system',
+          content: 'You fill in missing event details using web search results. Only return fields you can confirm from the search results. Return null for anything uncertain.',
+        },
+        {
+          role: 'user',
+          content: `Event: ${extracted.title}\nVenue: ${extracted.venue ?? 'unknown'}\nDate: ${extracted.startDate}\nAddress: ${extracted.address ?? 'unknown'}\nBorough: ${extracted.borough ?? 'unknown'}\n\nSearch results:\n${context}\n\nFill in any missing fields. Return ticket_url, address, borough, venue, start_time, image_url.`,
+        },
+      ],
+      {
+        name: 'enrich_missing_fields',
+        schema: {
+          type: 'object',
+          properties: {
+            ticket_url: { type: ['string', 'null'] },
+            address: { type: ['string', 'null'] },
+            borough: { type: ['string', 'null'] },
+            venue: { type: ['string', 'null'] },
+            start_time: { type: ['string', 'null'] },
+            image_url: { type: ['string', 'null'] },
+          },
+          required: ['ticket_url', 'address', 'borough', 'venue', 'start_time', 'image_url'],
+          additionalProperties: false,
+        },
+      }
+    );
+
+    // Merge — only fill nulls, don't overwrite existing data
+    if (!extracted.ticketUrl && merged.ticket_url) extracted.ticketUrl = merged.ticket_url;
+    if (!extracted.address && merged.address) extracted.address = merged.address;
+    if (!extracted.borough && merged.borough) extracted.borough = merged.borough;
+    if (!extracted.venue && merged.venue) extracted.venue = merged.venue;
+    if (!extracted.startTime && merged.start_time) extracted.startTime = merged.start_time;
+    if (!extracted.imageUrl && merged.image_url) extracted.imageUrl = merged.image_url;
+  } catch (err) {
+    console.warn('[extract] Tavily enrichment failed:', (err as Error).message);
+  }
 }
