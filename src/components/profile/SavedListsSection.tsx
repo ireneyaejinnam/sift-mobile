@@ -47,6 +47,7 @@ export default function SavedListsSection() {
   const [renamingList, setRenamingList] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState("");
   const [dbEvents, setDbEvents] = useState<SiftEvent[]>([]);
+  const [dbLoading, setDbLoading] = useState(false);
   const detailOpenTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -61,9 +62,11 @@ export default function SavedListsSection() {
     const missingIds = savedEvents
       .map((s) => s.eventId)
       .filter((id) => !events.some((e) => e.id === id));
-    if (missingIds.length === 0) return;
+    if (missingIds.length === 0) { setDbLoading(false); return; }
+    setDbLoading(true);
     Promise.all(missingIds.map((id) => fetchEventById(id))).then((results) => {
       setDbEvents(results.filter((e): e is SiftEvent => e !== null));
+      setDbLoading(false);
     });
   }, [savedEvents]);
 
@@ -78,16 +81,18 @@ export default function SavedListsSection() {
       .filter((e): e is SiftEvent => e != null);
   }, [listSheetName, savedEvents, dbEvents]);
 
-  // Count by list, memoized so the NestableDraggableFlatList data reference
-  // is stable across unrelated re-renders (prevents drag from getting stuck
-  // when other state changes mid-reorder).
+  // Count by list — only count events that actually resolve (not orphaned references)
   const countByList = useMemo(() => {
+    const pool = [...events, ...dbEvents];
+    const resolvedIds = new Set(pool.map((e) => e.id));
     const m: Record<string, number> = {};
     for (const s of savedEvents) {
-      m[s.listName] = (m[s.listName] ?? 0) + 1;
+      if (resolvedIds.has(s.eventId)) {
+        m[s.listName] = (m[s.listName] ?? 0) + 1;
+      }
     }
     return m;
-  }, [savedEvents]);
+  }, [savedEvents, dbEvents]);
 
   const listItems: ListItem[] = useMemo(
     () => listNames.map((listName) => ({ listName, count: countByList[listName] ?? 0 })),
@@ -278,7 +283,9 @@ export default function SavedListsSection() {
           contentContainerStyle={st.listSheetContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <Text style={st.emptyText}>No events saved yet</Text>
+            dbLoading
+              ? <Text style={st.emptyText}>Loading events...</Text>
+              : <Text style={st.emptyText}>No events saved yet</Text>
           }
         />
       </BottomSheet>

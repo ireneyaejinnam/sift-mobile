@@ -38,6 +38,7 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { SiftEvent } from "@/types/event";
+import { isTicketVendorUrl } from "@/lib/ticketUrl";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { tuneUpCategory, tuneDownCategory } from "@/lib/tasteProfile";
 import { colors, radius, shadows } from "@/lib/theme";
@@ -408,7 +409,7 @@ export default function EventCard({
               )}
 
               <View style={styles.footer}>
-                {event.ticketUrl ? (
+                {event.ticketUrl && isTicketVendorUrl(event.ticketUrl) ? (
                   <Pressable
                     onPress={() => {
                       track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
@@ -426,9 +427,12 @@ export default function EventCard({
                       Tickets drop {new Date(event.onSaleDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </Text>
                   </View>
-                ) : event.eventUrl ? (
+                ) : (event.eventUrl || event.ticketUrl) ? (
                   <Pressable
-                    onPress={() => { if (event.eventUrl) WebBrowser.openBrowserAsync(event.eventUrl); }}
+                    onPress={() => {
+                      const url = event.eventUrl || event.ticketUrl;
+                      if (url) WebBrowser.openBrowserAsync(url);
+                    }}
                     style={styles.ctaButtonOutline}
                   >
                     <ExternalLink size={14} strokeWidth={1.5} color={colors.primary} />

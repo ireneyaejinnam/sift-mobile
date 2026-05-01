@@ -18,6 +18,7 @@ import {
   Bookmark,
   CalendarDays,
   CalendarPlus,
+  Check,
   DollarSign,
   ExternalLink,
   ImageIcon,
@@ -33,6 +34,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import { generateGoogleCalendarUrl, addToDeviceCalendar, shareICSFile } from "@/lib/calendar";
+import { isTicketVendorUrl } from "@/lib/ticketUrl";
 import { fetchEventById } from "@/lib/getEvents";
 import { events } from "@/data/events";
 import type { SiftEvent } from "@/types/event";
@@ -67,6 +69,7 @@ export default function SharedEventPage() {
     isLoggedIn,
     getSavedListForEvent,
     isGoing,
+    toggleGoing,
     removeSavedEvent,
     addSavedEvent,
     addSharedWithYou,
@@ -269,8 +272,8 @@ export default function SharedEventPage() {
               ))}
             </View>
 
-            {/* Ticket button */}
-            {event.ticketUrl ? (
+            {/* Ticket button — only for real ticket vendor URLs */}
+            {event.ticketUrl && isTicketVendorUrl(event.ticketUrl) ? (
               <Pressable
                 onPress={() => {
                   track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
@@ -357,9 +360,33 @@ export default function SharedEventPage() {
               </Pressable>
             </View>
 
+            {/* Going button */}
+            <Pressable
+              onPress={() => {
+                if (!isLoggedIn) {
+                  router.push("/(auth)/signin");
+                  return;
+                }
+                const going = isGoing(event.id);
+                toggleGoing({
+                  eventId: event.id,
+                  eventTitle: event.title,
+                  eventDate: event.startDate,
+                  eventEndDate: event.endDate,
+                });
+                if (!going) showToast("Marked as going");
+              }}
+              style={[s.goingButton, isGoing(event.id) && s.goingButtonActive]}
+            >
+              {isGoing(event.id) && <Check size={16} strokeWidth={2} color={colors.white} />}
+              <Text style={[s.goingButtonText, isGoing(event.id) && s.goingButtonTextActive]}>
+                {isGoing(event.id) ? "Going" : "Going"}
+              </Text>
+            </Pressable>
+
             {/* View event link */}
             <Pressable
-              onPress={() => { const url = event.eventUrl || event.link; if (url) WebBrowser.openBrowserAsync(url); }}
+              onPress={() => { const url = event.eventUrl || event.link || event.ticketUrl; if (url) WebBrowser.openBrowserAsync(url); }}
               style={s.viewEventButton}
             >
               <Text style={s.viewEventText}>View on source</Text>
@@ -574,6 +601,24 @@ const s = StyleSheet.create({
     backgroundColor: colors.card,
   },
   actionButtonText: { ...typography.xs, fontWeight: "500", color: colors.foreground },
+  goingButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    marginBottom: 12,
+  },
+  goingButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  goingButtonText: { ...typography.body, fontWeight: "500", color: colors.foreground },
+  goingButtonTextActive: { color: colors.white },
   viewEventButton: {
     flexDirection: "row",
     alignItems: "center",

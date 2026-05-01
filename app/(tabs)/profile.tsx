@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
+import { View, Text, TextInput, Pressable, Linking, StyleSheet } from "react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -316,9 +316,6 @@ export default function ProfileTab() {
         {isLoggedIn && (
           <Pressable
             onPress={() => {
-              // Fire state clear + navigation in the same tick so React
-              // batches them — gate mounts with isLoggedIn already false,
-              // so there's no brief logged-in render.
               void signOut();
               router.replace("/(auth)/gate");
             }}
@@ -328,6 +325,17 @@ export default function ProfileTab() {
             <Text style={st.signOutText}>Sign out</Text>
           </Pressable>
         )}
+
+        {/* ── Privacy & Terms ─────────────────── */}
+        <View style={st.legalLinks}>
+          <Pressable onPress={() => Linking.openURL("https://siftapp.site/privacy")}>
+            <Text style={st.legalText}>Privacy Policy</Text>
+          </Pressable>
+          <Text style={st.legalDot}>·</Text>
+          <Pressable onPress={() => Linking.openURL("https://siftapp.site/terms")}>
+            <Text style={st.legalText}>Terms of Service</Text>
+          </Pressable>
+        </View>
       </NestableScrollContainer>
     </View>
   );
@@ -529,6 +537,16 @@ const st = StyleSheet.create({
     paddingVertical: 14,
   },
   signOutText: { ...typography.sm, color: colors.textMuted },
+  legalLinks: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  legalText: { ...typography.xs, color: colors.textMuted },
+  legalDot: { ...typography.xs, color: colors.textMuted },
   memberSinceCard: {
     flexDirection: "row",
     alignItems: "center",

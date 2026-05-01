@@ -40,6 +40,7 @@ import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
 import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { SiftEvent, EventSession } from "@/types/event";
+import { isTicketVendorUrl } from "@/lib/ticketUrl";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 import { scoreSession, getBudgetMax } from "@/lib/recommend";
@@ -484,7 +485,7 @@ export default function EventDetail({
             })()}
 
             {/* Ticket / On-sale badge */}
-            {event.ticketUrl ? (
+            {event.ticketUrl && isTicketVendorUrl(event.ticketUrl) ? (
               <Pressable
                 onPress={() => {
                   track("ticket_click", { event_id: event.id, ticket_url: event.ticketUrl });
@@ -507,7 +508,7 @@ export default function EventDetail({
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => { const url = event.eventUrl || event.link; if (url) WebBrowser.openBrowserAsync(url); }}
+                onPress={() => { const url = event.eventUrl || event.link || event.ticketUrl; if (url) WebBrowser.openBrowserAsync(url); }}
                 style={styles.primaryButton}
               >
                 <Text style={styles.primaryButtonText}>

@@ -81,6 +81,41 @@ export async function addDismissedEvent(record: DismissedRecord): Promise<void> 
   }
 }
 
+// ── Device ID (stable guest identity for analytics) ─────────
+
+const DEVICE_ID_KEY = "sift_device_id";
+
+export async function getOrCreateDeviceId(): Promise<string> {
+  try {
+    const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
+    if (existing) return existing;
+    const id = `device_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    await AsyncStorage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    return `device_${Date.now()}`;
+  }
+}
+
+// ── Hint dismissal ──────────────────────────────────────────
+
+const HINT_PREFIX = "sift_hint_";
+
+export async function isHintDismissed(hintKey: string): Promise<boolean> {
+  try {
+    const val = await AsyncStorage.getItem(`${HINT_PREFIX}${hintKey}`);
+    return val === "1";
+  } catch {
+    return false;
+  }
+}
+
+export async function dismissHint(hintKey: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(`${HINT_PREFIX}${hintKey}`, "1");
+  } catch {}
+}
+
 // ── Gesture tutorial ─────────────────────────────────────────
 
 const GESTURE_TIP_KEY = "sift_gesture_tip_seen";

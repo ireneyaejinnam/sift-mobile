@@ -107,10 +107,37 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     if (!userId) return;
     const remote = await fetchUserData(userId);
     if (!remote) return;
+
+    // Filter out orphaned saved/going references (events deleted from DB)
+    const allEventIds = [
+      ...new Set([
+        ...remote.savedEvents.map((s) => s.eventId),
+        ...remote.goingEvents.map((g) => g.eventId),
+      ]),
+    ];
+    const validIds = new Set<string>();
+    let allBatchesSucceeded = true;
+    if (allEventIds.length > 0 && supabase) {
+      try {
+        // Query in batches of 200 to avoid PostgREST limits
+        for (let i = 0; i < allEventIds.length; i += 200) {
+          const batch = allEventIds.slice(i, i + 200);
+          const { data, error } = await supabase
+            .from("events")
+            .select("id")
+            .in("id", batch);
+          if (error) { allBatchesSucceeded = false; break; }
+          for (const row of data ?? []) validIds.add(row.id as string);
+        }
+      } catch { allBatchesSucceeded = false; }
+    }
+    // Only filter if ALL batches succeeded — partial results could drop valid events
+    const canFilter = allBatchesSucceeded || allEventIds.length === 0;
+
     setStorage((prev) => ({
       ...prev,
-      savedEvents: remote.savedEvents,
-      goingEvents: remote.goingEvents,
+      savedEvents: canFilter ? remote.savedEvents.filter((s) => validIds.has(s.eventId)) : remote.savedEvents,
+      goingEvents: canFilter ? remote.goingEvents.filter((g) => validIds.has(g.eventId)) : remote.goingEvents,
       customLists: remote.customLists,
     }));
   }, []);
@@ -328,14 +355,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         eventStartDate: meta?.startDate,
         eventEndDate: meta?.endDate,
       };
-      const savedEvents = [
-        ...storage.savedEvents.filter((s) => s.eventId !== eventId),
-        newEvent,
-      ];
-      persist({ ...storage, savedEvents });
+      // Use functional update to avoid stale closure issues (save-cancel-resave bug)
+      setStorage((prev) => {
+        const savedEvents = [
+          ...prev.savedEvents.filter((s) => s.eventId !== eventId),
+          newEvent,
+        ];
+        const next = { ...prev, savedEvents };
+        saveStorage(next);
+        return next;
+      });
       if (userIdRef.current) syncSavedEvent(userIdRef.current, newEvent);
     },
-    [storage, persist]
+    [persist]
   );
 
   const removeSavedEvent = useCallback(
