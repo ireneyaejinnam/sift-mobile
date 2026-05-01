@@ -81,8 +81,14 @@ export async function matchToExistingEvent(
   let bestMatch: MatchResult | null = null;
   let bestScore = 0;
 
+  console.log(`[match] Extracted: "${extracted.title}" date=${extracted.startDate} venue="${extracted.venue}"`);
+  console.log(`[match] Candidates: ${candidates.length} events in ${dateStart} to ${dateEnd}`);
+
   for (const candidate of candidates) {
     const score = computeSimilarity(extracted, candidate);
+    if (score > 0.3) {
+      console.log(`[match]   "${candidate.title}" score=${score.toFixed(3)}`);
+    }
     if (score > bestScore && score > 0.5) {
       bestScore = score;
       bestMatch = {
@@ -93,6 +99,7 @@ export async function matchToExistingEvent(
     }
   }
 
+  console.log(`[match] Best: ${bestMatch ? `"${bestMatch.title}" (${bestScore.toFixed(3)})` : 'none'}`);
   return bestMatch;
 }
 

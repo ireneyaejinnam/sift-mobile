@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   View,
   Text,
   Pressable,
@@ -377,22 +378,9 @@ export default function DiscoverScreen() {
 
         const tier1Ids = new Set(tier1.map((e) => e.id));
 
-        // Tier 2: matches onboarding interests (logged-in only)
-        let tier2: SiftEvent[] = [];
-        if (userProfile?.interests?.length) {
-          const interestCats = userProfile.interests
-            .map((i) => INTEREST_TO_CATEGORY[i])
-            .filter(Boolean);
-          tier2 = pool
-            .filter((e) => !tier1Ids.has(e.id) && interestCats.includes(e.category))
-            .map((e) => ({ ...e, matchReason: "Based on your interests" }));
-        }
-
-        const usedIds = new Set([...tier1Ids, ...tier2.map((e) => e.id)]);
-
-        // Tier 3: everything else
-        const tier3 = pool
-          .filter((e) => !usedIds.has(e.id))
+        // Tier 2: everything else (onboarding preferences removed from algo)
+        const tier2 = pool
+          .filter((e) => !tier1Ids.has(e.id))
           .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
 
         // Re-rank within each tier by composite score × learned category weights
@@ -400,7 +388,6 @@ export default function DiscoverScreen() {
         return [
           ...applyPrefs(tier1, weights),
           ...applyPrefs(tier2, weights),
-          ...applyPrefs(tier3, weights),
         ];
       };
 
@@ -963,10 +950,6 @@ export default function DiscoverScreen() {
         </View>
       </View>
 
-      {/* Contextual hint — shows swipe gestures on first results view */}
-      <HintOverlay hintKey="swipe_gestures" position="top">
-        <HintText text="Swipe right = Going · Swipe left = Skip · Tap for details" />
-      </HintOverlay>
 
       <View style={s.resultsStage}>
         <View style={s.resultsFilters}>
@@ -979,6 +962,17 @@ export default function DiscoverScreen() {
           />
           <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
         </View>
+
+        {/* Contextual hints — below filters, above cards */}
+        <HintOverlay hintKey="swipe_gestures" position="bottom">
+          <HintText text={"Swipe right = Going · Swipe left = Skip · Tap for details\nLong press to tune your taste · Tap + to add events"} />
+        </HintOverlay>
+
+        {!activeSlot && (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        )}
 
         {activeSlot?.type === 'divider' && (
           <View style={s.dividerRow}>
