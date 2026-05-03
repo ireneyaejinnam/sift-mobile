@@ -24,7 +24,7 @@ const NAME_LIST_PATH   = join(__dirname, 'output', 'ai_new_events_name_list.json
 
 const VALID_CATEGORIES = new Set([
   'art', 'live_music', 'comedy', 'food', 'outdoors',
-  'nightlife', 'popups', 'fitness', 'theater', 'workshops',
+  'nightlife', 'popups', 'fitness', 'theater', 'workshops', 'sports',
 ]);
 
 const VALID_BOROUGHS = new Set([
@@ -196,6 +196,15 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
 
   console.log(`[upsert] Done. Events: ${eventsInserted}, Sessions: ${sessionsInserted}, Errors: ${errors}`);
 
+  // Retroactive matching: check if any private user-contributed events match newly upserted events.
+  // If so, merge: update user's saved/going refs to point to the public event, add user as contributor.
+  // Re-attach sessions from raw data since sanitizeEvent strips them
+  const sanitizedWithSessions = sanitized.map(e => {
+    const rawEv = raw.find(r => r.source_id === e.source_id);
+    return rawEv?.sessions ? { ...e, sessions: rawEv.sessions } : e;
+  });
+  await retroactiveMatch(sanitizedWithSessions);
+
   // Upsert name list — only entries whose source_url made it into ai_events
   if (existsSync(NAME_LIST_PATH)) {
     const upsertedUrls = new Set(sanitized.map(e => e.source_url).filter(Boolean));
@@ -218,6 +227,157 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
     writeFileSync(OUTPUT_PATH, '[]\n', 'utf-8');
     console.log(`[upsert] Reset ${OUTPUT_PATH} to []`);
     if (existsSync(NAME_LIST_PATH)) { unlinkSync(NAME_LIST_PATH); console.log(`[upsert] Deleted ${NAME_LIST_PATH}`); }
+  }
+}
+
+/**
+ * Retroactive matching: after upserting new public events, check if any
+ * private user-contributed events match. If so, merge them:
+ * - Update saved_events/going_events to point to the public event
+ * - Add user as contributor to the public event
+ * - Delete the old private event
+ */
+async function retroactiveMatch(newEvents: Record<string, any>[]): Promise<void> {
+  // Get all private user-contributed events
+  const { data: privateEvents } = await supabase
+    .from('events')
+    .select('id, title, start_date, venue_name, contributed_by')
+    .eq('source_type', 'user_contributed')
+    .eq('publication_status', 'private');
+
+  if (!privateEvents || privateEvents.length === 0) return;
+
+  const normalize = (s: string) => s
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+  let merged = 0;
+
+  for (const priv of privateEvents) {
+    const privTitle = normalize(priv.title);
+    const privDate = (priv.start_date ?? '').slice(0, 10);
+
+    // Find a matching public event from the newly upserted batch
+    const match = newEvents.find((pub) => {
+      const pubTitle = normalize(pub.title);
+      const pubDate = (pub.start_date ?? '').slice(0, 10);
+
+      // Date must match: exact start_date, within date range, or in sessions
+      const pubEndDate = (pub.end_date ?? '').slice(0, 10);
+      const dateMatch = privDate === pubDate
+        || (pubDate && pubEndDate && privDate >= pubDate && privDate <= pubEndDate)
+        || (Array.isArray(pub.sessions) && pub.sessions.some((s: any) => s.date === privDate));
+      if (!dateMatch) return false;
+
+      // Title must be very similar
+      const words1 = new Set(privTitle.split(' ').filter((w: string) => w.length > 2));
+      const words2 = new Set(pubTitle.split(' ').filter((w: string) => w.length > 2));
+      if (words1.size === 0 || words2.size === 0) return false;
+      const intersection = [...words1].filter((w) => words2.has(w)).length;
+      const union = new Set([...words1, ...words2]).size;
+      if (intersection / union <= 0.5) return false;
+
+      // If both have venue names, require reasonable venue similarity
+      const privVenue = normalize(priv.venue_name ?? '');
+      const pubVenue = normalize(pub.venue_name ?? '');
+      if (privVenue && pubVenue) {
+        const vw1 = new Set(privVenue.split(' ').filter((w: string) => w.length > 2));
+        const vw2 = new Set(pubVenue.split(' ').filter((w: string) => w.length > 2));
+        if (vw1.size > 0 && vw2.size > 0) {
+          const vi = [...vw1].filter((w) => vw2.has(w)).length;
+          const vu = new Set([...vw1, ...vw2]).size;
+          if (vi / vu < 0.3) return false;
+        }
+      }
+      return true;
+    });
+
+    if (!match) continue;
+
+    // Find the public event's ID in DB
+    const { data: pubEvent } = await supabase
+      .from('events')
+      .select('id')
+      .eq('source_id', match.source_id)
+      .eq('publication_status', 'public')
+      .maybeSingle();
+
+    if (!pubEvent) continue;
+
+    const publicId = pubEvent.id;
+    const privateId = priv.id;
+    const userId = priv.contributed_by;
+
+    console.log(`[upsert] Retroactive merge: "${priv.title}" → "${match.title}" (${publicId})`);
+
+    // 1. Migrate saved_events per-row: update if no conflict, delete if duplicate
+    const { data: privSaved } = await supabase
+      .from('saved_events').select('user_id').eq('event_id', privateId);
+    for (const row of privSaved ?? []) {
+      const { error } = await supabase
+        .from('saved_events').update({ event_id: publicId })
+        .eq('event_id', privateId).eq('user_id', row.user_id);
+      if (error) {
+        await supabase.from('saved_events').delete()
+          .eq('event_id', privateId).eq('user_id', row.user_id);
+      }
+    }
+
+    // 2. Migrate going_events per-row
+    const { data: privGoing } = await supabase
+      .from('going_events').select('user_id').eq('event_id', privateId);
+    for (const row of privGoing ?? []) {
+      const { error } = await supabase
+        .from('going_events').update({ event_id: publicId })
+        .eq('event_id', privateId).eq('user_id', row.user_id);
+      if (error) {
+        await supabase.from('going_events').delete()
+          .eq('event_id', privateId).eq('user_id', row.user_id);
+      }
+    }
+
+    // 3. Copy ALL contributors from private event to public event (before cascade delete)
+    const { data: allContributors } = await supabase
+      .from('event_contributors').select('user_id, source').eq('event_id', privateId);
+    for (const c of allContributors ?? []) {
+      await supabase.from('event_contributors').upsert(
+        { event_id: publicId, user_id: c.user_id, source: c.source },
+        { onConflict: 'event_id,user_id' }
+      );
+    }
+    // Also add contributed_by if not already a contributor
+    if (userId) {
+      await supabase.from('event_contributors').upsert(
+        { event_id: publicId, user_id: userId, source: 'retroactive_merge' },
+        { onConflict: 'event_id,user_id' }
+      );
+    }
+
+    // 4. Move social links
+    await supabase
+      .from('event_social_links')
+      .update({ event_id: publicId })
+      .eq('event_id', privateId);
+
+    // 5. Point social_post_submissions FK refs to the public event (preserves URL dedup)
+    await supabase
+      .from('social_post_submissions')
+      .update({ created_event_id: publicId, match_event_id: publicId })
+      .eq('created_event_id', privateId);
+    await supabase
+      .from('social_post_submissions')
+      .update({ match_event_id: publicId })
+      .eq('match_event_id', privateId);
+
+    // 6. Delete the private event
+    const { error: delErr } = await supabase.from('events').delete().eq('id', privateId);
+    if (delErr) console.error(`[upsert] Failed to delete private event ${privateId}:`, delErr.message);
+
+    merged++;
+  }
+
+  if (merged > 0) {
+    console.log(`[upsert] Retroactive merge: merged ${merged} private events into public events`);
   }
 }
 

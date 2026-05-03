@@ -89,7 +89,17 @@ Event fields
 
 source_id (string, required) — Format: ai-{slug}-{YYYY-MM}. Example: "ai-jazz-festival-2026-05"
 title (string, required) — Event name as listed on the official source.
-category (string, required) — One of: art, live_music, comedy, food, outdoors, nightlife, popups, fitness, theater, workshops
+category (string, required) — One of: art, live_music, comedy, food, outdoors, nightlife, popups, fitness, theater, workshops, sports
+  Category guide:
+  - popups: sample sales, brand pop-ups, store openings, launch events/parties, markets, flea markets, one-off brand experiences, branded activations, product launches, free brand events
+  - theater: Broadway shows, off-Broadway plays, musicals, opera, ballet, staged performances ONLY. NOT pop-ups, NOT brand experiences, NOT art shows
+  - art: gallery exhibitions, museum shows, art fairs, film screenings, film festivals, photography exhibits
+  - nightlife: club nights, dance parties, raves, bar events. NOT brand launch parties (those are popups)
+  - fitness: run clubs, gym events, workout classes, yoga, pilates, races. NOT spectator sports (those are sports)
+  - food: restaurant openings, food festivals, tastings, supper clubs. NOT juice brand launches (those are popups)
+  - live_music: concerts, live bands, DJ sets, album releases, jazz, tour stops
+  - outdoors: parks events, nature walks, kayaking, outdoor screenings (NOT indoor film festivals). NOT spectator sports (those are sports)
+  - sports: pro/college sports games, tournaments, match days, Yankees, Mets, Knicks, Nets, Rangers, NYCFC, basketball, baseball, football, soccer, hockey, tennis, golf, boxing matches
 description (string, required) — Write this like The Infatuation or Eater would. 1-2 sentences that make a 27-year-old NYC professional want to go. Be specific about what makes this worth their time — the chef's pedigree, the venue's reputation, the lineup, the one-night-only factor, the brand. No generic hype. No "don't miss this!" or "exciting event!" — just tell them why it's good.
 start_date (string, required) — YYYY-MM-DD
 end_date (string, optional) — YYYY-MM-DD, only if multi-day
@@ -135,7 +145,7 @@ const EVENT_SCHEMA = {
           properties: {
             source_id:   { type: 'string' },
             title:       { type: 'string' },
-            category:    { type: 'string', enum: ['art', 'live_music', 'comedy', 'food', 'outdoors', 'nightlife', 'popups', 'fitness', 'theater', 'workshops'] },
+            category:    { type: 'string', enum: ['art', 'live_music', 'comedy', 'food', 'outdoors', 'nightlife', 'popups', 'fitness', 'theater', 'workshops', 'sports'] },
             description: { type: 'string' },
             start_date:  { type: 'string' },
             end_date:    { type: ['string', 'null'] },

@@ -17,6 +17,7 @@ import {
   Palette,
   ShoppingBag,
   Trees,
+  Trophy,
   Utensils,
   Wrench,
   type LucideIcon,
@@ -38,6 +39,7 @@ const CATEGORIES: { value: EventCategory; label: string; Icon: LucideIcon; chipB
   { value: "theater",   label: "Theater",        Icon: Drama,        chipBg: "#E8EFF5", chipFg: "#1E4060" },
   { value: "workshops", label: "Workshops",      Icon: Wrench,       chipBg: "#ECF2E8", chipFg: "#304E20" },
   { value: "popups",    label: "Pop-ups",        Icon: ShoppingBag,  chipBg: "#F5EDEA", chipFg: "#6A3820" },
+  { value: "sports",    label: "Sports",         Icon: Trophy,       chipBg: "#E8F0E8", chipFg: "#2D5A3A" },
 ];
 
 const BOROUGHS: BoroughName[] = [

@@ -212,13 +212,31 @@ const RULES: Rule[] = [
       'invisible dog',
     ],
   },
+  // ── Sports (before outdoors so "Yankees" doesn't get caught by outdoors) ──
+  {
+    target: 'sports',
+    keywords: [
+      'sports', 'basketball', 'football', 'soccer', 'golf', 'baseball',
+      'yankees', 'mets', 'knicks', 'nets', 'rangers', 'islanders',
+      'nycfc', 'liberty', 'red bulls',
+      'tournament', 'match day', 'game day', 'playoffs', 'championship',
+      'home game', 'away game', 'doubleheader', 'opening day',
+      'hockey', 'tennis', 'boxing match', 'ufc', 'mma',
+      'world series', 'super bowl', 'nba', 'nfl', 'mlb', 'nhl', 'mls',
+    ],
+    antiKeywords: ['esports', 'e-sports', 'gaming', 'video game'],
+    venuePatterns: [
+      'madison square garden', 'msg', 'barclays center',
+      'yankee stadium', 'citi field', 'metlife stadium',
+      'usta billie jean king', 'arthur ashe', 'red bull arena',
+      'audi field', 'prudential center',
+    ],
+  },
   // ── Outdoors ──
   {
     target: 'outdoors',
     keywords: [
-      'sports', 'basketball', 'football', 'soccer', 'golf', 'baseball',
-      'yankees', 'mets', 'knicks', 'nets', 'rangers', 'islanders',
-      'tournament', 'match day', 'game day', 'hike', 'hiking', 'parade',
+      'hike', 'hiking', 'parade',
       'kayak', 'bike ride', 'cycling tour', 'outdoor adventure',
       'nature walk', 'bird watching', 'foraging', 'fishing',
       'rock climbing', 'sailing', 'rowing',
@@ -237,7 +255,7 @@ const RULES: Rule[] = [
     ],
     antiKeywords: ['tour stop', 'album release', 'headliner', 'setlist', 'concert tour'],
     venuePatterns: [
-      'prospect park', 'central park', 'stadium', 'citi field', 'yankee stadium',
+      'prospect park', 'central park',
       'brooklyn bridge park', 'battery park', 'hudson river park',
       'governors island', 'randalls island', 'high line',
       'botanical garden', 'bronx zoo', 'queens botanical',
@@ -335,10 +353,16 @@ function tryReclassify(
   const tagsLower = tags.map((t) => t.toLowerCase()).join(' ');
   const allText = `${titleLower} ${descLower} ${venueLower} ${tagsLower}`;
 
-  // Check if it's a confirmed popup — if so, keep it as popups (don't reclassify away)
+  // Check if it's a confirmed popup — reclassify TO popups if not already, or leave if already popups
   for (const kw of POPUP_CONFIRM_KEYWORDS) {
     if (allText.includes(kw)) {
-      return null; // confirmed popup, leave it
+      if (currentCategory === 'popups') return null; // already correct
+      return {
+        newCategory: 'popups',
+        confidence: 'high' as Confidence,
+        matchedKeyword: kw,
+        matchSource: 'title' as const,
+      };
     }
   }
 

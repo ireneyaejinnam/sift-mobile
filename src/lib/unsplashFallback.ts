@@ -17,6 +17,7 @@ const QUERIES: Record<string, string> = {
   outdoors:  "outdoor park nature new york",
   nightlife: "nightlife bar neon lights",
   popups:    "market popup shopping urban street",
+  sports:    "sports stadium crowd game new york",
 };
 
 // Module-level cache — persists for the app session

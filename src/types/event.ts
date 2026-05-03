@@ -8,7 +8,8 @@ export type EventCategory =
   | "fitness"
   | "theater"
   | "workshops"
-  | "popups";
+  | "popups"
+  | "sports";
 
 export type EventDistance = "neighborhood" | "borough" | "anywhere";
 

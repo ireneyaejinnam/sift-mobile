@@ -48,6 +48,7 @@ const DB_TO_CATEGORY: Record<string, EventCategory> = {
   theater: "theater",
   workshops: "workshops",
   popups: "popups",
+  sports: "sports",
 };
 
 const VALID_BOROUGHS = [
@@ -425,6 +426,7 @@ export async function fetchAllUpcoming(
   categories?: EventCategory[],
   categoryWeights?: Partial<Record<EventCategory, number>>
 ): Promise<SiftEvent[]> {
+  console.log('[getEvents] fetchAllUpcoming categories:', categories);
   if (USE_LOCAL_SEED) {
     const mapped = fetchLocalAllUpcoming(limit, categories);
     if (categoryWeights && Object.keys(categoryWeights).length > 0) {
