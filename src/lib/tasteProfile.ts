@@ -14,20 +14,31 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import type { EventCategory } from "@/types/event";
 
-const STORAGE_KEY = "sift_taste_profile_v1";
+const STORAGE_KEY = "sift_taste_profile_v2";
 
 export type TasteProfile = {
   categoryWeights: Partial<Record<EventCategory, number>>;
+  tagWeights: Record<string, number>;
+  boroughWeights: Record<string, number>;
+  pricePreference: { ceiling: number | null; freeBoost: number };
   likedIds: string[];     // last 100 liked (going / saved)
   dislikedIds: string[];  // last 100 disliked (dismissed)
-  seededFromHistory?: boolean; // true once existing saves/going are factored in
+  interactionCount: number; // total meaningful interactions for cold start confidence
+  seededFromHistory?: boolean;
 };
 
 const WEIGHT_BUMP = 0.25;
 const WEIGHT_DROP = 0.15;
 const WEIGHT_MIN  = 0.3;
 const WEIGHT_MAX  = 2.0;
+const TAG_BUMP    = 0.08;
+const TAG_DROP    = 0.04;
+const TAG_MIN     = 0.2;
+const TAG_MAX     = 2.5;
+const BOROUGH_BUMP = 0.06;
+const BOROUGH_DROP = 0.03;
 const MAX_IDS     = 100;
+const MAX_TAGS    = 50; // cap tag weights map size
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
@@ -41,6 +52,27 @@ async function getCurrentUserId(): Promise<string | null> {
   }
 }
 
+// ── Defaults & migration from v1 ─────────────────────────────────────────────
+
+function ensureDefaults(partial: any): TasteProfile {
+  const likedIds = partial.likedIds ?? [];
+  const dislikedIds = partial.dislikedIds ?? [];
+  // Derive interactionCount from history if missing (v1 migration / hydrated profiles)
+  const interactionCount = partial.interactionCount > 0
+    ? partial.interactionCount
+    : likedIds.length + dislikedIds.length;
+  return {
+    categoryWeights: partial.categoryWeights ?? {},
+    tagWeights: partial.tagWeights ?? {},
+    boroughWeights: partial.boroughWeights ?? {},
+    pricePreference: partial.pricePreference ?? { ceiling: null, freeBoost: 0 },
+    likedIds,
+    dislikedIds,
+    interactionCount,
+    seededFromHistory: partial.seededFromHistory,
+  };
+}
+
 // ── Load ─────────────────────────────────────────────────────────────────────
 
 export async function loadTasteProfile(): Promise<TasteProfile> {
@@ -50,36 +82,41 @@ export async function loadTasteProfile(): Promise<TasteProfile> {
     try {
       const { data } = await supabase
         .from("user_taste_profiles")
-        .select("category_weights, liked_event_ids, disliked_event_ids")
+        .select("category_weights, tag_weights, borough_weights, price_preference, liked_event_ids, disliked_event_ids, interaction_count")
         .eq("user_id", userId)
         .single();
 
       if (data) {
-        const profile: TasteProfile = {
-          categoryWeights: (data.category_weights as Partial<Record<EventCategory, number>>) ?? {},
-          likedIds: (data.liked_event_ids as string[]) ?? [],
-          dislikedIds: (data.disliked_event_ids as string[]) ?? [],
-        };
-        // Keep local cache in sync
+        const profile = ensureDefaults({
+          categoryWeights: data.category_weights,
+          tagWeights: data.tag_weights,
+          boroughWeights: data.borough_weights,
+          pricePreference: data.price_preference,
+          likedIds: data.liked_event_ids,
+          dislikedIds: data.disliked_event_ids,
+          interactionCount: data.interaction_count,
+        });
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile)).catch(() => {});
         return profile;
       }
     } catch {}
   }
 
-  // Guest or Supabase miss — use AsyncStorage
+  // Guest or Supabase miss — use AsyncStorage (handles v1 → v2 migration via ensureDefaults)
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as TasteProfile;
+    if (raw) return ensureDefaults(JSON.parse(raw));
+    // Also check v1 key
+    const v1 = await AsyncStorage.getItem("sift_taste_profile_v1");
+    if (v1) return ensureDefaults(JSON.parse(v1));
   } catch {}
 
-  return { categoryWeights: {}, likedIds: [], dislikedIds: [] };
+  return ensureDefaults({});
 }
 
 // ── Save ─────────────────────────────────────────────────────────────────────
 
 async function saveProfile(profile: TasteProfile): Promise<void> {
-  // Always keep local cache in sync
   AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(profile)).catch(() => {});
 
   const userId = await getCurrentUserId();
@@ -87,33 +124,144 @@ async function saveProfile(profile: TasteProfile): Promise<void> {
     void supabase.from("user_taste_profiles").upsert({
       user_id: userId,
       category_weights: profile.categoryWeights,
+      tag_weights: profile.tagWeights,
+      borough_weights: profile.boroughWeights,
+      price_preference: profile.pricePreference,
       liked_event_ids: profile.likedIds,
       disliked_event_ids: profile.dislikedIds,
+      interaction_count: profile.interactionCount,
       updated_at: new Date().toISOString(),
     });
   }
 }
 
+// ── Signal strengths ─────────────────────────────────────────────────────────
+const SWIPE_RIGHT_BUMP = 0.10;
+const SWIPE_LEFT_DROP  = 0.05;
+const SAVE_BUMP        = 0.12;
+const GOING_BUMP       = 0.15;
+
+/** Context about the event for multi-dimensional taste learning */
+export interface EventContext {
+  category?: EventCategory;
+  tags?: string[];
+  borough?: string;
+  price?: number;  // price_min or 0 if free
+}
+
+// ── Taste update helpers ─────────────────────────────────────────────────────
+
+function bumpTaste(profile: TasteProfile, ctx: EventContext, strength: number) {
+  if (ctx.category) {
+    profile.categoryWeights[ctx.category] = Math.min(
+      WEIGHT_MAX,
+      (profile.categoryWeights[ctx.category] ?? 1.0) + strength
+    );
+  }
+  if (ctx.tags) {
+    for (const tag of ctx.tags) {
+      profile.tagWeights[tag] = Math.min(
+        TAG_MAX,
+        (profile.tagWeights[tag] ?? 1.0) + TAG_BUMP * (strength / SWIPE_RIGHT_BUMP)
+      );
+    }
+    trimTagWeights(profile);
+  }
+  if (ctx.borough) {
+    profile.boroughWeights[ctx.borough] = Math.min(
+      WEIGHT_MAX,
+      (profile.boroughWeights[ctx.borough] ?? 1.0) + BOROUGH_BUMP * (strength / SWIPE_RIGHT_BUMP)
+    );
+  }
+  if (ctx.price != null) {
+    if (ctx.price === 0) {
+      profile.pricePreference.freeBoost = Math.min(2.0, profile.pricePreference.freeBoost + 0.05);
+    }
+  }
+  profile.interactionCount++;
+}
+
+function dropTaste(profile: TasteProfile, ctx: EventContext, strength: number) {
+  if (ctx.category) {
+    profile.categoryWeights[ctx.category] = Math.max(
+      WEIGHT_MIN,
+      (profile.categoryWeights[ctx.category] ?? 1.0) - strength
+    );
+  }
+  if (ctx.tags) {
+    for (const tag of ctx.tags) {
+      profile.tagWeights[tag] = Math.max(
+        TAG_MIN,
+        (profile.tagWeights[tag] ?? 1.0) - TAG_DROP * (strength / SWIPE_LEFT_DROP)
+      );
+    }
+    trimTagWeights(profile);
+  }
+  if (ctx.borough) {
+    profile.boroughWeights[ctx.borough] = Math.max(
+      WEIGHT_MIN,
+      (profile.boroughWeights[ctx.borough] ?? 1.0) - BOROUGH_DROP * (strength / SWIPE_LEFT_DROP)
+    );
+  }
+  profile.interactionCount++;
+}
+
+/** Keep tag weights map from growing unbounded — prune lowest-signal entries */
+function trimTagWeights(profile: TasteProfile) {
+  const entries = Object.entries(profile.tagWeights);
+  if (entries.length <= MAX_TAGS) return;
+  // Remove entries closest to neutral (1.0)
+  entries.sort((a, b) => Math.abs(a[1] - 1.0) - Math.abs(b[1] - 1.0));
+  const toRemove = entries.slice(0, entries.length - MAX_TAGS);
+  for (const [key] of toRemove) delete profile.tagWeights[key];
+}
+
 // ── Record interactions ───────────────────────────────────────────────────────
 
 /**
- * Event-level signal — the user swiped right/left on a specific event.
- * Updates only likedIds/dislikedIds. Does NOT change category weights,
- * because "I'm not going to this particular concert" doesn't mean
- * "I dislike the whole concert category."
+ * Swipe right — positive signal.
  */
-export async function recordEventLike(eventId: string): Promise<TasteProfile> {
+export async function recordEventLike(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
   const profile = await loadTasteProfile();
   profile.likedIds = [eventId, ...profile.likedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
   profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  bumpTaste(profile, ctx ?? { category }, SWIPE_RIGHT_BUMP);
   await saveProfile(profile);
   return profile;
 }
 
-export async function recordEventDislike(eventId: string): Promise<TasteProfile> {
+/**
+ * Swipe left — negative signal.
+ */
+export async function recordEventDislike(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
   const profile = await loadTasteProfile();
   profile.dislikedIds = [eventId, ...profile.dislikedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
   profile.likedIds = profile.likedIds.filter(id => id !== eventId);
+  dropTaste(profile, ctx ?? { category }, SWIPE_LEFT_DROP);
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
+ * Save — strong positive signal.
+ */
+export async function recordEventSave(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.likedIds = [eventId, ...profile.likedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
+  profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  bumpTaste(profile, ctx ?? { category }, SAVE_BUMP);
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
+ * Going — strongest positive signal.
+ */
+export async function recordEventGoing(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.likedIds = [eventId, ...profile.likedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
+  profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  bumpTaste(profile, ctx ?? { category }, GOING_BUMP);
   await saveProfile(profile);
   return profile;
 }
@@ -122,9 +270,13 @@ export async function recordEventDislike(eventId: string): Promise<TasteProfile>
  * Reverse a prior dislike (e.g. when the user taps Undo after an accidental
  * left swipe). Removes the id from dislikedIds so the event can resurface.
  */
-export async function undoEventDislike(eventId: string): Promise<TasteProfile> {
+export async function undoEventDislike(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
   const profile = await loadTasteProfile();
   profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  // Reverse the taste drop from the original dismiss
+  bumpTaste(profile, ctx ?? { category }, SWIPE_LEFT_DROP);
+  // Don't double-count: the original dismiss incremented interactionCount, undo decrements it
+  profile.interactionCount = Math.max(0, profile.interactionCount - 1);
   await saveProfile(profile);
   return profile;
 }
@@ -209,17 +361,20 @@ export async function migrateToSupabase(): Promise<void> {
 
     const { data: remote } = await supabase
       .from("user_taste_profiles")
-      .select("category_weights, liked_event_ids, disliked_event_ids")
+      .select("category_weights, tag_weights, borough_weights, price_preference, liked_event_ids, disliked_event_ids, interaction_count")
       .eq("user_id", userId)
       .single();
 
     const remoteWeights = (remote?.category_weights as Partial<Record<EventCategory, number>>) ?? {};
-    const merged: TasteProfile = {
-      // Remote weights win on conflict (device they logged into previously is authoritative)
+    const merged: TasteProfile = ensureDefaults({
       categoryWeights: { ...local.categoryWeights, ...remoteWeights },
+      tagWeights: { ...local.tagWeights, ...(remote?.tag_weights as Record<string, number> ?? {}) },
+      boroughWeights: { ...local.boroughWeights, ...(remote?.borough_weights as Record<string, number> ?? {}) },
+      pricePreference: (remote?.price_preference as any) ?? local.pricePreference,
       likedIds: [...new Set([...(remote?.liked_event_ids ?? []), ...local.likedIds])].slice(0, MAX_IDS),
       dislikedIds: [...new Set([...(remote?.disliked_event_ids ?? []), ...local.dislikedIds])].slice(0, MAX_IDS),
-    };
+      interactionCount: Math.max(local.interactionCount, remote?.interaction_count ?? 0),
+    });
 
     await saveProfile(merged);
   } catch {}
