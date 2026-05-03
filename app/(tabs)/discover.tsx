@@ -58,13 +58,27 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
-import { fetchAllUpcoming, computeEventScore } from "@/lib/getEvents";
-import { loadTasteProfile, recordEventLike, recordEventDislike, undoEventDislike, hydrateTasteProfile } from "@/lib/tasteProfile";
+import { fetchAllUpcoming, computeEventScore, type TasteContext } from "@/lib/getEvents";
+import { loadTasteProfile, recordEventLike, recordEventDislike, recordEventGoing, recordEventSave, undoEventDislike, hydrateTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
 import { getOrCreateDeviceId } from "@/lib/storage";
+import {
+  setInteractionsUserId,
+  recordImpression,
+  recordSkip,
+  undoSkip,
+  recordSave as recordSaveInteraction,
+  recordGoing as recordGoingInteraction,
+  recordShare as recordShareInteraction,
+  fetchHiddenEventIds,
+  fetchInteractionsMap,
+  flushImpressions,
+  migrateFromDismissedHistory,
+  type EventInteraction,
+} from "@/lib/interactions";
 import { colors, spacing, radius, typography, shadows } from "@/lib/theme";
 import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
@@ -120,22 +134,47 @@ export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
 
+  const [interactionsMap, setInteractionsMap] = useState<Map<string, EventInteraction>>(new Map());
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+
+  // Load server-side interactions after identity is resolved
+  const loadServerInteractions = useCallback(async () => {
+    // Migrate local dismissals first (may create permanently_hidden rows)
+    const history = await getDismissedEvents();
+    setDismissedHistory(history);
+    if (history.length > 0) {
+      await migrateFromDismissedHistory(history.map((h) => h.eventId)).catch(() => {});
+    }
+    // Fetch after migration so newly hidden rows are included
+    fetchInteractionsMap().then(setInteractionsMap);
+    fetchHiddenEventIds().then(setHiddenIds);
+  }, []);
+
   useEffect(() => {
     // Use Supabase UID if logged in, stable device ID if guest (not email — privacy)
     if (userEmail) {
       import("@/lib/supabase").then(({ supabase }) => {
         supabase?.auth.getUser().then(({ data }) => {
-          setTrackingUserId(data.user?.id ?? userEmail);
-        }).catch(() => setTrackingUserId(userEmail));
+          const uid = data.user?.id ?? userEmail;
+          setTrackingUserId(uid);
+          setInteractionsUserId(uid, true); // authenticated
+          loadServerInteractions();
+        }).catch(() => {
+          setTrackingUserId(userEmail);
+          setInteractionsUserId(userEmail, true);
+          loadServerInteractions();
+        });
       });
     } else {
-      getOrCreateDeviceId().then(setTrackingUserId);
+      getOrCreateDeviceId().then((id) => {
+        setTrackingUserId(id);
+        setInteractionsUserId(id); // guest: device ID for local tracking only
+      });
+      // Guest: load dismissed history from AsyncStorage only (no server calls)
+      getDismissedEvents().then(setDismissedHistory);
     }
     track("app_open", { has_profile: !!userProfile });
-  }, []);
-
-  useEffect(() => {
-    getDismissedEvents().then(setDismissedHistory);
+    return () => { void flushImpressions(); };
   }, []);
 
   const [entryMode, setEntryMode] = useState<"chooser" | "browse" | "sift">("sift");
@@ -302,10 +341,72 @@ export default function DiscoverScreen() {
     }, [entryMode, step, handleBack, reset])
   );
 
+  // ── Diversity re-ranking ──────────────────────────────────────────────────
+  // Max 2 of same category in any 5-card window.
+  // If category is filtered, diversify on borough instead.
+  const diversifyFeed = (events: SiftEvent[], filteredCats: EventCategory[]): SiftEvent[] => {
+    if (events.length <= 5) return events;
+    const result: SiftEvent[] = [];
+    const deferred: SiftEvent[] = [];
+    const windowSize = 5;
+    const maxPerWindow = 2;
+
+    const getKey = (e: SiftEvent) =>
+      filteredCats.length === 0 ? e.category : (e.borough ?? "unknown");
+
+    for (const event of events) {
+      const key = getKey(event);
+      // Count how many of this key are in the last windowSize items
+      const recentCount = result.slice(-windowSize).filter((r) => getKey(r) === key).length;
+      if (recentCount < maxPerWindow) {
+        result.push(event);
+      } else {
+        deferred.push(event);
+      }
+    }
+    // Append deferred at end
+    return [...result, ...deferred];
+  };
+
+  // ── Explore slots ──────────────────────────────────────────────────────
+  // Inject ~10% high-quality wildcards from categories the user hasn't explored much
+  const injectExploreSlots = (
+    feed: SiftEvent[],
+    fullPool: SiftEvent[],
+    weights: Partial<Record<EventCategory, number>>,
+    filteredCats: EventCategory[]
+  ): SiftEvent[] => {
+    if (filteredCats.length > 0) return feed; // user explicitly filtered — don't inject
+    if (feed.length < 10) return feed;
+
+    const feedIds = new Set(feed.map((e) => e.id));
+    // Find categories with low or no weight (underexplored)
+    const allCats: EventCategory[] = ["arts","music","comedy","food","outdoors","nightlife","fitness","theater","workshops","popups","sports"];
+    const exploreCats = allCats.filter((c) => (weights[c] ?? 1.0) <= 1.0);
+    if (exploreCats.length === 0) return feed;
+
+    // Pick high-quality events from underexplored categories not already in feed
+    const exploreCandidates = fullPool
+      .filter((e) => exploreCats.includes(e.category) && !feedIds.has(e.id))
+      .filter((e) => (e.vibeScore ?? 5) >= 6) // only high quality
+      .slice(0, Math.ceil(feed.length * 0.12));
+
+    if (exploreCandidates.length === 0) return feed;
+
+    // Insert explore events at every ~8th position
+    const result = [...feed];
+    let inserted = 0;
+    for (const exp of exploreCandidates) {
+      const pos = Math.min(8 + inserted * 8, result.length);
+      result.splice(pos, 0, { ...exp, matchReason: "Something different" });
+      inserted++;
+    }
+    return result;
+  };
+
   const goToResults = useCallback(async (f: Filters, opts?: { skipTransition?: boolean }) => {
     const version = ++fetchVersionRef.current;
     loadingRef.current = true;
-    console.log('[discover] goToResults categories:', f.categories, 'version:', version);
 
     let msgTimer1: ReturnType<typeof setTimeout> | undefined;
     let msgTimer2: ReturnType<typeof setTimeout> | undefined;
@@ -336,6 +437,33 @@ export default function DiscoverScreen() {
       //   Tier 2: Onboarding interests (logged-in only, skip for guest)
       //   Tier 3: Everything else in the date range
 
+      // Generate user-facing match reason from score explanation
+      const getMatchReason = (event: SiftEvent): string => {
+        const expl = (event as any).__scoreExplanation;
+        if (!expl) return "Picked for you";
+        const tb = expl.tasteBreakdown;
+        // Find the strongest taste signal
+        const signals: [string, number][] = [
+          ["category", tb.category],
+          ["tags", tb.tags],
+          ["borough", tb.borough],
+          ["price", tb.price],
+        ];
+        signals.sort((a, b) => b[1] - a[1]);
+        const top = signals[0];
+        if (top[1] < 0.05) return event.price === 0 ? "It's free" : "Picked for you";
+        const catLabels: Record<string, string> = {
+          arts: "art events", music: "live music", comedy: "comedy", food: "food events",
+          outdoors: "outdoors", nightlife: "nightlife", fitness: "fitness", theater: "theater",
+          workshops: "workshops", popups: "pop-ups", sports: "sports",
+        };
+        if (top[0] === "category") return `Because you like ${catLabels[event.category] ?? event.category}`;
+        if (top[0] === "tags" && event.tags?.length) return `Because you like ${event.tags[0]}`;
+        if (top[0] === "borough" && event.borough) return `Popular in ${event.borough}`;
+        if (top[0] === "price" && event.price === 0) return "It's free";
+        return "Picked for you";
+      };
+
       const applyDistanceFilter = (list: SiftEvent[]) =>
         list.filter((e) => {
           if (f.boroughs && f.boroughs.length > 0) {
@@ -346,20 +474,42 @@ export default function DiscoverScreen() {
           return true;
         });
 
-      // Re-rank within a tier by composite score × taste weight.
+      // Compute impression penalty for an event based on interaction history
+      const getImpressionPenalty = (eventId: string): number => {
+        const interaction = interactionsMap.get(eventId);
+        if (!interaction || interaction.impression_count === 0) return 1.0;
+        // If user has positively acted, no penalty
+        if (interaction.going_count > 0 || interaction.save_count > 0) return 1.0;
+        // Seen but never acted on — downrank
+        return Math.max(0.3, 1.0 - (interaction.impression_count * 0.25));
+      };
+
+      // Build taste context from profile
+      const buildTasteCtx = (catWeight: number): TasteContext => ({
+        categoryWeight: catWeight,
+        tagWeights: tasteProfile?.tagWeights ?? {},
+        boroughWeights: tasteProfile?.boroughWeights ?? {},
+        pricePreference: tasteProfile?.pricePreference ?? { ceiling: null, freeBoost: 0 },
+        interactionCount: tasteProfile?.interactionCount ?? 0,
+      });
+
+      // Re-rank within a tier by composite score with full taste context + novelty.
       const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
-        if (Object.keys(weights).length === 0) return tier;
         return [...tier].sort((a, b) => {
           const wa = weights[a.category] ?? 1.0;
           const wb = weights[b.category] ?? 1.0;
-          return computeEventScore(b, wb) - computeEventScore(a, wa);
+          const pa = getImpressionPenalty(a.id);
+          const pb = getImpressionPenalty(b.id);
+          return computeEventScore(b, wb, pb, buildTasteCtx(wb)) - computeEventScore(a, wa, pa, buildTasteCtx(wa));
         });
       };
 
-      // Events arrive pre-sorted by composite score (vibe + timeliness + completeness).
-      // tieredSort groups them into tiers while preserving that order within each tier.
+      // Events arrive pre-sorted by composite score.
+      // tieredSort filters hidden events, groups into tiers, and re-ranks with taste + novelty.
       const tieredSort = (all: SiftEvent[]) => {
-        let pool = applyDistanceFilter(all);
+        // Filter out permanently hidden events (server-side + local)
+        let pool = all.filter((e) => !hiddenIds.has(e.id));
+        pool = applyDistanceFilter(pool);
 
         // Apply date range filter if user picked dates
         if (f.dateFrom && f.dateTo) {
@@ -376,27 +526,36 @@ export default function DiscoverScreen() {
 
         const quizCats = f.categories ?? [];
 
-        // Tier 1: matches quiz categories
+        // Tier 1: matches quiz categories (or all events if no filter)
         const tier1 = quizCats.length > 0
           ? pool.filter((e) => quizCats.includes(e.category))
-              .map((e) => ({ ...e, matchReason: "Matches your mood" }))
-          : pool.map((e) => ({ ...e, matchReason: "Picked for you" }));
-
-        if (quizCats.length === 0) return tier1;
+          : pool;
 
         const tier1Ids = new Set(tier1.map((e) => e.id));
 
-        // Tier 2: everything else (onboarding preferences removed from algo)
-        const tier2 = pool
-          .filter((e) => !tier1Ids.has(e.id))
-          .map((e) => ({ ...e, matchReason: e.price === 0 ? "It's free" : "More to explore" }));
+        // Tier 2: everything else (empty when no category filter)
+        const tier2 = quizCats.length > 0
+          ? pool.filter((e) => !tier1Ids.has(e.id))
+          : [];
 
-        // Re-rank within each tier by composite score × learned category weights
+        // Re-rank within each tier by composite score with full taste
         const weights = tasteProfile?.categoryWeights ?? {};
-        return [
+        const ranked = [
           ...applyPrefs(tier1, weights),
           ...applyPrefs(tier2, weights),
         ];
+
+        // Apply user-facing match reasons after scoring
+        for (const e of ranked) {
+          if (!e.matchReason) e.matchReason = getMatchReason(e);
+        }
+
+        // ── Diversity re-ranking ──
+        const diversified = diversifyFeed(ranked, quizCats);
+
+        // ── Explore slots ──
+        // 10% of feed = high-quality wildcards from underexplored categories
+        return injectExploreSlots(diversified, pool, weights, quizCats);
       };
 
       const fetchAndSort = async (): Promise<SiftEvent[]> => {
@@ -420,7 +579,6 @@ export default function DiscoverScreen() {
 
       // If a newer filter change started while we were fetching, discard these stale results
       if (fetchVersionRef.current !== version) {
-        console.log('[discover] Discarding stale results (version', version, 'vs current', fetchVersionRef.current, ')');
         return;
       }
 
@@ -458,10 +616,9 @@ export default function DiscoverScreen() {
     } finally {
       loadingRef.current = false;
     }
-  }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
+  }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile, interactionsMap, hiddenIds]);
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
-    console.log('[discover] handleFiltersChange categories:', newFilters.categories, 'loadingRef:', loadingRef.current);
     setFilters(newFilters);
     // Clear stale cards immediately before fetching new ones
     setSlots([]);
@@ -563,7 +720,16 @@ export default function DiscoverScreen() {
         };
         addDismissedEvent(record);
         setDismissedHistory((prev) => [...prev, record]);
-        recordEventDislike(eventId).then(setTasteProfile).catch(() => {});
+        recordEventDislike(eventId, dismissed.category, {
+          category: dismissed.category,
+          tags: dismissed.tags,
+          borough: dismissed.borough,
+          price: dismissed.price,
+        }).then(setTasteProfile).catch(() => {});
+        // Track skip in server-side interactions; if permanently hidden, update local state
+        recordSkip(eventId).then((hidden) => {
+          if (hidden) setHiddenIds((prev) => new Set([...prev, eventId]));
+        }).catch(() => {});
       }
       setSlots((prev) => {
         const idx = prev.findIndex((s) => s.event?.id === eventId);
@@ -584,7 +750,10 @@ export default function DiscoverScreen() {
     if (!evt) return;
     sessionDismissedRef.current.delete(evt.id);
     setDismissedIds((prev) => prev.filter((id) => id !== evt.id));
-    undoEventDislike(evt.id).then(setTasteProfile).catch(() => {});
+    undoEventDislike(evt.id, evt.category, {
+      category: evt.category, tags: evt.tags, borough: evt.borough, price: evt.price,
+    }).then(setTasteProfile).catch(() => {});
+    undoSkip(evt.id).catch(() => {});
     setSlots((prev) => {
       if (prev.length === 0) {
         return [{ event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' }];
@@ -653,6 +822,13 @@ export default function DiscoverScreen() {
     .map((c: string) => categories.find((cat) => cat.value === c)?.label ?? c)
     .join(" · ");
 
+  // Track impression when a new event card becomes active
+  useEffect(() => {
+    if (activeSlot?.type === 'event' && activeSlot.event) {
+      recordImpression(activeSlot.event.id);
+    }
+  }, [activeSlot?.key]);
+
   const handleCardStageLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.round(event.nativeEvent.layout.height);
     setCardStageHeight((prev) => (prev === nextHeight ? prev : nextHeight));
@@ -704,7 +880,10 @@ export default function DiscoverScreen() {
       track("event_going", { event_id: event.id, source: "swipe" });
       showToast("Marked as going");
       promptCalendar(event);
-      recordEventLike(event.id).then(setTasteProfile).catch(() => {});
+      recordEventGoing(event.id, event.category, {
+        category: event.category, tags: event.tags, borough: event.borough, price: event.price,
+      }).then(setTasteProfile).catch(() => {});
+      recordGoingInteraction(event.id).catch(() => {});
       advanceGoingSlot(event.id);
     },
     [isLoggedIn, toggleGoing, advanceGoingSlot, showToast, promptCalendar]
@@ -1102,8 +1281,11 @@ export default function DiscoverScreen() {
             onSaved={(name) => {
               showToast(`Saved to ${name}`);
               if (saveSheetEvent) {
-                recordEventLike(saveSheetEvent.id)
+                recordEventSave(saveSheetEvent.id, saveSheetEvent.category, {
+                  category: saveSheetEvent.category, tags: saveSheetEvent.tags, borough: saveSheetEvent.borough, price: saveSheetEvent.price,
+                })
                   .then(setTasteProfile).catch(() => {});
+                recordSaveInteraction(saveSheetEvent.id).catch(() => {});
               }
             }}
           />
@@ -1128,7 +1310,10 @@ export default function DiscoverScreen() {
               track("event_going", { event_id: goingSheetEvent.id, source: "swipe" });
               showToast("Marked as going");
               promptCalendar({ ...goingSheetEvent, startDate: date, endDate: date });
-              recordEventLike(goingSheetEvent.id).then(setTasteProfile).catch(() => {});
+              recordEventGoing(goingSheetEvent.id, goingSheetEvent.category, {
+                category: goingSheetEvent.category, tags: goingSheetEvent.tags, borough: goingSheetEvent.borough, price: goingSheetEvent.price,
+              }).then(setTasteProfile).catch(() => {});
+              recordGoingInteraction(goingSheetEvent.id).catch(() => {});
               setGoingSheetEvent(null);
             }}
             onCancel={() => setGoingSheetEvent(null)}
@@ -1146,7 +1331,10 @@ export default function DiscoverScreen() {
             eventId={shareSheetEvent.id}
             eventTitle={shareSheetEvent.title}
             eventUrl={shareSheetEvent.eventUrl || shareSheetEvent.link}
-            onClose={() => setShareSheetEvent(null)}
+            onClose={() => {
+              if (shareSheetEvent) recordShareInteraction(shareSheetEvent.id).catch(() => {});
+              setShareSheetEvent(null);
+            }}
           />
         )}
       </BottomSheet>

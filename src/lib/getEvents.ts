@@ -212,16 +212,81 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
  * Composite ranking score: vibe * 0.50 + timeliness * 0.30 + completeness * 0.20
  * categoryWeight (from taste profile) is applied as a multiplier.
  */
+/** Taste context for multi-dimensional scoring */
+export interface TasteContext {
+  categoryWeight: number;
+  tagWeights: Record<string, number>;
+  boroughWeights: Record<string, number>;
+  pricePreference: { ceiling: number | null; freeBoost: number };
+  interactionCount: number;
+}
+
+const DEFAULT_TASTE: TasteContext = {
+  categoryWeight: 1.0,
+  tagWeights: {},
+  boroughWeights: {},
+  pricePreference: { ceiling: null, freeBoost: 0 },
+  interactionCount: 0,
+};
+
+/**
+ * Compute event score for feed ranking.
+ *
+ * Formula: quality × 0.25 + taste × 0.40 + timing × 0.20 + completeness × 0.10 + novelty × 0.05
+ * Taste: category 35% + tags 35% + borough 10% + price 10% + freeBoost 10%
+ *
+ * Cold start: blends personalized score with quality-based score based on interaction count.
+ */
 export function computeEventScore(
   event: SiftEvent,
-  categoryWeight = 1.0
+  categoryWeight = 1.0,
+  impressionPenalty = 1.0,
+  taste: TasteContext = DEFAULT_TASTE
 ): number {
-  // Vibe: 1–10 → 0–1, unchecked events default to 0.5 (neutral)
-  const vibe = event.vibeScore != null ? (event.vibeScore - 1) / 9 : 0.5;
+  // Quality: vibe 1–10 → 0–1, unchecked = 0.5 neutral
+  const quality = event.vibeScore != null ? (event.vibeScore - 1) / 9 : 0.5;
 
-  // Timeliness: peak at 1–3 days, decays beyond 14
+  // ── Taste score (multi-dimensional) ──
+  const categoryAffinity = Math.min(categoryWeight / 2.0, 1.0);
+
+  // Tag affinity: average weight of matching tags (neutral = 0.5)
+  let tagAffinity = 0.5;
+  if (event.tags && event.tags.length > 0 && Object.keys(taste.tagWeights).length > 0) {
+    const tagScores = event.tags
+      .map((t) => taste.tagWeights[t])
+      .filter((w): w is number => w != null);
+    if (tagScores.length > 0) {
+      tagAffinity = Math.min(
+        (tagScores.reduce((a, b) => a + b, 0) / tagScores.length) / 2.5,
+        1.0
+      );
+    }
+  }
+
+  // Borough affinity
+  let boroughAffinity = 0.5;
+  if (event.borough && Object.keys(taste.boroughWeights).length > 0) {
+    const bw = taste.boroughWeights[event.borough];
+    if (bw != null) boroughAffinity = Math.min(bw / 2.0, 1.0);
+  }
+
+  // Price affinity
+  let priceAffinity = 0.5;
+  if (event.price === 0 && taste.pricePreference.freeBoost > 0) {
+    priceAffinity = Math.min(0.5 + taste.pricePreference.freeBoost * 0.25, 1.0);
+  } else if (taste.pricePreference.ceiling != null && event.price != null) {
+    priceAffinity = event.price <= taste.pricePreference.ceiling ? 0.7 : 0.3;
+  }
+
+  const tasteScore =
+    categoryAffinity * 0.35 +
+    tagAffinity * 0.35 +
+    boroughAffinity * 0.15 +
+    priceAffinity * 0.15;
+
+  // Timing: peak at 1–3 days, decays beyond 14
   const daysUntil = event.daysLeft ?? 30;
-  const timeliness =
+  const timing =
     daysUntil <= 0  ? 0
     : daysUntil <= 3  ? 1.0
     : daysUntil <= 7  ? 0.8
@@ -236,8 +301,40 @@ export function computeEventScore(
     (event.location ? 0.2 : 0) +
     (event.priceLabel && event.priceLabel !== "See tickets" ? 0.1 : 0);
 
-  const base = vibe * 0.50 + timeliness * 0.30 + completeness * 0.20;
-  return base * categoryWeight;
+  const novelty = impressionPenalty;
+
+  const personalizedScore =
+    quality * 0.25 + tasteScore * 0.40 + timing * 0.20 + completeness * 0.10 + novelty * 0.05;
+
+  // Cold start blending: until ~20 interactions, lean more on quality + timing
+  // If caller passed a non-default categoryWeight, they have real preference data —
+  // ensure confidence is at least 0.5 so category weight still influences scoring
+  const rawConfidence = Math.min(1, taste.interactionCount / 20);
+  const confidence = (categoryWeight !== 1.0 && rawConfidence < 0.5) ? 0.5 : rawConfidence;
+  const coldStartScore = quality * 0.45 + timing * 0.35 + completeness * 0.15 + novelty * 0.05;
+
+  const finalScore = confidence * personalizedScore + (1 - confidence) * coldStartScore;
+
+  // Attach explanation for debugging / future user-facing labels
+  (event as any).__scoreExplanation = {
+    finalScore: +finalScore.toFixed(3),
+    confidence: +confidence.toFixed(2),
+    components: {
+      quality: +(quality * 0.25).toFixed(3),
+      taste: +(tasteScore * 0.40).toFixed(3),
+      timing: +(timing * 0.20).toFixed(3),
+      completeness: +(completeness * 0.10).toFixed(3),
+      novelty: +(novelty * 0.05).toFixed(3),
+    },
+    tasteBreakdown: {
+      category: +(categoryAffinity * 0.35).toFixed(3),
+      tags: +(tagAffinity * 0.35).toFixed(3),
+      borough: +(boroughAffinity * 0.15).toFixed(3),
+      price: +(priceAffinity * 0.15).toFixed(3),
+    },
+  };
+
+  return finalScore;
 }
 
 /**
@@ -426,7 +523,6 @@ export async function fetchAllUpcoming(
   categories?: EventCategory[],
   categoryWeights?: Partial<Record<EventCategory, number>>
 ): Promise<SiftEvent[]> {
-  console.log('[getEvents] fetchAllUpcoming categories:', categories);
   if (USE_LOCAL_SEED) {
     const mapped = fetchLocalAllUpcoming(limit, categories);
     if (categoryWeights && Object.keys(categoryWeights).length > 0) {
