@@ -425,6 +425,7 @@ export async function fetchAllUpcoming(
   categories?: EventCategory[],
   categoryWeights?: Partial<Record<EventCategory, number>>
 ): Promise<SiftEvent[]> {
+  console.log('[getEvents] fetchAllUpcoming categories:', categories);
   if (USE_LOCAL_SEED) {
     const mapped = fetchLocalAllUpcoming(limit, categories);
     if (categoryWeights && Object.keys(categoryWeights).length > 0) {

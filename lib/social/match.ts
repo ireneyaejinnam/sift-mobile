@@ -29,6 +29,9 @@ export async function matchToExistingEvent(
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   // Step 0: Check if this exact URL was already submitted
+  // Only use URL dedup if the previous event is PUBLIC — otherwise fall through
+  // to fuzzy matching which may find a better public match
+  let privateUrlMatch: MatchResult | null = null;
   if (extracted.sourceUrl) {
     const { data: existing } = await supabase
       .from('social_post_submissions')
@@ -42,32 +45,53 @@ export async function matchToExistingEvent(
     if (prevEventId) {
       const { data: event } = await supabase
         .from('events')
-        .select('id, title')
+        .select('id, title, publication_status')
         .eq('id', prevEventId)
         .maybeSingle();
-      if (event) return { eventId: event.id, title: event.title, similarity: 1.0 };
+      if (event && event.publication_status === 'public') {
+        return { eventId: event.id, title: event.title, similarity: 1.0 };
+      }
+      // Save private match as fallback — if fuzzy matching can't run or finds nothing,
+      // we still want to add contributors to the existing private event
+      if (event) {
+        privateUrlMatch = { eventId: event.id, title: event.title, similarity: 1.0 };
+      }
     }
   }
 
-  if (!extracted.startDate) return null;
+  if (!extracted.startDate) return privateUrlMatch;
 
-  // Step 1: Query candidates within +/- 7 days
+  // Step 1: Query candidates — 3-way date match to catch collapsed multi-session events
   const dateStart = shiftDate(extracted.startDate, -7);
   const dateEnd = shiftDate(extracted.endDate ?? extracted.startDate, 7);
+  const extDate = extracted.startDate.slice(0, 10);
+
+  // Find events that have a session on the extracted date (catches later sessions of collapsed events)
+  const { data: sessionCandidates } = await supabase
+    .from('event_sessions')
+    .select('event_id')
+    .eq('date', extDate);
+  const sessionEventIds = [...new Set((sessionCandidates ?? []).map((s: any) => s.event_id))];
+
+  const datePredicates = [
+    `and(start_date.gte.${dateStart},start_date.lte.${dateEnd})`,
+    `and(start_date.lte.${extDate},end_date.gte.${extDate})`,
+    ...(sessionEventIds.length > 0 ? [`id.in.(${sessionEventIds.join(',')})`] : []),
+  ].join(',');
 
   const { data: candidates, error } = await supabase
     .from('events')
-    .select('id, title, start_date, venue_name, ticket_url, event_url')
-    .gte('start_date', dateStart)
-    .lte('start_date', dateEnd)
+    .select('id, title, start_date, venue_name, ticket_url, event_url, publication_status')
+    .or(datePredicates)
     .eq('is_suppressed', false)
     .limit(500);
 
-  if (error || !candidates || candidates.length === 0) return null;
+  if (error || !candidates || candidates.length === 0) return privateUrlMatch;
 
   // Step 2: Check for URL-based exact match first (compare as URLs, not text)
   if (extracted.ticketUrl || extracted.sourceUrl) {
     for (const c of candidates) {
+      if (c.publication_status !== 'public') continue;
       if (extracted.ticketUrl && c.ticket_url && normalizeUrl(extracted.ticketUrl) === normalizeUrl(c.ticket_url)) {
         return { eventId: c.id, title: c.title, similarity: 1.0 };
       }
@@ -84,12 +108,21 @@ export async function matchToExistingEvent(
   console.log(`[match] Extracted: "${extracted.title}" date=${extracted.startDate} venue="${extracted.venue}"`);
   console.log(`[match] Candidates: ${candidates.length} events in ${dateStart} to ${dateEnd}`);
 
+  const sessionMatchedIds = new Set(sessionEventIds);
   for (const candidate of candidates) {
-    const score = computeSimilarity(extracted, candidate);
+    // For candidates found via session date match, use the extracted date for scoring
+    // so the date component isn't penalized for comparing against the aggregate start_date
+    const dateOverride = sessionMatchedIds.has(candidate.id) ? extDate : undefined;
+    const score = computeSimilarity(extracted, candidate, dateOverride);
     if (score > 0.3) {
-      console.log(`[match]   "${candidate.title}" score=${score.toFixed(3)}`);
+      console.log(`[match]   "${candidate.title}" score=${score.toFixed(3)} ${(candidate as any).publication_status}`);
     }
-    if (score > bestScore && score > 0.5) {
+    // Prefer public events: at equal score, public wins over private
+    const isPublic = (candidate as any).publication_status === 'public';
+    const bestIsPublic = bestMatch ? candidates.find(c => c.id === bestMatch!.eventId && (c as any).publication_status === 'public') : false;
+    const betterScore = score > bestScore;
+    const sameScoreButPublic = score === bestScore && isPublic && !bestIsPublic;
+    if ((betterScore || sameScoreButPublic) && score > 0.5) {
       bestScore = score;
       bestMatch = {
         eventId: candidate.id,
@@ -100,7 +133,9 @@ export async function matchToExistingEvent(
   }
 
   console.log(`[match] Best: ${bestMatch ? `"${bestMatch.title}" (${bestScore.toFixed(3)})` : 'none'}`);
-  return bestMatch;
+  // If fuzzy matching found nothing but we had a private URL match, use it as fallback
+  // so repeat submissions still add contributors toward promotion
+  return bestMatch ?? privateUrlMatch;
 }
 
 /**
@@ -111,7 +146,8 @@ export async function matchToExistingEvent(
  */
 function computeSimilarity(
   extracted: ExtractedEvent,
-  candidate: { title: string; start_date: string; venue_name?: string | null }
+  candidate: { title: string; start_date: string; venue_name?: string | null },
+  overrideCandDate?: string
 ): number {
   const normExtTitle = normalize(extracted.title);
   const normCandTitle = normalize(candidate.title);
@@ -123,11 +159,12 @@ function computeSimilarity(
     tokenContainment(normExtTitle, normCandTitle)
   );
 
-  // Date: fuzzy
+  // Date: fuzzy — use override date for session-matched candidates
   let dateSim = 0.0;
-  if (extracted.startDate && candidate.start_date) {
+  const candDateStr = overrideCandDate ?? candidate.start_date;
+  if (extracted.startDate && candDateStr) {
     const extDate = new Date(extracted.startDate + 'T12:00:00Z').getTime();
-    const candDate = new Date(candidate.start_date.slice(0, 10) + 'T12:00:00Z').getTime();
+    const candDate = new Date(candDateStr.slice(0, 10) + 'T12:00:00Z').getTime();
     const daysDiff = Math.abs(extDate - candDate) / (1000 * 60 * 60 * 24);
     if (daysDiff === 0) dateSim = 1.0;
     else if (daysDiff <= 2) dateSim = 0.7;
@@ -216,6 +253,8 @@ function normalizeUrl(url: string): string {
 
 function normalize(s: string): string {
   return s
+    .normalize('NFD')              // decompose accents: é → e + combining accent
+    .replace(/[\u0300-\u036f]/g, '') // strip combining diacritical marks
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, '')
     .replace(/\s+/g, ' ')

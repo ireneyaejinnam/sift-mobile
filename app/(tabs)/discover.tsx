@@ -149,6 +149,7 @@ export default function DiscoverScreen() {
   const [cardStageHeight, setCardStageHeight] = useState(0);
   const [lastDismissedEvent, setLastDismissedEvent] = useState<SiftEvent | null>(null);
   const loadingRef = useRef(false);
+  const fetchVersionRef = useRef(0);
   const expandedToInterestsRef = useRef(false);
   const expandedInterestCatsRef = useRef<EventCategory[]>([]);
 
@@ -296,8 +297,9 @@ export default function DiscoverScreen() {
   );
 
   const goToResults = useCallback(async (f: Filters, opts?: { skipTransition?: boolean }) => {
-    if (loadingRef.current) return;
+    const version = ++fetchVersionRef.current;
     loadingRef.current = true;
+    console.log('[discover] goToResults categories:', f.categories, 'version:', version);
 
     let msgTimer1: ReturnType<typeof setTimeout> | undefined;
     let msgTimer2: ReturnType<typeof setTimeout> | undefined;
@@ -410,6 +412,12 @@ export default function DiscoverScreen() {
       // Run fetch and minimum transition delay in parallel
       const [resultEvents] = await Promise.all([fetchAndSort(), minDelay]);
 
+      // If a newer filter change started while we were fetching, discard these stale results
+      if (fetchVersionRef.current !== version) {
+        console.log('[discover] Discarding stale results (version', version, 'vs current', fetchVersionRef.current, ')');
+        return;
+      }
+
       clearTimeout(msgTimer1);
       clearTimeout(msgTimer2);
 
@@ -447,6 +455,7 @@ export default function DiscoverScreen() {
   }, [userProfile, goingEvents, savedEvents, dismissedHistory, tasteProfile]);
 
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
+    console.log('[discover] handleFiltersChange categories:', newFilters.categories, 'loadingRef:', loadingRef.current);
     setFilters(newFilters);
     // Clear stale cards immediately before fetching new ones
     setSlots([]);
@@ -963,14 +972,14 @@ export default function DiscoverScreen() {
           <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
         </View>
 
-        {/* Contextual hints — below filters, above cards */}
-        <HintOverlay hintKey="swipe_gestures" position="bottom">
+        {/* Contextual hints — inline, below filters, above cards */}
+        <HintOverlay hintKey="swipe_gestures">
           <HintText text={"Swipe right = Going · Swipe left = Skip · Tap for details\nLong press to tune your taste · Tap + to add events"} />
         </HintOverlay>
 
-        {!activeSlot && (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator size="large" color={colors.primary} />
+        {!activeSlot && !loading && (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 40 }}>
+            <SkeletonCard />
           </View>
         )}
 

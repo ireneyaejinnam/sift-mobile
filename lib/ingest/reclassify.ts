@@ -335,10 +335,16 @@ function tryReclassify(
   const tagsLower = tags.map((t) => t.toLowerCase()).join(' ');
   const allText = `${titleLower} ${descLower} ${venueLower} ${tagsLower}`;
 
-  // Check if it's a confirmed popup — if so, keep it as popups (don't reclassify away)
+  // Check if it's a confirmed popup — reclassify TO popups if not already, or leave if already popups
   for (const kw of POPUP_CONFIRM_KEYWORDS) {
     if (allText.includes(kw)) {
-      return null; // confirmed popup, leave it
+      if (currentCategory === 'popups') return null; // already correct
+      return {
+        newCategory: 'popups',
+        confidence: 'high' as Confidence,
+        matchedKeyword: kw,
+        matchSource: 'title' as const,
+      };
     }
   }
 
