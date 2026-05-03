@@ -47,7 +47,6 @@ import ProgressBar from "@/components/layout/ProgressBar";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
-import GestureTutorial from "@/components/ui/GestureTutorial";
 import HintOverlay, { HintText } from "@/components/ui/HintOverlay";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
@@ -61,7 +60,7 @@ import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
 import { fetchAllUpcoming, computeEventScore, type TasteContext } from "@/lib/getEvents";
 import { loadTasteProfile, recordEventLike, recordEventDislike, recordEventGoing, recordEventSave, undoEventDislike, hydrateTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
-import { hasGestureTipSeen, setGestureTipSeen, getDismissedEvents, addDismissedEvent } from "@/lib/storage";
+import { getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
 import { getOrCreateDeviceId } from "@/lib/storage";
@@ -69,6 +68,8 @@ import {
   setInteractionsUserId,
   recordImpression,
   recordSkip,
+  recordNeutralSkip,
+  undoNeutralSkip,
   undoSkip,
   recordSave as recordSaveInteraction,
   recordGoing as recordGoingInteraction,
@@ -182,6 +183,8 @@ export default function DiscoverScreen() {
   const [filters, setFilters] = useState<Filters>({});
   const [slots, setSlots] = useState<Slot[]>([]);
   const [resultPool, setResultPool] = useState<SiftEvent[]>([]);
+  const resultPoolRef = useRef<SiftEvent[]>([]);
+  useEffect(() => { resultPoolRef.current = resultPool; }, [resultPool]);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [dismissedHistory, setDismissedHistory] = useState<DismissedRecord[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
@@ -189,10 +192,10 @@ export default function DiscoverScreen() {
   const [goingSheetEvent, setGoingSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showGestureTip, setShowGestureTip] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const [cardStageHeight, setCardStageHeight] = useState(0);
   const [lastDismissedEvent, setLastDismissedEvent] = useState<SiftEvent | null>(null);
+  const lastDismissWasHardPass = useRef(false);
   const loadingRef = useRef(false);
   const fetchVersionRef = useRef(0);
   const expandedToInterestsRef = useRef(false);
@@ -509,6 +512,7 @@ export default function DiscoverScreen() {
       const tieredSort = (all: SiftEvent[]) => {
         // Filter out permanently hidden events (server-side + local)
         let pool = all.filter((e) => !hiddenIds.has(e.id));
+        console.log(`[feed] after hiddenIds filter: ${pool.length} (from ${all.length}, hidden: ${all.length - pool.length})`);
         pool = applyDistanceFilter(pool);
 
         // Apply date range filter if user picked dates
@@ -562,10 +566,14 @@ export default function DiscoverScreen() {
         try {
           const categoryWeights = tasteProfile?.categoryWeights;
           const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
+          console.log(`[feed] fetched ${allEvents.length} events, hiddenIds: ${hiddenIds.size}, sessionDismissed: ${sessionDismissedRef.current.size}`);
           if (allEvents.length > 0) {
-            return tieredSort(allEvents).filter(
+            const sorted = tieredSort(allEvents);
+            const filtered = sorted.filter(
               (e) => !sessionDismissedRef.current.has(e.id)
             );
+            console.log(`[feed] after tieredSort: ${sorted.length}, after sessionFilter: ${filtered.length}`);
+            return filtered;
           }
           return getAllCandidates(f, [], userProfile);
         } catch {
@@ -609,10 +617,6 @@ export default function DiscoverScreen() {
         categories: f.categories,
       });
 
-      // Show gesture tutorial on first ever results view
-      hasGestureTipSeen().then((seen) => {
-        if (!seen) setShowGestureTip(true);
-      });
     } finally {
       loadingRef.current = false;
     }
@@ -665,7 +669,7 @@ export default function DiscoverScreen() {
     excludedIds: Set<string>,
     quizCategories: string[]
   ): Slot[] => {
-    const next = resultPool.find((e) => !excludedIds.has(e.id))
+    const next = resultPoolRef.current.find((e) => !excludedIds.has(e.id))
       ?? getNextCandidate([...excludedIds], filters, userProfile);
 
     if (next) {
@@ -702,16 +706,51 @@ export default function DiscoverScreen() {
     return [{ event: null, key: `done-${Date.now()}`, type: 'done' as const }];
   };
 
-  const handleDismissEvent = useCallback(
+  // Advance the slot after any dismiss (shared by neutral + hard pass)
+  const advanceDismissSlot = useCallback(
+    (eventId: string, nextDismissed: string[]) => {
+      setSlots((prev) => {
+        const idx = prev.findIndex((s) => s.event?.id === eventId);
+        if (idx === -1) return prev;
+        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
+        const excludedIds = new Set([...nextDismissed, ...shownIds]);
+        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
+      });
+    },
+    [filters]
+  );
+
+  // Left swipe = "Not now" — no taste impact, event resurfaces later
+  const handleNeutralSkip = useCallback(
+    (eventId: string) => {
+      sessionDismissedRef.current.add(eventId);
+      const nextDismissed = [...dismissedIds, eventId];
+      setDismissedIds(nextDismissed);
+
+      const event = resultPool.find((e) => e.id === eventId);
+      if (event) setLastDismissedEvent(event);
+      lastDismissWasHardPass.current = false;
+
+      // No taste update — just record neutral skip for temporary suppression
+      const daysLeft = event?.daysLeft;
+      recordNeutralSkip(eventId, daysLeft).catch(() => {});
+
+      advanceDismissSlot(eventId, nextDismissed);
+    },
+    [dismissedIds, resultPool, advanceDismissSlot]
+  );
+
+  // Down swipe = "Not interested" — negative taste impact, counts toward permanent hide
+  const handleHardPass = useCallback(
     (eventId: string) => {
       sessionDismissedRef.current.add(eventId);
       const nextDismissed = [...dismissedIds, eventId];
       setDismissedIds(nextDismissed);
 
       const dismissed = resultPool.find((e) => e.id === eventId);
-      if (dismissed) {
-        setLastDismissedEvent(dismissed);
-      }
+      if (dismissed) setLastDismissedEvent(dismissed);
+      lastDismissWasHardPass.current = true;
+
       if (dismissed?.category) {
         const record: DismissedRecord = {
           eventId,
@@ -726,20 +765,14 @@ export default function DiscoverScreen() {
           borough: dismissed.borough,
           price: dismissed.price,
         }).then(setTasteProfile).catch(() => {});
-        // Track skip in server-side interactions; if permanently hidden, update local state
         recordSkip(eventId).then((hidden) => {
           if (hidden) setHiddenIds((prev) => new Set([...prev, eventId]));
         }).catch(() => {});
       }
-      setSlots((prev) => {
-        const idx = prev.findIndex((s) => s.event?.id === eventId);
-        if (idx === -1) return prev;
-        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
-        const excludedIds = new Set([...nextDismissed, ...shownIds]);
-        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
-      });
+
+      advanceDismissSlot(eventId, nextDismissed);
     },
-    [dismissedIds, filters, userProfile, resultPool]
+    [dismissedIds, resultPool, advanceDismissSlot]
   );
 
   // Undoes the most recent dismiss. Pulls the event back out of dismissedIds,
@@ -750,10 +783,16 @@ export default function DiscoverScreen() {
     if (!evt) return;
     sessionDismissedRef.current.delete(evt.id);
     setDismissedIds((prev) => prev.filter((id) => id !== evt.id));
-    undoEventDislike(evt.id, evt.category, {
-      category: evt.category, tags: evt.tags, borough: evt.borough, price: evt.price,
-    }).then(setTasteProfile).catch(() => {});
-    undoSkip(evt.id).catch(() => {});
+    if (lastDismissWasHardPass.current) {
+      // Reverse taste + server skip for hard passes
+      undoEventDislike(evt.id, evt.category, {
+        category: evt.category, tags: evt.tags, borough: evt.borough, price: evt.price,
+      }).then(setTasteProfile).catch(() => {});
+      undoSkip(evt.id).catch(() => {});
+    } else {
+      // Clear server-side suppression for neutral skips
+      undoNeutralSkip(evt.id).catch(() => {});
+    }
     setSlots((prev) => {
       if (prev.length === 0) {
         return [{ event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' }];
@@ -1169,19 +1208,12 @@ export default function DiscoverScreen() {
 
       <View style={s.resultsStage}>
         <View style={s.resultsFilters}>
-          <GestureTutorial
-            visible={showGestureTip}
-            onDismiss={() => {
-              setShowGestureTip(false);
-              setGestureTipSeen();
-            }}
-          />
           <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
         </View>
 
-        {/* Contextual hints — inline, below filters, above cards */}
+        {/* Swipe hints — stays until user dismisses */}
         <HintOverlay hintKey="swipe_gestures">
-          <HintText text={"Swipe right = Going · Swipe left = Skip · Tap for details\nLong press to tune your taste · Tap + to add events"} />
+          <HintText text={"Swipe right = Going · Swipe left = Not now\nSwipe down = Not interested · Tap for details\nLong press to tune your taste · Tap + to add events"} />
         </HintOverlay>
 
         {!activeSlot && !loading && (
@@ -1244,7 +1276,8 @@ export default function DiscoverScreen() {
                 track("card_tap", { event_id: activeSlot.event!.id, category: activeSlot.event!.category });
                 openEventDetail(activeSlot.event!);
               }}
-              onDismiss={() => handleDismissEvent(activeSlot.event!.id)}
+              onDismiss={() => handleNeutralSkip(activeSlot.event!.id)}
+              onHardPass={() => handleHardPass(activeSlot.event!.id)}
               onGoing={() => handleGoingSwipe(activeSlot.event!)}
               onRequestSignIn={() => router.push("/(auth)/signin")}
               onBookmarkPress={() => {
