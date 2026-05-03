@@ -24,7 +24,7 @@ const NAME_LIST_PATH   = join(__dirname, 'output', 'ai_new_events_name_list.json
 
 const VALID_CATEGORIES = new Set([
   'art', 'live_music', 'comedy', 'food', 'outdoors',
-  'nightlife', 'popups', 'fitness', 'theater', 'workshops',
+  'nightlife', 'popups', 'fitness', 'theater', 'workshops', 'sports',
 ]);
 
 const VALID_BOROUGHS = new Set([

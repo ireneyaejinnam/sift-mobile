@@ -89,15 +89,16 @@ Rules:
 - price: numeric value in dollars, 0 if free, null if unknown
 - price_label: human-readable ("Free", "$25", "$15-30", "See tickets")
 - For Instagram/TikTok posts: extract from caption, link in bio context, and any visible text
-- category must match one of: art, live_music, comedy, food, outdoors, nightlife, popups, fitness, theater, workshops
+- category must match one of: art, live_music, comedy, food, outdoors, nightlife, popups, fitness, theater, workshops, sports
   Category guide:
   - popups: sample sales, brand pop-ups, launch events/parties, markets, branded activations, product launches, free brand events
   - theater: Broadway/off-Broadway plays, musicals, opera, ballet ONLY. NOT pop-ups, NOT brand experiences
   - art: galleries, museums, film screenings/festivals, photography
   - nightlife: club nights, dance parties, raves. NOT brand launch parties (= popups)
-  - fitness: run clubs, gym events, workouts, yoga, races. NOT outdoor walks
+  - fitness: run clubs, gym events, workouts, yoga. NOT spectator sports (= sports)
   - food: restaurant openings, tastings, food festivals. NOT juice brand launches (= popups)
-  - live_music: concerts, DJ sets, jazz, tour stops, album releases`;
+  - live_music: concerts, DJ sets, jazz, tour stops, album releases
+  - sports: pro/college games, tournaments, Yankees, Mets, Knicks, Nets, Rangers, basketball, baseball, football, soccer, hockey`;
 }
 
 /**

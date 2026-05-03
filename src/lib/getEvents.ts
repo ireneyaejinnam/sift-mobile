@@ -48,6 +48,7 @@ const DB_TO_CATEGORY: Record<string, EventCategory> = {
   theater: "theater",
   workshops: "workshops",
   popups: "popups",
+  sports: "sports",
 };
 
 const VALID_BOROUGHS = [

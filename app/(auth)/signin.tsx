@@ -42,7 +42,9 @@ export default function SignInScreen() {
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: "https://siftapp.site/reset-password",
+      });
       if (error) {
         showToast(error.message);
       } else {

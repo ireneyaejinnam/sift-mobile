@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   View,
   Text,
   Pressable,
@@ -36,6 +38,7 @@ import {
   ShoppingBag,
   Sparkles,
   Trees,
+  Trophy,
   Utensils,
   Wrench,
   Zap,
@@ -63,6 +66,7 @@ import type { DismissedRecord } from "@/lib/storage";
 import { track, setTrackingUserId } from "@/lib/track";
 import { getOrCreateDeviceId } from "@/lib/storage";
 import { colors, spacing, radius, typography, shadows } from "@/lib/theme";
+import { generateGoogleCalendarUrl, addToDeviceCalendar } from "@/lib/calendar";
 import type { BoroughName, EventCategory, EventDistance, SiftEvent } from "@/types/event";
 import type { Filters, Step } from "@/types/quiz";
 
@@ -85,6 +89,7 @@ const categories: { value: EventCategory; label: string; emoji: string; Icon: Ca
   { value: "theater",   label: "Theater",          emoji: "🎭", Icon: Drama,       chipBg: "#E3ECF4", chipFg: "#2F4E70" },
   { value: "workshops", label: "Workshops",        emoji: "🛠️", Icon: Wrench,      chipBg: "#E8EFDC", chipFg: "#3E5A2B" },
   { value: "popups",    label: "Pop-ups & Sales",  emoji: "🛍️", Icon: ShoppingBag, chipBg: "#F2E4D8", chipFg: "#7A4028" },
+  { value: "sports",    label: "Sports",            emoji: "🏆", Icon: Trophy,      chipBg: "#E8F0E8", chipFg: "#2D5A3A" },
 ];
 
 const boroughOptions: { value: BoroughName; chipBg: string; chipFg: string }[] = [
@@ -99,6 +104,7 @@ const INTEREST_TO_CATEGORY: Record<string, EventCategory> = {
   live_music: "music", art_exhibitions: "arts", theater: "theater",
   workshops: "workshops", fitness: "fitness", comedy: "comedy",
   food: "food", outdoor: "outdoors", nightlife: "nightlife", popups: "popups",
+  sports: "sports",
 };
 
 interface Slot {
@@ -652,6 +658,27 @@ export default function DiscoverScreen() {
     setCardStageHeight((prev) => (prev === nextHeight ? prev : nextHeight));
   }, []);
 
+  const promptCalendar = useCallback((ev: SiftEvent) => {
+    Alert.alert("Add to your calendar?", undefined, [
+      {
+        text: "Google Calendar",
+        onPress: () => {
+          track("calendar_export", { event_id: ev.id, method: "google" });
+          Linking.openURL(generateGoogleCalendarUrl(ev));
+        },
+      },
+      {
+        text: "Apple Calendar",
+        onPress: async () => {
+          track("calendar_export", { event_id: ev.id, method: "apple" });
+          const ok = await addToDeviceCalendar(ev);
+          if (ok) showToast("Added to calendar");
+        },
+      },
+      { text: "Skip", style: "cancel" },
+    ]);
+  }, [showToast]);
+
   const handleGoingSwipe = useCallback(
     (event: SiftEvent) => {
       if (!isLoggedIn) {
@@ -676,10 +703,11 @@ export default function DiscoverScreen() {
       });
       track("event_going", { event_id: event.id, source: "swipe" });
       showToast("Marked as going");
+      promptCalendar(event);
       recordEventLike(event.id).then(setTasteProfile).catch(() => {});
       advanceGoingSlot(event.id);
     },
-    [isLoggedIn, toggleGoing, advanceGoingSlot, showToast]
+    [isLoggedIn, toggleGoing, advanceGoingSlot, showToast, promptCalendar]
   );
 
   // ── Transition screen (must come before quiz check) ────
@@ -1099,6 +1127,7 @@ export default function DiscoverScreen() {
               });
               track("event_going", { event_id: goingSheetEvent.id, source: "swipe" });
               showToast("Marked as going");
+              promptCalendar({ ...goingSheetEvent, startDate: date, endDate: date });
               recordEventLike(goingSheetEvent.id).then(setTasteProfile).catch(() => {});
               setGoingSheetEvent(null);
             }}

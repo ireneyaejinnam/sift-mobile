@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, Linking, StyleSheet } from "react-nat
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { User, Pencil, Check, LogOut, ChevronRight, Settings } from "lucide-react-native";
+import { User, Pencil, Check, ChevronRight, Settings } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { loadTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
@@ -23,8 +23,8 @@ const BUDGET_LABELS: Record<string, string> = {
   no_limit: "No limit",
 };
 const CATEGORY_LABELS: Record<string, string> = {
-  music: "Live music",
-  arts: "Art & culture",
+  music: "Live music", live_music: "Live music",
+  arts: "Art & culture", art: "Art & culture",
   comedy: "Comedy",
   food: "Food & drink",
   outdoors: "Outdoors",
@@ -33,6 +33,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   theater: "Theater",
   workshops: "Workshops",
   popups: "Pop-ups",
+  sports: "Sports",
 };
 const INTEREST_LABELS: Record<string, string> = {
   live_music: "Live music",
@@ -59,7 +60,6 @@ export default function ProfileTab() {
     sharedWithYou,
     createdAt,
     updateDisplayName,
-    signOut,
     refreshFromRemote,
   } = useUser();
 
@@ -79,9 +79,24 @@ export default function ProfileTab() {
     }, [isLoggedIn, refreshFromRemote])
   );
 
-  const topCategory = tasteProfile
-    ? Object.entries(tasteProfile.categoryWeights).sort(([, a], [, b]) => b - a)[0]
-    : null;
+  const [topSavedCategory, setTopSavedCategory] = useState<[string, number] | null>(null);
+  useEffect(() => {
+    if (!isLoggedIn || savedEvents.length === 0) { setTopSavedCategory(null); return; }
+    const ids = savedEvents.map(e => e.eventId);
+    import("@/lib/supabase").then(({ supabase }) => {
+      if (!supabase) return;
+      supabase.from("events").select("id, category").in("id", ids).then(({ data }) => {
+        if (!data?.length) return;
+        const counts: Record<string, number> = {};
+        for (const row of data) {
+          const cat = row.category as string;
+          counts[cat] = (counts[cat] ?? 0) + 1;
+        }
+        const top = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
+        if (top) setTopSavedCategory(top);
+      });
+    });
+  }, [isLoggedIn, savedEvents.length]);
 
   const now = new Date();
   const goingThisMonth = goingEvents.filter((e) => {
@@ -152,7 +167,7 @@ export default function ProfileTab() {
               {userEmail ? <Text style={st.emailLabel}>{userEmail}</Text> : null}
             </View>
             <Pressable
-              onPress={() => router.push("/(onboarding)/flow")}
+              onPress={() => router.push("/settings")}
               style={st.settingsButton}
               hitSlop={8}
             >
@@ -263,10 +278,10 @@ export default function ProfileTab() {
           <View style={st.section}>
             <Text style={st.sectionTitle}>Sift knows you</Text>
             <View style={st.prefCard}>
-              {topCategory && (
+              {topSavedCategory && (
                 <View style={st.prefRow}>
-                  <Text style={st.prefKey}>Most explored</Text>
-                  <Text style={st.prefValue}>{CATEGORY_LABELS[topCategory[0]] ?? topCategory[0]}</Text>
+                  <Text style={st.prefKey}>Most saved</Text>
+                  <Text style={st.prefValue}>{CATEGORY_LABELS[topSavedCategory[0]] ?? topSavedCategory[0]}</Text>
                 </View>
               )}
               {goingThisMonth > 0 && (
@@ -310,20 +325,6 @@ export default function ProfileTab() {
               {new Date(createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
             </Text>
           </View>
-        )}
-
-        {/* ── Sign out ────────────────────────── */}
-        {isLoggedIn && (
-          <Pressable
-            onPress={() => {
-              void signOut();
-              router.replace("/(auth)/gate");
-            }}
-            style={st.signOutButton}
-          >
-            <LogOut size={15} strokeWidth={1.8} color={colors.textMuted} />
-            <Text style={st.signOutText}>Sign out</Text>
-          </Pressable>
         )}
 
         {/* ── Privacy & Terms ─────────────────── */}
