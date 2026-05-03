@@ -223,6 +223,19 @@ export async function migrateFromDismissedHistory(
     skipCounts.set(id, (skipCounts.get(id) ?? 0) + 1);
   }
 
+  // Filter out event IDs that no longer exist (deleted by dedup/cleanup)
+  if (skipCounts.size > 0) {
+    const candidateIds = [...skipCounts.keys()];
+    const { data: validEvents } = await db()
+      .from("events")
+      .select("id")
+      .in("id", candidateIds);
+    const validIds = new Set((validEvents ?? []).map((r: any) => r.id));
+    for (const id of candidateIds) {
+      if (!validIds.has(id)) skipCounts.delete(id);
+    }
+  }
+
   if (skipCounts.size === 0) return;
 
   const now = new Date().toISOString();
