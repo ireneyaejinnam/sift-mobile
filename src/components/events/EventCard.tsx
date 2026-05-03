@@ -84,7 +84,8 @@ function formatEventDate(event: SiftEvent) {
 interface EventCardProps {
   event: SiftEvent;
   onPress: () => void;
-  onDismiss: () => void;
+  onDismiss: () => void;       // neutral "not now" (left swipe)
+  onHardPass: () => void;      // negative "not interested" (down swipe)
   onGoing: () => void;
   onRequestSignIn?: () => void;
   onBookmarkPress: () => void;
@@ -99,6 +100,7 @@ export default function EventCard({
   event,
   onPress,
   onDismiss,
+  onHardPass,
   onGoing,
   onRequestSignIn,
   onBookmarkPress,
@@ -192,48 +194,59 @@ export default function EventCard({
   // ── Swipe gesture ────────────────────────────────────────
 
   const translateX = useSharedValue(0);
-
-  const onSwipeComplete = () => {
-    onDismiss();
-  };
-
-  const onSwipeRightComplete = () => {
-    onGoing();
-  };
-
-  const onSwipeUpComplete = () => {
-    onPress();
-  };
+  const translateY = useSharedValue(0);
+  const SWIPE_DOWN_THRESHOLD = 90;
 
   const panGesture = Gesture.Pan()
-    .activeOffsetX([-20, 20])
+    .minDistance(20)
     .onUpdate((e) => {
-      if (Math.abs(e.translationX) >= Math.abs(e.translationY)) {
+      const horizontal = Math.abs(e.translationX) >= Math.abs(e.translationY);
+      if (horizontal) {
         translateX.value = e.translationX;
+        translateY.value = 0;
+      } else if (e.translationY > 0) {
+        // Only track downward movement
+        translateY.value = e.translationY;
+        translateX.value = 0;
+      } else if (e.translationY < 0) {
+        // Swipe up: don't track visually, handle on end
+        translateX.value = 0;
+        translateY.value = 0;
       }
     })
     .onEnd((e) => {
-      const horizontalWins = Math.abs(e.translationX) >= Math.abs(e.translationY);
+      const horizontal = Math.abs(e.translationX) >= Math.abs(e.translationY);
 
-      if (horizontalWins && e.translationX < -SWIPE_THRESHOLD) {
+      if (horizontal && e.translationX < -SWIPE_THRESHOLD) {
+        // Left swipe = "Not now" (neutral)
         translateX.value = withTiming(-SCREEN_WIDTH, { duration: 250 }, () => {
-          runOnJS(onSwipeComplete)();
+          runOnJS(onDismiss)();
         });
-      } else if (horizontalWins && e.translationX > SWIPE_THRESHOLD) {
+      } else if (horizontal && e.translationX > SWIPE_THRESHOLD) {
+        // Right swipe = "Going"
         translateX.value = withTiming(SCREEN_WIDTH, { duration: 250 }, () => {
-          runOnJS(onSwipeRightComplete)();
+          runOnJS(onGoing)();
         });
-      } else if (!horizontalWins && e.translationY < -SWIPE_UP_THRESHOLD) {
+      } else if (!horizontal && e.translationY > SWIPE_DOWN_THRESHOLD) {
+        // Down swipe = "Not interested" (hard pass)
+        translateY.value = withTiming(800, { duration: 250 }, () => {
+          runOnJS(onHardPass)();
+        });
+      } else if (!horizontal && e.translationY < -SWIPE_UP_THRESHOLD) {
+        // Up swipe = open detail
         translateX.value = withTiming(0, { duration: 120 });
-        runOnJS(onSwipeUpComplete)();
+        translateY.value = withTiming(0, { duration: 120 });
+        runOnJS(onPress)();
       } else {
         translateX.value = withTiming(0, { duration: 200 });
+        translateY.value = withTiming(0, { duration: 200 });
       }
     });
 
   const animatedCardStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
+      { translateY: translateY.value },
       {
         rotate: `${interpolate(
           translateX.value,
@@ -244,7 +257,7 @@ export default function EventCard({
       },
     ],
     opacity: interpolate(
-      Math.abs(translateX.value),
+      Math.max(Math.abs(translateX.value), translateY.value),
       [0, SWIPE_THRESHOLD, SCREEN_WIDTH],
       [1, 0.7, 0],
       Extrapolation.CLAMP
@@ -255,8 +268,12 @@ export default function EventCard({
     opacity: interpolate(translateX.value, [0, SWIPE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
   }));
 
-  const skipOverlayStyle = useAnimatedStyle(() => ({
+  const notNowOverlayStyle = useAnimatedStyle(() => ({
     opacity: interpolate(translateX.value, [0, -SWIPE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
+  }));
+
+  const hardPassOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(translateY.value, [0, SWIPE_DOWN_THRESHOLD], [0, 1], Extrapolation.CLAMP),
   }));
 
   const handleBookmarkPress = () => {
@@ -326,8 +343,11 @@ export default function EventCard({
               <Animated.View style={[styles.swipeOverlayLeft, goingOverlayStyle]}>
                 <Text style={styles.swipeOverlayTextGoing}>GOING ✓</Text>
               </Animated.View>
-              <Animated.View style={[styles.swipeOverlayRight, skipOverlayStyle]}>
-                <Text style={styles.swipeOverlayTextSkip}>SKIP</Text>
+              <Animated.View style={[styles.swipeOverlayRight, notNowOverlayStyle]}>
+                <Text style={styles.swipeOverlayTextNotNow}>NOT NOW</Text>
+              </Animated.View>
+              <Animated.View style={[styles.swipeOverlayCenter, hardPassOverlayStyle]}>
+                <Text style={styles.swipeOverlayTextHardPass}>NOT INTERESTED</Text>
               </Animated.View>
 
               {/* Pills — overlaid top-left */}
@@ -600,12 +620,24 @@ const styles = StyleSheet.create({
     right: 20,
     zIndex: 10,
     borderWidth: 3,
+    borderColor: "#8E8E93",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: "rgba(142, 142, 147, 0.2)",
+    transform: [{ rotate: "15deg" }],
+  },
+  swipeOverlayCenter: {
+    position: "absolute",
+    top: 60,
+    alignSelf: "center",
+    zIndex: 10,
+    borderWidth: 3,
     borderColor: "#FF3B30",
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 6,
     backgroundColor: "rgba(255, 59, 48, 0.2)",
-    transform: [{ rotate: "15deg" }],
   },
   swipeOverlayTextGoing: {
     color: "#34C759",
@@ -613,11 +645,17 @@ const styles = StyleSheet.create({
     fontSize: 22,
     letterSpacing: 1.5,
   },
-  swipeOverlayTextSkip: {
+  swipeOverlayTextNotNow: {
+    color: "#8E8E93",
+    fontWeight: "800",
+    fontSize: 18,
+    letterSpacing: 1.5,
+  },
+  swipeOverlayTextHardPass: {
     color: "#FF3B30",
     fontWeight: "800",
-    fontSize: 22,
-    letterSpacing: 1.5,
+    fontSize: 16,
+    letterSpacing: 1,
   },
 
   // ── Pills overlaid on image ─────────────────────────────
