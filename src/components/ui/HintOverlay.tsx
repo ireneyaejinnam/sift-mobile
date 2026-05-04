@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { X } from "lucide-react-native";
+import { X, Info } from "lucide-react-native";
 import { isHintDismissed, dismissHint } from "@/lib/storage";
-import { colors, radius } from "@/lib/theme";
+import { colors, radius, typography } from "@/lib/theme";
 
 interface HintOverlayProps {
   hintKey: string;
-  children: React.ReactNode;
+  hints: { action: string; detail: string }[];
   onDismiss?: () => void;
 }
 
 export default function HintOverlay({
   hintKey,
-  children,
+  hints,
   onDismiss,
 }: HintOverlayProps) {
   const [visible, setVisible] = useState(false);
@@ -32,46 +32,77 @@ export default function HintOverlay({
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.bubble}>
-        <View style={styles.content}>{children}</View>
-        <Pressable onPress={handleDismiss} hitSlop={12} style={styles.closeButton}>
-          <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
-        </Pressable>
+    <View style={s.container}>
+      <View style={s.banner}>
+        <View style={s.header}>
+          <View style={s.titleRow}>
+            <Info size={13} color={colors.primary} strokeWidth={2} />
+            <Text style={s.title}>How it works</Text>
+          </View>
+          <Pressable onPress={handleDismiss} hitSlop={12} style={s.closeBtn}>
+            <X size={14} color={colors.primary} strokeWidth={2.5} />
+          </Pressable>
+        </View>
+        <View style={s.hintList}>
+          {hints.map((hint, i) => (
+            <View key={i} style={s.hintRow}>
+              <Text style={s.action}>{hint.action}</Text>
+              <Text style={s.detail}>{hint.detail}</Text>
+            </View>
+          ))}
+        </View>
       </View>
     </View>
   );
 }
 
-export function HintText({ text }: { text: string }) {
-  return <Text style={styles.hintText}>{text}</Text>;
-}
-
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
-  bubble: {
+  banner: {
+    backgroundColor: colors.primaryLight,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(30, 30, 30, 0.92)",
-    borderRadius: radius.md,
-    paddingVertical: 12,
-    paddingLeft: 16,
-    paddingRight: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
+    justifyContent: "space-between",
   },
-  content: { flex: 1 },
-  closeButton: { padding: 8, marginLeft: 8 },
-  hintText: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: "#fff",
-    fontWeight: "500",
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  title: {
+    ...typography.xs,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  hintList: {
+    gap: 4,
+  },
+  hintRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+  },
+  action: {
+    ...typography.xs,
+    fontWeight: "700",
+    color: colors.foreground,
+    width: 96,
+  },
+  detail: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    flex: 1,
   },
 });

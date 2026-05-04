@@ -6,13 +6,34 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://imtgzobtqgrmwoeotocj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_-keiT6PucJbkBxVXMCVJpw_hcsLy-7s",
+        "EXPO_PUBLIC_API_URL": "https://sift-mobile-two.vercel.app",
+        "EXPO_PUBLIC_UNSPLASH_ACCESS_KEY": "NPVSoYGgqwuXlU2dopIgmineoiIWRQlgfFNslQh1U40",
+        "EXPO_PUBLIC_SHARE_BASE_URL": "https://siftapp.site"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://imtgzobtqgrmwoeotocj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_-keiT6PucJbkBxVXMCVJpw_hcsLy-7s",
+        "EXPO_PUBLIC_API_URL": "https://sift-mobile-two.vercel.app",
+        "EXPO_PUBLIC_UNSPLASH_ACCESS_KEY": "NPVSoYGgqwuXlU2dopIgmineoiIWRQlgfFNslQh1U40",
+        "EXPO_PUBLIC_SHARE_BASE_URL": "https://siftapp.site"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://imtgzobtqgrmwoeotocj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_-keiT6PucJbkBxVXMCVJpw_hcsLy-7s",
+        "EXPO_PUBLIC_API_URL": "https://sift-mobile-two.vercel.app",
+        "EXPO_PUBLIC_UNSPLASH_ACCESS_KEY": "NPVSoYGgqwuXlU2dopIgmineoiIWRQlgfFNslQh1U40",
+        "EXPO_PUBLIC_SHARE_BASE_URL": "https://siftapp.site"
+      }
     }
   },
   "submit": {

@@ -147,6 +147,47 @@ export async function undoSkip(eventId: string): Promise<void> {
     .eq("event_id", eventId);
 }
 
+/**
+ * Neutral skip ("Not now") — no taste impact, just suppresses for a few days.
+ * Does NOT count toward permanent hide.
+ */
+export async function recordNeutralSkip(eventId: string, daysUntilEvent?: number): Promise<void> {
+  if (!hasServerAccess()) return;
+  const now = new Date();
+  // Suppress for shorter if event is soon
+  const suppressDays = (daysUntilEvent != null && daysUntilEvent <= 3) ? 2 : 5;
+  const suppressedUntil = new Date(now.getTime() + suppressDays * 86400000).toISOString();
+
+  const { data: existing } = await db()
+    .from("user_event_interactions")
+    .select("neutral_skip_count")
+    .eq("user_id", userId)
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  await db()
+    .from("user_event_interactions")
+    .upsert(
+      {
+        user_id: userId,
+        event_id: eventId,
+        neutral_skip_count: (existing?.neutral_skip_count ?? 0) + 1,
+        suppressed_until: suppressedUntil,
+        last_action_at: now.toISOString(),
+      },
+      { onConflict: "user_id,event_id" }
+    );
+}
+
+export async function undoNeutralSkip(eventId: string): Promise<void> {
+  if (!hasServerAccess()) return;
+  await db()
+    .from("user_event_interactions")
+    .update({ suppressed_until: null, last_action_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("event_id", eventId);
+}
+
 export async function recordSave(eventId: string): Promise<void> {
   await upsertAction(eventId, "save_count");
 }
@@ -178,11 +219,13 @@ export async function hideEventPermanently(eventId: string): Promise<void> {
 
 export async function fetchHiddenEventIds(): Promise<Set<string>> {
   if (!hasServerAccess()) return new Set();
+  const now = new Date().toISOString();
+  // Permanently hidden OR temporarily suppressed (neutral skip)
   const { data } = await db()
     .from("user_event_interactions")
     .select("event_id")
     .eq("user_id", userId)
-    .eq("permanently_hidden", true);
+    .or(`permanently_hidden.eq.true,suppressed_until.gt.${now}`);
   return new Set((data ?? []).map((r: any) => r.event_id));
 }
 
