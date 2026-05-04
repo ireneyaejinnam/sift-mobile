@@ -47,7 +47,7 @@ import ProgressBar from "@/components/layout/ProgressBar";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
-import HintOverlay, { HintText } from "@/components/ui/HintOverlay";
+import HintOverlay from "@/components/ui/HintOverlay";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
@@ -1212,9 +1212,14 @@ export default function DiscoverScreen() {
         </View>
 
         {/* Swipe hints — stays until user dismisses */}
-        <HintOverlay hintKey="swipe_gestures">
-          <HintText text={"Swipe right = Going · Swipe left = Not now\nSwipe down = Not interested · Tap for details\nLong press to tune your taste · Tap + to add events"} />
-        </HintOverlay>
+        <HintOverlay hintKey="swipe_gestures" hints={[
+          { action: "Swipe right", detail: "Going" },
+          { action: "Swipe left", detail: "Not now — won't affect your taste" },
+          { action: "Swipe down", detail: "Not interested — fewer like this" },
+          { action: "Tap card", detail: "See event details" },
+          { action: "Long press", detail: "Tune your taste" },
+          { action: "Tap +", detail: "Add events from social" },
+        ]} />
 
         {!activeSlot && !loading && (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 40 }}>

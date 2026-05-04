@@ -52,6 +52,7 @@ export default function AddEventScreen() {
   const [state, setState] = useState<ScreenState>("input");
 
   // Auto-fill and submit from share intent
+  // Small delay to ensure auth session is hydrated before making API call
   useEffect(() => {
     if (!isLoggedIn && state === "input") {
       return;
@@ -60,7 +61,8 @@ export default function AddEventScreen() {
     if (prefill) {
       setInput(prefill);
       if (isValidUrl(prefill)) {
-        submitUrl(prefill);
+        const timer = setTimeout(() => submitUrl(prefill), 500);
+        return () => clearTimeout(timer);
       }
     }
   }, [prefill, isLoggedIn]);
