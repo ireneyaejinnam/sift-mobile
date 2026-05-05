@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ScrollView,
   Image,
@@ -35,6 +36,7 @@ export default function SignInScreen() {
     : email.trim().length > 0 && password.trim().length >= 6;
 
   const handleForgotPassword = async () => {
+    Keyboard.dismiss();
     if (!email.trim() || loading) return;
     if (!supabase) {
       showToast("Sign in is not configured right now.");
@@ -64,6 +66,7 @@ export default function SignInScreen() {
   }, [isCreateAccount]);
 
   const handleSubmit = async () => {
+    Keyboard.dismiss();
     if (!canSubmit || loading) return;
     if (!supabase) {
       showToast("Sign in is not configured right now.");
