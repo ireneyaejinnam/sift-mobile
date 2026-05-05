@@ -1,4 +1,5 @@
-import { View, Text, Pressable, StyleSheet, Linking } from "react-native";
+import { View, Text, Pressable, Alert, StyleSheet, Linking, ActivityIndicator } from "react-native";
+import { useState } from "react";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -8,6 +9,7 @@ import {
   Sliders,
   LogOut,
   Shield,
+  Trash2,
   FileText,
 } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
@@ -17,9 +19,66 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signOut, userEmail } = useUser();
+  const [deleting, setDeleting] = useState(false);
 
   const handleChangePassword = () => {
     router.push("/change-password");
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete your account?",
+      "This permanently deletes your account, saved events, taste profile, and all your data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete My Account",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Are you sure?",
+              "All your data will be permanently deleted. There is no way to recover your account.",
+              [
+                { text: "Go Back", style: "cancel" },
+                { text: "Yes, Delete", style: "destructive", onPress: executeDelete },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const executeDelete = async () => {
+    setDeleting(true);
+    try {
+      const { supabase } = await import("@/lib/supabase");
+      if (!supabase) throw new Error("Not connected");
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error("Not signed in");
+
+      const apiBase = process.env.EXPO_PUBLIC_API_URL ?? "";
+      const res = await fetch(`${apiBase}/api/delete-account`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to delete account");
+      }
+
+      await signOut();
+      router.replace("/(auth)/gate");
+    } catch (err) {
+      Alert.alert("Error", (err as Error).message ?? "Something went wrong. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -63,6 +122,16 @@ export default function SettingsScreen() {
               void signOut();
               router.replace("/(auth)/gate");
             }}
+          />
+          <View style={s.divider} />
+          <MenuItem
+            icon={deleting
+              ? <ActivityIndicator size={18} color="#C0392B" />
+              : <Trash2 size={18} strokeWidth={1.6} color="#C0392B" />}
+            label="Delete account"
+            sub="Permanently delete all your data"
+            labelColor="#C0392B"
+            onPress={handleDeleteAccount}
           />
         </View>
 
