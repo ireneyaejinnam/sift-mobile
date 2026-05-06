@@ -58,7 +58,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
 import { fetchAllUpcoming, computeEventScore, type TasteContext } from "@/lib/getEvents";
-import { loadTasteProfile, recordEventLike, recordEventDislike, recordEventGoing, recordEventSave, undoEventDislike, hydrateTasteProfile } from "@/lib/tasteProfile";
+import { loadTasteProfile, recordEventLike, recordEventDislike, recordEventGoing, recordEventSave, undoEventDislike, hydrateTasteProfile, incrementSeenCount } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { getDismissedEvents, addDismissedEvent } from "@/lib/storage";
 import type { DismissedRecord } from "@/lib/storage";
@@ -198,8 +198,14 @@ export default function DiscoverScreen() {
   const lastDismissWasHardPass = useRef(false);
   const loadingRef = useRef(false);
   const fetchVersionRef = useRef(0);
+  const feedCursorRef = useRef(0); // cursor into resultPool for sequential advancement
+  const servedCategoryWindowRef = useRef<EventCategory[]>([]);
   const expandedToInterestsRef = useRef(false);
   const expandedInterestCatsRef = useRef<EventCategory[]>([]);
+
+  const commitServedCategory = (category: EventCategory) => {
+    servedCategoryWindowRef.current = [...servedCategoryWindowRef.current, category].slice(-4);
+  };
 
   // Quiz step slide-in animation
   const quizEntrance = useSharedValue(1);
@@ -304,13 +310,14 @@ export default function DiscoverScreen() {
     loadingRef.current = false;
     expandedToInterestsRef.current = false;
     expandedInterestCatsRef.current = [];
+    servedCategoryWindowRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
     setEntryMode("sift");
     setStep("category");
     setFilters({});
     setSlots([]);
-    setResultPool([]);
+    setResultPool([]); resultPoolRef.current = [];
     setDismissedIds([]);
     setSelectedEvent(null);
     sessionDismissedRef.current = new Set();
@@ -347,28 +354,70 @@ export default function DiscoverScreen() {
   // ── Diversity re-ranking ──────────────────────────────────────────────────
   // Max 2 of same category in any 5-card window.
   // If category is filtered, diversify on borough instead.
-  const diversifyFeed = (events: SiftEvent[], filteredCats: EventCategory[]): SiftEvent[] => {
-    if (events.length <= 5) return events;
-    const result: SiftEvent[] = [];
-    const deferred: SiftEvent[] = [];
-    const windowSize = 5;
-    const maxPerWindow = 2;
+  // Cap per-category contribution so no single category dominates the feed tail
+  const MAX_EVENTS_PER_CATEGORY = 70;
+  const capEventsPerCategory = (events: SiftEvent[]): SiftEvent[] => {
+    const counts = new Map<string, number>();
+    return events.filter((e) => {
+      const count = counts.get(e.category) ?? 0;
+      if (count >= MAX_EVENTS_PER_CATEGORY) return false;
+      counts.set(e.category, count + 1);
+      return true;
+    });
+  };
 
+  const diversifyFeed = (events: SiftEvent[], filteredCats: EventCategory[]): SiftEvent[] => {
+    if (events.length <= 1) return events;
+    const maxPerWindow = 2;
+    const windowSize = 4; // look back 4 positions (so max 2 of same in last 5 including candidate)
     const getKey = (e: SiftEvent) =>
       filteredCats.length === 0 ? e.category : (e.borough ?? "unknown");
 
-    for (const event of events) {
-      const key = getKey(event);
-      // Count how many of this key are in the last windowSize items
-      const recentCount = result.slice(-windowSize).filter((r) => getKey(r) === key).length;
-      if (recentCount < maxPerWindow) {
-        result.push(event);
-      } else {
-        deferred.push(event);
+    // Group events by category, maintaining score order within each group
+    const buckets = new Map<string, SiftEvent[]>();
+    for (const e of events) {
+      const key = getKey(e);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(e);
+    }
+
+    const result: SiftEvent[] = [];
+    const totalEvents = events.length;
+    let stuckCount = 0;
+
+    while (result.length < totalEvents && stuckCount < 20) {
+      const recentKeys = result.slice(-windowSize).map(getKey);
+      let placed = false;
+
+      // Try each bucket in order of first element's original rank
+      // (buckets maintain score order, so first = highest scoring in that category)
+      const sortedBuckets = [...buckets.entries()]
+        .filter(([, arr]) => arr.length > 0)
+        .sort(([, a], [, b]) => events.indexOf(a[0]) - events.indexOf(b[0]));
+
+      for (const [key, bucket] of sortedBuckets) {
+        const count = recentKeys.filter((k) => k === key).length;
+        if (count < maxPerWindow) {
+          result.push(bucket.shift()!);
+          placed = true;
+          stuckCount = 0;
+          break;
+        }
+      }
+
+      if (!placed) {
+        // All available categories are at max in the window — take the best remaining
+        const best = sortedBuckets[0];
+        if (best && best[1].length > 0) {
+          result.push(best[1].shift()!);
+          stuckCount++;
+        } else {
+          break;
+        }
       }
     }
-    // Append deferred at end
-    return [...result, ...deferred];
+
+    return result;
   };
 
   // ── Explore slots ──────────────────────────────────────────────────────
@@ -487,23 +536,25 @@ export default function DiscoverScreen() {
         return Math.max(0.3, 1.0 - (interaction.impression_count * 0.25));
       };
 
-      // Build taste context from profile
+      // Build taste context from profile (uses activeProfile, set in fetchAndSort)
+      let activeProfile: TasteProfile | null = tasteProfile;
       const buildTasteCtx = (catWeight: number): TasteContext => ({
         categoryWeight: catWeight,
-        tagWeights: tasteProfile?.tagWeights ?? {},
-        boroughWeights: tasteProfile?.boroughWeights ?? {},
-        pricePreference: tasteProfile?.pricePreference ?? { ceiling: null, freeBoost: 0 },
-        interactionCount: tasteProfile?.interactionCount ?? 0,
+        tagWeights: activeProfile?.tagWeights ?? {},
+        boroughWeights: activeProfile?.boroughWeights ?? {},
+        pricePreference: activeProfile?.pricePreference ?? { ceiling: null, freeBoost: 0 },
+        interactionCount: activeProfile?.interactionCount ?? 0,
       });
 
       // Re-rank within a tier by composite score with full taste context + novelty.
+      const hasDateRange = !!(f.dateFrom && f.dateTo);
       const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
         return [...tier].sort((a, b) => {
           const wa = weights[a.category] ?? 1.0;
           const wb = weights[b.category] ?? 1.0;
           const pa = getImpressionPenalty(a.id);
           const pb = getImpressionPenalty(b.id);
-          return computeEventScore(b, wb, pb, buildTasteCtx(wb)) - computeEventScore(a, wa, pa, buildTasteCtx(wa));
+          return computeEventScore(b, wb, pb, buildTasteCtx(wb), hasDateRange) - computeEventScore(a, wa, pa, buildTasteCtx(wa), hasDateRange);
         });
       };
 
@@ -512,7 +563,6 @@ export default function DiscoverScreen() {
       const tieredSort = (all: SiftEvent[]) => {
         // Filter out permanently hidden events (server-side + local)
         let pool = all.filter((e) => !hiddenIds.has(e.id));
-        console.log(`[feed] after hiddenIds filter: ${pool.length} (from ${all.length}, hidden: ${all.length - pool.length})`);
         pool = applyDistanceFilter(pool);
 
         // Apply date range filter if user picked dates
@@ -543,37 +593,54 @@ export default function DiscoverScreen() {
           : [];
 
         // Re-rank within each tier by composite score with full taste
-        const weights = tasteProfile?.categoryWeights ?? {};
+        const weights = activeProfile?.categoryWeights ?? {};
+        console.log('[feed:debug] categoryWeights:', JSON.stringify(weights));
+        console.log('[feed:debug] interactionCount:', activeProfile?.interactionCount);
         const ranked = [
           ...applyPrefs(tier1, weights),
           ...applyPrefs(tier2, weights),
         ];
+
+        // Log top 15 categories before diversity
+        console.log('[feed:debug] ranked top 15:', ranked.slice(0, 15).map(e => e.category).join(', '));
 
         // Apply user-facing match reasons after scoring
         for (const e of ranked) {
           if (!e.matchReason) e.matchReason = getMatchReason(e);
         }
 
-        // ── Diversity re-ranking ──
-        const diversified = diversifyFeed(ranked, quizCats);
+        // ── Cap + Diversity re-ranking ──
+        const capped = capEventsPerCategory(ranked);
+        const diversified = diversifyFeed(capped, quizCats);
+        console.log(`[feed:debug] capped: ${capped.length}, diversified: ${diversified.length}`);
+        // Log top 15 after diversity
+        console.log('[feed:debug] diversified top 15:', diversified.slice(0, 15).map(e => e.category).join(', '));
 
-        // ── Explore slots ──
-        // 10% of feed = high-quality wildcards from underexplored categories
-        return injectExploreSlots(diversified, pool, weights, quizCats);
+        return diversified;
       };
 
       const fetchAndSort = async (): Promise<SiftEvent[]> => {
         try {
-          const categoryWeights = tasteProfile?.categoryWeights;
+          // Ensure taste profile is loaded (may not be ready on first render)
+          if (!activeProfile || Object.keys(activeProfile.categoryWeights).length === 0) {
+            activeProfile = await loadTasteProfile();
+            setTasteProfile(activeProfile);
+          }
+          const categoryWeights = activeProfile?.categoryWeights;
           const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
-          console.log(`[feed] fetched ${allEvents.length} events, hiddenIds: ${hiddenIds.size}, sessionDismissed: ${sessionDismissedRef.current.size}`);
           if (allEvents.length > 0) {
             const sorted = tieredSort(allEvents);
-            const filtered = sorted.filter(
-              (e) => !sessionDismissedRef.current.has(e.id)
-            );
-            console.log(`[feed] after tieredSort: ${sorted.length}, after sessionFilter: ${filtered.length}`);
-            return filtered;
+            // Dedupe by ID + filter cancelled events
+            const seenIds = new Set<string>();
+            const deduped = sorted.filter((e) => {
+              if (seenIds.has(e.id) || sessionDismissedRef.current.has(e.id)) return false;
+              const titleLower = (e.title ?? '').toLowerCase();
+              if (titleLower.includes('cancelled') || titleLower.includes('canceled')) return false;
+              seenIds.add(e.id);
+              return true;
+            });
+            console.log('[feed:debug] final pool top 20:', deduped.slice(0, 20).map(e => `${e.category}`).join(', '));
+            return deduped;
           }
           return getAllCandidates(f, [], userProfile);
         } catch {
@@ -603,6 +670,9 @@ export default function DiscoverScreen() {
           }))
         : [{ event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
       setResultPool(resultEvents);
+      resultPoolRef.current = resultEvents; // sync ref immediately — don't wait for useEffect
+      feedCursorRef.current = 1; // first event is already shown in initial slot
+      servedCategoryWindowRef.current = resultEvents[0] ? [resultEvents[0].category] : [];
       setSlots(initial);
       setDismissedIds([]);
 
@@ -625,8 +695,9 @@ export default function DiscoverScreen() {
   const handleFiltersChange = useCallback(async (newFilters: Filters) => {
     setFilters(newFilters);
     // Clear stale cards immediately before fetching new ones
+    servedCategoryWindowRef.current = [];
     setSlots([]);
-    setResultPool([]);
+    setResultPool([]); resultPoolRef.current = [];
     setDismissedIds([]);
     await goToResults(newFilters, { skipTransition: true });
   }, [goToResults]);
@@ -635,13 +706,14 @@ export default function DiscoverScreen() {
     loadingRef.current = false;
     expandedToInterestsRef.current = false;
     expandedInterestCatsRef.current = [];
+    servedCategoryWindowRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
     setEntryMode("browse");
     setStep("category");
     setFilters({});
     setSlots([]);
-    setResultPool([]);
+    setResultPool([]); resultPoolRef.current = [];
     setDismissedIds([]);
     setSelectedEvent(null);
     void goToResults({});
@@ -651,13 +723,14 @@ export default function DiscoverScreen() {
     loadingRef.current = false;
     expandedToInterestsRef.current = false;
     expandedInterestCatsRef.current = [];
+    servedCategoryWindowRef.current = [];
     sessionDismissedRef.current = new Set();
     setIsTransitioning(false);
     setEntryMode("sift");
     setStep("category");
     setFilters({});
     setSlots([]);
-    setResultPool([]);
+    setResultPool([]); resultPoolRef.current = [];
     setDismissedIds([]);
     setSelectedEvent(null);
   }, []);
@@ -669,10 +742,32 @@ export default function DiscoverScreen() {
     excludedIds: Set<string>,
     quizCategories: string[]
   ): Slot[] => {
-    const next = resultPoolRef.current.find((e) => !excludedIds.has(e.id))
-      ?? getNextCandidate([...excludedIds], filters, userProfile);
+    // Advance cursor through the diversified pool sequentially
+    const pool = resultPoolRef.current;
+    const recentCategories = servedCategoryWindowRef.current.slice(-4);
+    const isOverRepresented = (candidate: SiftEvent) =>
+      recentCategories.filter((category) => category === candidate.category).length > 1;
+    let next: SiftEvent | undefined;
+    let diversityFallback: SiftEvent | undefined;
+    console.log(`[feed:slot] cursor=${feedCursorRef.current}, pool=${pool.length}`);
+    while (feedCursorRef.current < pool.length) {
+      const candidate = pool[feedCursorRef.current];
+      feedCursorRef.current++;
+      if (!excludedIds.has(candidate.id)) {
+        if (isOverRepresented(candidate)) {
+          diversityFallback ??= candidate;
+          continue; // keep scanning for a diverse event
+        }
+        next = candidate;
+        break;
+      }
+    }
+    if (!next) next = diversityFallback;
+    if (!next) next = getNextCandidate([...excludedIds], filters, userProfile) ?? undefined;
 
     if (next) {
+      console.log(`[feed:slot] serving: "${next.title?.slice(0,30)}" (${next.category}) cursor now=${feedCursorRef.current}`);
+      commitServedCategory(next.category);
       const updated = [...prev];
       updated[idx] = { event: next, key: `${next.id}-${Date.now()}-${Math.random()}`, type: 'event' };
       return updated;
@@ -731,9 +826,11 @@ export default function DiscoverScreen() {
       if (event) setLastDismissedEvent(event);
       lastDismissWasHardPass.current = false;
 
-      // No taste update — just record neutral skip for temporary suppression
+      // No taste weight update — just increment interaction count + record suppression
       const daysLeft = event?.daysLeft;
       recordNeutralSkip(eventId, daysLeft).catch(() => {});
+      // Persist interactionCount so "events seen" reflects all swipes
+      incrementSeenCount().then(setTasteProfile).catch(() => {});
 
       advanceDismissSlot(eventId, nextDismissed);
     },
@@ -794,6 +891,7 @@ export default function DiscoverScreen() {
       undoNeutralSkip(evt.id).catch(() => {});
     }
     setSlots((prev) => {
+      commitServedCategory(evt.category);
       if (prev.length === 0) {
         return [{ event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' }];
       }
@@ -847,6 +945,7 @@ export default function DiscoverScreen() {
 
     expandedInterestCatsRef.current = interestCats;
     setResultPool((prev) => [...prev, ...fresh]);
+    commitServedCategory(fresh[0].category);
     setSlots(
       fresh.slice(0, 1).map((e) => ({
         event: e,

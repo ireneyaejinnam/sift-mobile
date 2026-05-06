@@ -48,8 +48,10 @@ const SCORE_SCHEMA = {
             vibe_score: { type: 'number' },
             is_suppressed: { type: 'boolean' },
             reason: { type: 'string' },
+            suggested_category: { type: 'string', enum: ['art', 'live_music', 'comedy', 'food', 'outdoors', 'nightlife', 'popups', 'fitness', 'theater', 'workshops', 'sports'] },
+            category_confidence: { type: 'number' },
           },
-          required: ['index', 'vibe_score', 'is_suppressed', 'reason'],
+          required: ['index', 'vibe_score', 'is_suppressed', 'reason', 'suggested_category', 'category_confidence'],
           additionalProperties: false,
         },
       },
@@ -60,8 +62,10 @@ const SCORE_SCHEMA = {
 } as const;
 
 const SYSTEM_PROMPT = `You score NYC events 1-10 for Sift, a curation app for 18-35 NYC professionals.
+Also verify the category — suggest the correct one with confidence 0-1.
 
 SUPPRESS (score 1-3, is_suppressed: true):
+- Cancelled/postponed events: any event with "cancelled", "canceled", or "postponed" in title
 - Tourist traps: walking tours, harbor cruises, hop-on-hop-off, scavenger hunts, Times Square shows, Madame Tussauds
 - Corporate/professional: networking mixers, career fairs, real estate seminars, speed networking
 - Spam/false: fake listings, MLM events, webinars, virtual events
@@ -78,6 +82,19 @@ KEEP (score 6-10, is_suppressed: false):
 - Fitness events at known studios/run clubs
 
 Score 4-5: borderline — suppress if generic, keep if has specificity.
+
+CATEGORY GUIDE:
+- popups: sample sales, brand pop-ups, store openings, launch events, markets, brand activations, product launches, fashion pop-ups, beauty pop-ups
+- live_music: concerts, DJ sets, jazz, album releases, tour stops
+- art: gallery exhibitions, museum shows, art fairs, film screenings
+- theater: Broadway, off-Broadway, musicals, opera, ballet, drag shows, immersive theater
+- comedy: stand-up, improv, comedy shows
+- nightlife: club nights, dance parties, raves
+- food: restaurant openings, tastings, food festivals, supper clubs
+- fitness: run clubs, gym events, yoga, workout classes
+- outdoors: parks events, nature walks, kayaking, tours
+- workshops: classes, seminars, panels, networking
+- sports: pro/college games, Yankees, Mets, Knicks, Nets, Rangers
 
 The test: Would a 28-year-old who works in tech/finance/media/fashion text this to their group chat?`;
 
@@ -100,6 +117,8 @@ interface ScoreResult {
   vibe_score: number;
   is_suppressed: boolean;
   reason: string;
+  suggested_category: string;
+  category_confidence: number;
 }
 
 async function scoreBatch(events: any[]): Promise<ScoreResult[]> {
@@ -147,6 +166,7 @@ async function main() {
 
   let totalScored = 0;
   let totalSuppressed = 0;
+  let totalReclassified = 0;
 
   for (let i = 0; i < data.length; i += BATCH_SIZE) {
     const batch = data.slice(i, i + BATCH_SIZE);
@@ -160,16 +180,29 @@ async function main() {
 
       const suppress = s.is_suppressed || s.vibe_score < 5;
 
+      // Check if category should be updated
+      const shouldUpdateCategory = s.suggested_category
+        && s.category_confidence > 0.8
+        && s.suggested_category !== event.category;
+
       if (dryRun) {
-        console.log(`    ${event.title.slice(0, 50)} → ${s.vibe_score}/10 ${suppress ? 'SUPPRESS' : 'KEEP'} (${s.reason})`);
+        const catChange = shouldUpdateCategory ? ` [CAT: ${event.category} → ${s.suggested_category}]` : '';
+        console.log(`    ${event.title.slice(0, 50)} → ${s.vibe_score}/10 ${suppress ? 'SUPPRESS' : 'KEEP'} (${s.reason})${catChange}`);
       } else {
+        const updateFields: Record<string, any> = {
+          vibe_score: s.vibe_score,
+          vibe_checked: true,
+          is_suppressed: suppress,
+        };
+
+        if (shouldUpdateCategory) {
+          updateFields.category = s.suggested_category;
+          console.log(`    [category] ${event.title.slice(0, 40)}: ${event.category} → ${s.suggested_category} (conf: ${s.category_confidence})`);
+        }
+
         const { error: updateErr } = await supabase
           .from('events')
-          .update({
-            vibe_score: s.vibe_score,
-            vibe_checked: true,
-            is_suppressed: suppress,
-          })
+          .update(updateFields)
           .eq('id', event.id);
 
         if (updateErr) {
@@ -179,12 +212,13 @@ async function main() {
 
       totalScored++;
       if (suppress) totalSuppressed++;
+      if (shouldUpdateCategory) totalReclassified++;
     }
 
     await new Promise(r => setTimeout(r, 500));
   }
 
-  console.log(`[score-scraped] Done. Scored: ${totalScored}, Suppressed: ${totalSuppressed}`);
+  console.log(`[score-scraped] Done. Scored: ${totalScored}, Suppressed: ${totalSuppressed}, Reclassified: ${totalReclassified}`);
 }
 
 main().catch(console.error);

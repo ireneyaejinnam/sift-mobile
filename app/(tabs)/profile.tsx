@@ -73,9 +73,13 @@ export default function ProfileTab() {
   }, [isLoggedIn]);
 
   // Re-pull going/saved on focus so server-side deletions reflect in the stats.
+  // Also reload taste profile so "events seen" counter is fresh.
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) void refreshFromRemote();
+      if (isLoggedIn) {
+        void refreshFromRemote();
+        loadTasteProfile().then(setTasteProfile);
+      }
     }, [isLoggedIn, refreshFromRemote])
   );
 
@@ -104,9 +108,7 @@ export default function ProfileTab() {
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).length;
 
-  const totalSwiped = tasteProfile
-    ? tasteProfile.likedIds.length + tasteProfile.dislikedIds.length
-    : 0;
+  const totalSwiped = tasteProfile?.interactionCount ?? 0;
 
   const displayLabel = userDisplayName || userEmail || "Guest";
   const avatarLetter =

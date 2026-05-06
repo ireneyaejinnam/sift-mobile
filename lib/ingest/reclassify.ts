@@ -332,15 +332,37 @@ const RULES: Rule[] = [
       'nebula', 'brooklyn mirage', 'nowadays',
     ],
   },
+  // ── Popups (last — only fire on strong retail/brand signals) ──
+  {
+    target: 'popups',
+    keywords: [
+      'sample sale', 'pop-up shop', 'popup shop', 'brand pop-up',
+      'trunk show', 'flea market', 'holiday market',
+      'flash sale', 'merch drop', 'product launch',
+      'limited edition', 'shopping event', 'retail experience',
+      'brand activation', 'beauty pop-up', 'fashion pop-up',
+      'skincare pop-up', 'experiential retail',
+    ],
+    antiKeywords: [
+      'botanical', 'garden', 'dance', 'baseball', 'mets', 'yankees',
+      'theater', 'theatre', 'museum', 'gallery', 'concert', 'comedy',
+      'yoga', 'run club', 'hiking', 'kayak', 'park',
+    ],
+    venuePatterns: [
+      'showfields', 'popup plaza',
+    ],
+  },
 ];
 
-// Keywords that confirm something IS a genuine popup
+// Keywords that confirm something IS a genuine popup — must be retail/brand/shopping specific.
+// Do NOT include standalone 'pop-up' or 'activation' — too many false positives.
 const POPUP_CONFIRM_KEYWORDS = [
   'sample sale', 'pop-up shop', 'popup shop', 'brand activation',
   'trunk show', 'flea market', 'holiday market', 'pop-up market',
   'bazaar', 'flash sale', 'limited edition drop',
   'merch drop', 'merchandise pop-up', 'build-a-box', 'beauty pop-up',
   'skincare pop-up', 'fashion pop-up', 'product launch',
+  'limited-time shop', 'experiential retail', 'sampling event',
 ];
 
 type Confidence = 'high' | 'medium' | 'low';
