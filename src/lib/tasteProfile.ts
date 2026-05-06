@@ -267,6 +267,17 @@ export async function recordEventGoing(eventId: string, category?: EventCategory
 }
 
 /**
+ * Increment interactionCount and persist — used for neutral skips
+ * that don't change taste weights but should count as "seen".
+ */
+export async function incrementSeenCount(): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.interactionCount++;
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
  * Reverse a prior dislike (e.g. when the user taps Undo after an accidental
  * left swipe). Removes the id from dislikedIds so the event can resurface.
  */

@@ -241,13 +241,14 @@ export function computeEventScore(
   event: SiftEvent,
   categoryWeight = 1.0,
   impressionPenalty = 1.0,
-  taste: TasteContext = DEFAULT_TASTE
+  taste: TasteContext = DEFAULT_TASTE,
+  dateRangeActive = false
 ): number {
   // Quality: vibe 1–10 → 0–1, unchecked = 0.5 neutral
   const quality = event.vibeScore != null ? (event.vibeScore - 1) / 9 : 0.5;
 
   // ── Taste score (multi-dimensional) ──
-  const categoryAffinity = Math.min(categoryWeight / 2.0, 1.0);
+  const categoryAffinity = Math.min(Math.max((categoryWeight - 0.3) / 1.7, 0), 1.0);
 
   // Tag affinity: average weight of matching tags (neutral = 0.5)
   let tagAffinity = 0.5;
@@ -284,15 +285,21 @@ export function computeEventScore(
     boroughAffinity * 0.15 +
     priceAffinity * 0.15;
 
-  // Timing: peak at 1–3 days, decays beyond 14
-  const daysUntil = event.daysLeft ?? 30;
-  const timing =
-    daysUntil <= 0  ? 0
-    : daysUntil <= 3  ? 1.0
-    : daysUntil <= 7  ? 0.8
-    : daysUntil <= 14 ? 0.5
-    : daysUntil <= 30 ? 0.3
-    : 0.1;
+  // Timing: flat when user selected a date range (all events equally valid),
+  // otherwise smoother decay curve
+  let timing: number;
+  if (dateRangeActive) {
+    timing = 1.0; // user told us their dates — don't penalize later events in range
+  } else {
+    const daysUntil = event.daysLeft ?? 30;
+    timing =
+      daysUntil <= 0  ? 0
+      : daysUntil <= 3  ? 1.0
+      : daysUntil <= 7  ? 0.85
+      : daysUntil <= 14 ? 0.7
+      : daysUntil <= 30 ? 0.45
+      : 0.25;
+  }
 
   // Completeness: rewards rich event data
   const completeness =
@@ -304,14 +311,14 @@ export function computeEventScore(
   const novelty = impressionPenalty;
 
   const personalizedScore =
-    quality * 0.25 + tasteScore * 0.40 + timing * 0.20 + completeness * 0.10 + novelty * 0.05;
+    quality * 0.20 + tasteScore * 0.50 + timing * 0.15 + completeness * 0.10 + novelty * 0.05;
 
   // Cold start blending: until ~20 interactions, lean more on quality + timing
   // If caller passed a non-default categoryWeight, they have real preference data —
   // ensure confidence is at least 0.5 so category weight still influences scoring
   const rawConfidence = Math.min(1, taste.interactionCount / 20);
   const confidence = (categoryWeight !== 1.0 && rawConfidence < 0.5) ? 0.5 : rawConfidence;
-  const coldStartScore = quality * 0.45 + timing * 0.35 + completeness * 0.15 + novelty * 0.05;
+  const coldStartScore = quality * 0.40 + timing * 0.30 + completeness * 0.20 + novelty * 0.10;
 
   const finalScore = confidence * personalizedScore + (1 - confidence) * coldStartScore;
 
