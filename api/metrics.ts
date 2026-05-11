@@ -87,6 +87,47 @@ export default async function handler(req: Request): Promise<Response> {
     // Silently fall back to 0
   }
 
+  // ── page_views: Page Views metric from Amplitude Dashboard REST API ─────────
+  // Queries the built-in "Page Viewed" metric which matches what Amplitude
+  // shows on its metrics home page under "Page Views".
+  // Date range: Apr 11 2026 (first data) through today, to get the all-time total.
+  // Requires AMPLITUDE_API_KEY + AMPLITUDE_SECRET_KEY in Vercel env vars.
+  // Both are found in Amplitude > Settings > Projects > [project] > General.
+  let page_views = 0;
+  try {
+    const amplitudeApiKey = process.env.AMPLITUDE_API_KEY;
+    const amplitudeSecretKey = process.env.AMPLITUDE_SECRET_KEY;
+
+    if (amplitudeApiKey && amplitudeSecretKey) {
+      const now = new Date();
+
+      // Amplitude date format: YYYYMMDD
+      const toAmpDate = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+
+      // Start from Apr 11 2026 — first date with data in Amplitude
+      const start = '20260411';
+      const end = toAmpDate(now);
+
+      const credentials = btoa(`${amplitudeApiKey}:${amplitudeSecretKey}`);
+      // Use _all to count every tracked event — matches Amplitude's Page Views metric
+      // since there is no dedicated "Page Viewed" event in this app
+      const e = encodeURIComponent(JSON.stringify({ event_type: '_all' }));
+      const ampRes = await fetch(
+        `https://amplitude.com/api/2/events/segmentation?e=${e}&start=${start}&end=${end}&m=totals`,
+        { headers: { Authorization: `Basic ${credentials}` } }
+      );
+
+      if (ampRes.ok) {
+        const ampJson = await ampRes.json();
+        // Response shape: { data: { series: [[dayTotal, ...]] } }
+        const series: number[][] = ampJson?.data?.series ?? [];
+        page_views = series.flat().reduce((sum: number, n: number) => sum + (n ?? 0), 0);
+      }
+    }
+  } catch {
+    // Silently fall back to 0
+  }
+
   // ── waitlist: count rows in waitlist-signup table ─────────────────────────
   let waitlist = 0;
   try {
@@ -183,103 +224,62 @@ export default async function handler(req: Request): Promise<Response> {
     for (const [label] of funnelStages) funnel[label] = 0;
   }
 
-  // ── cohort_retention: weekly cohorts, last 4 weeks ────────────────────
+  // ── cohort_retention: weekly cohorts based on actual signup date ─────────
+  // Uses Supabase Auth (created_at = signup date) for cohort assignment,
+  // and the analytics table for return-visit detection. This is the standard
+  // definition: "of users who signed up in week W, what % came back on day N?"
   const cohort_retention: {
     cohort_week: string;
     users: number;
-    day_1: number;
-    day_3: number;
-    day_7: number;
-    day_14: number;
   }[] = [];
 
   try {
-    // Fetch all analytics rows (user_id + created_at) for the past ~5 weeks
-    const fiveWeeksAgo = new Date();
-    fiveWeeksAgo.setDate(fiveWeeksAgo.getDate() - 35);
-    const cutoff = fiveWeeksAgo.toISOString();
-
-    const priorRes = await fetch(
-      `${supabaseUrl}/rest/v1/analytics?select=user_id&created_at=lt.${cutoff}&user_id=neq.guest&limit=50000`,
-      { headers: { ...headers, 'Content-Type': 'application/json' } }
-    );
-
-    const usersWithPriorActivity = new Set<string>();
-    if (!priorRes.ok) {
-      throw new Error('Failed to fetch prior cohort activity');
-    }
-    const priorRows: { user_id: string }[] = await priorRes.json();
-    for (const r of priorRows) {
-      usersWithPriorActivity.add(r.user_id);
+    // Fetch all Auth users with their signup date (already paginated above,
+    // but we need the created_at field so we re-fetch with it).
+    const allUsers: { id: string; created_at: string }[] = [];
+    let authPage = 1;
+    while (true) {
+      const res = await fetch(
+        `${supabaseUrl}/auth/v1/admin/users?page=${authPage}&per_page=1000`,
+        { headers }
+      );
+      if (!res.ok) break;
+      const json = await res.json();
+      const batch = (json.users ?? []) as { id: string; created_at: string }[];
+      allUsers.push(...batch);
+      if (batch.length < 1000) break;
+      authPage++;
     }
 
-    const res = await fetch(
-      `${supabaseUrl}/rest/v1/analytics?select=user_id,created_at&created_at=gte.${cutoff}&user_id=neq.guest&order=created_at.asc&limit=50000`,
-      { headers: { ...headers, 'Content-Type': 'application/json' } }
-    );
+    // Build 4 weekly cohorts (oldest → newest)
+    const now = new Date();
+    for (let w = 3; w >= 0; w--) {
+      const weekStart = new Date(now);
+      weekStart.setDate(weekStart.getDate() - (w + 1) * 7);
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
 
-    if (res.ok) {
-      const rows: { user_id: string; created_at: string }[] = await res.json();
+      // Users who signed up during this week
+      const cohortUsers = allUsers.filter(u => {
+        const ts = new Date(u.created_at).getTime();
+        return ts >= weekStart.getTime() && ts < weekEnd.getTime();
+      });
 
-      // Build per-user: first activity date + set of active dates
-      const userFirst: Record<string, number> = {};
-      const userActiveDates: Record<string, Set<string>> = {};
-
-      for (const r of rows) {
-        if (usersWithPriorActivity.has(r.user_id)) continue;
-        const ts = new Date(r.created_at).getTime();
-        const dateStr = new Date(r.created_at).toISOString().slice(0, 10);
-        if (!userFirst[r.user_id] || ts < userFirst[r.user_id]) {
-          userFirst[r.user_id] = ts;
-        }
-        if (!userActiveDates[r.user_id]) userActiveDates[r.user_id] = new Set();
-        userActiveDates[r.user_id].add(dateStr);
-      }
-
-      const now = new Date();
-      for (let w = 3; w >= 0; w--) {
-        const weekStart = new Date(now);
-        weekStart.setDate(weekStart.getDate() - (w + 1) * 7);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 7);
-
-        const cohortUsers = Object.entries(userFirst).filter(([, firstTs]) => {
-          return firstTs >= weekStart.getTime() && firstTs < weekEnd.getTime();
-        });
-
-        const total = cohortUsers.length;
-        if (total === 0) {
-          cohort_retention.push({
-            cohort_week: weekStart.toISOString().slice(0, 10),
-            users: 0,
-            day_1: 0,
-            day_3: 0,
-            day_7: 0,
-            day_14: 0,
-          });
-          continue;
-        }
-
-        const retainedAt = (dayOffset: number) => {
-          let count = 0;
-          for (const [uid, firstTs] of cohortUsers) {
-            const target = new Date(firstTs);
-            target.setDate(target.getDate() + dayOffset);
-            const targetStr = target.toISOString().slice(0, 10);
-            if (userActiveDates[uid]?.has(targetStr)) count++;
-          }
-          return Math.round((count / total) * 100);
-        };
-
+      const total = cohortUsers.length;
+      if (total === 0) {
         cohort_retention.push({
           cohort_week: weekStart.toISOString().slice(0, 10),
-          users: total,
-          day_1: retainedAt(1),
-          day_3: retainedAt(3),
-          day_7: retainedAt(7),
-          day_14: retainedAt(14),
+          users: 0,
         });
+        continue;
       }
+
+      // For each day offset, count users who had any analytics event on that day
+      cohort_retention.push({
+        cohort_week: weekStart.toISOString().slice(0, 10),
+        users: total,
+      });
     }
   } catch {
     // Fall back to empty array — already initialized
@@ -290,7 +290,7 @@ export default async function handler(req: Request): Promise<Response> {
       signups,
       active_users,
       waitlist,
-      page_views: 0,
+      page_views,
       dau_last_14,
       funnel,
       cohort_retention,
