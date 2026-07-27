@@ -10,7 +10,7 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
-import { setOnboardingDoneFlag } from "@/lib/storage";
+import { setOnboardingDoneFlag, loadOnboardingDraft, saveOnboardingDraft, clearOnboardingDraft } from "@/lib/storage";
 import { track } from "@/lib/track";
 import type { UserProfile } from "@/types/user";
 import { colors, spacing, radius, typography } from "@/lib/theme";
@@ -75,13 +75,11 @@ function Pill({
 export default function OnboardingFlow() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { setUserProfile, userProfile, isLoggedIn } = useUser();
+  const { setUserProfile, userProfile, ready } = useUser();
 
-  // Onboarding is for logged-in users only
-  if (!isLoggedIn) {
-    router.replace("/(auth)/signin");
-    return null;
-  }
+  // The taste-setter is open to everyone — guests/anonymous users included.
+  // With anonymous auth (EPIC 1 A2) every install has a durable uid, so
+  // setUserProfile persists locally and syncs server-side under that uid.
   const [step, setStep] = useState(1);
   const [initialized, setInitialized] = useState(false);
   const [profile, setProfile] = useState<Partial<UserProfile>>({
@@ -101,21 +99,44 @@ export default function OnboardingFlow() {
     track("onboarding_started");
   }, []);
 
-  // Initialize from stored profile if editing
+  // Initialize once: a saved draft (partial in-progress progress) wins over the
+  // committed profile, so leaving mid-onboarding and returning resumes where you
+  // left off. Otherwise seed from the stored profile (edit case).
   useEffect(() => {
-    if (initialized || !userProfile) return;
-    setProfile({
-      interests: userProfile.interests ?? [],
-      borough: userProfile.borough ?? "",
-      neighborhood: userProfile.neighborhood ?? "",
-      travelRange: userProfile.travelRange ?? "",
-      vibe: userProfile.vibe ?? "",
-      budget: userProfile.budget ?? "",
-      freeDays: userProfile.freeDays ?? [],
-      freeTime: userProfile.freeTime ?? [],
-    });
-    setInitialized(true);
-  }, [userProfile, initialized]);
+    // Wait for the context to settle so we don't seed an empty profile before
+    // an existing one has loaded (edit case).
+    if (initialized || !ready) return;
+    let cancelled = false;
+    (async () => {
+      const draft = await loadOnboardingDraft();
+      if (cancelled) return;
+      if (draft) {
+        setProfile(draft.profile);
+        setStep(draft.step);
+      } else if (userProfile) {
+        setProfile({
+          interests: userProfile.interests ?? [],
+          borough: userProfile.borough ?? "",
+          neighborhood: userProfile.neighborhood ?? "",
+          travelRange: userProfile.travelRange ?? "",
+          vibe: userProfile.vibe ?? "",
+          budget: userProfile.budget ?? "",
+          freeDays: userProfile.freeDays ?? [],
+          freeTime: userProfile.freeTime ?? [],
+        });
+      }
+      setInitialized(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userProfile, initialized, ready]);
+
+  // Autosave draft on each change so progress survives leaving the screen.
+  useEffect(() => {
+    if (!initialized || showConfirmation) return;
+    void saveOnboardingDraft({ step, profile, updatedAt: new Date().toISOString() });
+  }, [step, profile, initialized, showConfirmation]);
 
   const toggleArray = useCallback(
     (key: "interests" | "freeDays" | "freeTime", value: string) => {
@@ -145,6 +166,7 @@ export default function OnboardingFlow() {
     };
     setUserProfile(full);
     setOnboardingDoneFlag();
+    void clearOnboardingDraft();
     track("onboarding_step_2_complete", {
       free_days: full.freeDays,
       free_times: full.freeTime,

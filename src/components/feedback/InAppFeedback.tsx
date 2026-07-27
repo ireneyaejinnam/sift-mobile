@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Modal,
   View,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track } from "@/lib/track";
+import { useFeedback } from "@/context/FeedbackContext";
 import { colors } from "@/lib/theme";
 
 const FIRST_USE_KEY = "sift_first_use_ts";
@@ -31,10 +32,24 @@ export function InAppFeedback() {
   const [visible, setVisible] = useState(false);
   const [selectedRating, setSelectedRating] = useState<Rating | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const { manualOpenCount } = useFeedback();
+  const skipFirstManual = useRef(true);
 
   useEffect(() => {
     checkEligibility();
   }, []);
+
+  // On-demand open (e.g. from Settings) — bypass the 7-day eligibility gate
+  // and always reset to the rating step.
+  useEffect(() => {
+    if (skipFirstManual.current) {
+      skipFirstManual.current = false;
+      return;
+    }
+    setSelectedRating(null);
+    setSubmitted(false);
+    setVisible(true);
+  }, [manualOpenCount]);
 
   async function checkEligibility() {
     try {

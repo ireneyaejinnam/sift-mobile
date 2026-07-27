@@ -8,7 +8,8 @@ import { useUser } from "@/context/UserContext";
 import { loadTasteProfile } from "@/lib/tasteProfile";
 import type { TasteProfile } from "@/lib/tasteProfile";
 import { events } from "@/data/events";
-import SavedListsSection from "@/components/profile/SavedListsSection";
+import TastePrompt from "@/components/ui/TastePrompt";
+import { getTasteInsight } from "@/lib/tasteInsight";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
 const VIBE_LABELS: Record<string, string> = {
@@ -83,32 +84,20 @@ export default function ProfileTab() {
     }, [isLoggedIn, refreshFromRemote])
   );
 
-  const [topSavedCategory, setTopSavedCategory] = useState<[string, number] | null>(null);
-  useEffect(() => {
-    if (!isLoggedIn || savedEvents.length === 0) { setTopSavedCategory(null); return; }
-    const ids = savedEvents.map(e => e.eventId);
-    import("@/lib/supabase").then(({ supabase }) => {
-      if (!supabase) return;
-      supabase.from("events").select("id, category").in("id", ids).then(({ data }) => {
-        if (!data?.length) return;
-        const counts: Record<string, number> = {};
-        for (const row of data) {
-          const cat = row.category as string;
-          counts[cat] = (counts[cat] ?? 0) + 1;
-        }
-        const top = Object.entries(counts).sort(([, a], [, b]) => b - a)[0];
-        if (top) setTopSavedCategory(top);
-      });
-    });
-  }, [isLoggedIn, savedEvents.length]);
-
   const now = new Date();
   const goingThisMonth = goingEvents.filter((e) => {
     const d = new Date(e.eventDate);
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).length;
 
-  const totalSwiped = tasteProfile?.interactionCount ?? 0;
+  const insight = tasteProfile ? getTasteInsight(tasteProfile) : null;
+  const insightCategoryLabels = (insight?.topCategories ?? [])
+    .slice(0, 2)
+    .map((c) => CATEGORY_LABELS[c] ?? c);
+  const insightCategoryPhrase =
+    insightCategoryLabels.length === 2
+      ? `${insightCategoryLabels[0]} & ${insightCategoryLabels[1]}`
+      : insightCategoryLabels[0] ?? "";
 
   const displayLabel = userDisplayName || userEmail || "Guest";
   const avatarLetter =
@@ -220,8 +209,12 @@ export default function ProfileTab() {
           </View>
         )}
 
-        {/* ── Saved Lists ─────────────────────── */}
-        {isLoggedIn && <SavedListsSection />}
+        {/* ── Set-your-taste nudge (if not completed) ── */}
+        <TastePrompt
+          show={isLoggedIn && !userProfile?.interests?.length}
+          hintKey="set_taste_prompt_profile"
+          onPress={() => router.push("/(onboarding)/flow")}
+        />
 
         {/* ── Preferences ─────────────────────── */}
         {userProfile && (
@@ -267,7 +260,9 @@ export default function ProfileTab() {
                 <View style={[st.prefRow, { borderBottomWidth: 0 }]}>
                   <Text style={st.prefKey}>Availability</Text>
                   <Text style={st.prefValue}>
-                    {[...(userProfile.freeDays ?? []), ...(userProfile.freeTime ?? [])].join(" · ")}
+                    {[...(userProfile.freeDays ?? []), ...(userProfile.freeTime ?? [])]
+                      .map((v) => v.replace(/_/g, " "))
+                      .join(" · ")}
                   </Text>
                 </View>
               )}
@@ -280,26 +275,35 @@ export default function ProfileTab() {
           <View style={st.section}>
             <Text style={st.sectionTitle}>Sift knows you</Text>
             <View style={st.prefCard}>
-              {topSavedCategory && (
-                <View style={st.prefRow}>
-                  <Text style={st.prefKey}>Most saved</Text>
-                  <Text style={st.prefValue}>{CATEGORY_LABELS[topSavedCategory[0]] ?? topSavedCategory[0]}</Text>
-                </View>
-              )}
-              {goingThisMonth > 0 && (
-                <View style={st.prefRow}>
-                  <Text style={st.prefKey}>Going this month</Text>
-                  <Text style={st.prefValue}>{goingThisMonth} event{goingThisMonth !== 1 ? "s" : ""}</Text>
-                </View>
-              )}
-              <View style={[st.prefRow, { borderBottomWidth: 0 }]}>
-                <Text style={st.prefKey}>Events seen</Text>
-                <Text style={st.prefValue}>
-                  {totalSwiped > 0
-                    ? `${totalSwiped}${totalSwiped < 20 ? " — keep swiping" : ""}`
-                    : "Start swiping to build your taste"}
+              {insight?.confident ? (
+                <>
+                  <Text style={st.insightLine}>
+                    You're into <Text style={st.insightStrong}>{insightCategoryPhrase}</Text>
+                    {insight.topBorough ? (
+                      <> in <Text style={st.insightStrong}>{insight.topBorough}</Text></>
+                    ) : null}
+                    {insight.lovesFree ? <>, and you love a good deal</> : null}.
+                  </Text>
+                  {insight.topTags.length > 0 && (
+                    <View style={st.insightChips}>
+                      {insight.topTags.map((t) => (
+                        <View key={t} style={st.pill}>
+                          <Text style={st.pillText}>{t}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  {goingThisMonth > 0 && (
+                    <Text style={st.insightMeta}>
+                      {goingThisMonth} event{goingThisMonth !== 1 ? "s" : ""} on your calendar this month.
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <Text style={st.insightLine}>
+                  Keep swiping and saving — Sift is still learning what you're into.
                 </Text>
-              </View>
+              )}
             </View>
           </View>
         )}
@@ -529,6 +533,29 @@ const st = StyleSheet.create({
     backgroundColor: colors.primaryLight,
   },
   pillText: { fontSize: 12, fontWeight: "500", color: colors.primary },
+  insightLine: {
+    ...typography.sm,
+    color: colors.foreground,
+    lineHeight: 22,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  insightStrong: { fontWeight: "700", color: colors.primary },
+  insightChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  insightMeta: {
+    ...typography.xs,
+    color: colors.textSecondary,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+  },
 
   // ── Sign out ──────────────────────────────
   signOutButton: {
