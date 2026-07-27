@@ -14,6 +14,8 @@ interface GoingDateSheetProps {
   onCancel: () => void;
   confirmLabel?: string;
   userProfile?: UserProfile | null;
+  /** Pre-select a date the user already chose (going/saved) for this event. */
+  initialDate?: string | null;
 }
 
 function formatShortDate(d: string): string {
@@ -37,16 +39,20 @@ function RangeCalendar({
   onConfirm,
   onCancel,
   confirmLabel,
+  initialDate,
 }: {
   event: SiftEvent;
   onConfirm: (date: string) => void;
   onCancel: () => void;
   confirmLabel: string;
+  initialDate?: string | null;
 }) {
   const today = todayNYC();
   const effectiveMin = event.startDate > today ? event.startDate : today;
   const maxDate = event.endDate!;
-  const [selected, setSelected] = useState<string>(effectiveMin);
+  const [selected, setSelected] = useState<string>(
+    initialDate && initialDate >= effectiveMin && initialDate <= maxDate ? initialDate : effectiveMin
+  );
 
   const markedDates = {
     [selected]: {
@@ -112,6 +118,7 @@ export default function GoingDateSheet({
   onCancel,
   confirmLabel = "Mark as Going",
   userProfile,
+  initialDate,
 }: GoingDateSheetProps) {
   const sessions = event.sessions ?? [];
   const isMultiSession = sessions.length > 1;
@@ -125,6 +132,7 @@ export default function GoingDateSheet({
         onConfirm={onConfirm}
         onCancel={onCancel}
         confirmLabel={confirmLabel}
+        initialDate={initialDate}
       />
     );
   }
@@ -144,9 +152,13 @@ export default function GoingDateSheet({
       : [{ startDate: event.startDate }];
 
   const toKey = (s: EventSession) => `${s.startDate}::${s.time ?? ""}`;
-  const [selected, setSelected] = useState<string>(
-    toKey(options[0] ?? { startDate: event.startDate })
-  );
+  const [selected, setSelected] = useState<string>(() => {
+    if (initialDate) {
+      const match = options.find((s) => s.startDate === initialDate);
+      if (match) return toKey(match);
+    }
+    return toKey(options[0] ?? { startDate: event.startDate });
+  });
 
   return (
     <View style={st.container}>

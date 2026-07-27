@@ -16,13 +16,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import {
   ArrowLeft,
-  Bookmark,
   CalendarDays,
   Check,
   ExternalLink,
   ImageIcon,
   MapPin,
   Share2,
+  Star,
   Ticket,
 } from "lucide-react-native";
 import Animated, {
@@ -84,7 +84,10 @@ export default function EventDetail({
   const {
     isLoggedIn,
     userProfile,
+    savedEvents,
     getSavedListForEvent,
+    getGoingEvent,
+    addSavedEvent,
     removeSavedEvent,
     toggleGoing,
     isGoing,
@@ -153,6 +156,10 @@ export default function EventDetail({
   const DISMISS_THRESHOLD = 110;
 
   const handleBookmarkPress = () => {
+    if (!isLoggedIn && onRequestSignIn) {
+      onRequestSignIn();
+      return;
+    }
     if (savedList) {
       removeSavedEvent(event.id);
       showToast("Removed from list");
@@ -273,14 +280,14 @@ export default function EventDetail({
               onPress={handleBookmarkPress}
               style={styles.overlayButton}
             >
-              <Bookmark
+              <Star
                 size={18}
                 strokeWidth={1.5}
                 color={savedList ? colors.primary : colors.foreground}
                 fill={savedList ? colors.primary : "none"}
               />
-              <Text style={styles.overlayButtonText}>
-                {savedList ? "Saved" : "Save"}
+              <Text style={[styles.overlayButtonText, savedList && { color: colors.primary }]}>
+                Interested
               </Text>
             </Pressable>
             <Pressable
@@ -508,12 +515,14 @@ export default function EventDetail({
             {/* Action buttons */}
             <View style={styles.actions}>
               <Pressable
-                onPress={() => { const url = event.eventUrl || event.link || event.ticketUrl; if (url) WebBrowser.openBrowserAsync(url); }}
+                onPress={() => {
+                  const url = event.eventUrl || event.link || event.ticketUrl;
+                  track("event_link_click", { event_id: event.id, url, has_ticket_url: !!event.ticketUrl });
+                  if (url) WebBrowser.openBrowserAsync(url);
+                }}
                 style={styles.primaryButton}
               >
-                <Text style={styles.primaryButtonText}>
-                  {event.ticketUrl ? "View event" : "Check it out"}
-                </Text>
+                <Text style={styles.primaryButtonText}>View event</Text>
                 <ExternalLink
                   size={16}
                   strokeWidth={1.5}
@@ -576,6 +585,11 @@ export default function EventDetail({
         <GoingDateSheet
           event={event}
           userProfile={userProfile}
+          initialDate={
+            getGoingEvent(event.id)?.eventDate ??
+            savedEvents.find((s) => s.eventId === event.id)?.eventStartDate ??
+            null
+          }
           onConfirm={(date) => {
             toggleGoing({
               eventId: event.id,
@@ -583,6 +597,11 @@ export default function EventDetail({
               eventDate: date,
               eventEndDate: event.endDate,
             });
+            if (savedList) {
+              addSavedEvent(event.id, savedList, {
+                title: event.title, startDate: date, endDate: event.endDate,
+              });
+            }
             setGoingSheetOpen(false);
             showToast("Marked as going");
             promptCalendar(calendarEventForDate(date));
