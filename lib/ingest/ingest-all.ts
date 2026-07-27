@@ -7,7 +7,7 @@ import { ingestDice } from './dice';
 import { ingestResidentAdvisor } from './resident-advisor';
 import { geocodeAllEvents } from './geocode';
 import { reclassifyEvents } from './reclassify';
-import { deduplicateEvents } from './dedup';
+import { deduplicateEvents, mergeRecurringEvents } from './dedup';
 import { cleanupExpired } from './cleanup';
 import { fillMissingPhotos } from './google-places';
 import { fetchMissingImages } from './fetchImages';
@@ -37,6 +37,7 @@ async function main() {
     ['Geocode',    geocodeAllEvents],
     ['Reclassify', reclassifyEvents],
     ['Dedup',      deduplicateEvents],
+    ['Merge recurring', mergeRecurringEvents],
     ['Cleanup',    cleanupExpired],
     ['Photos',     fillMissingPhotos],
     ['Images',     fetchMissingImages],

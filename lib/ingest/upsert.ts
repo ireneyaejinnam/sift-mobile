@@ -135,7 +135,7 @@ export async function upsertEvents(events: SiftEvent[]): Promise<{ inserted: num
       venue_name?: string;
       address?: string;
       borough?: string;
-      price_min?: number;
+      price_min?: number | null;   // null = unknown price (NOT free)
       price_max?: number;
     }[] = [];
 

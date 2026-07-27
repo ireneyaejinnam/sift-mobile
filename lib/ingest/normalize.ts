@@ -7,31 +7,28 @@ import { SIFT_CATEGORIES } from './config';
 const NYC_ZIP_RE = /\b1(?:00|01|02|03|04|10|11|12|13|14|16)\d{2}\b/;
 
 // Non-NYC state/city indicators that should never appear in a valid NYC address
-const NON_NYC_RE = /\b(?:washington\s*,?\s*d\.?c\.?|los angeles|chicago|boston|miami|seattle|houston|dallas|philadelphia|atlanta|denver|phoenix|portland|san francisco|las vegas|austin|nashville|new orleans)\b/i;
+const NON_NYC_RE = /\b(?:washington\s*,?\s*d\.?c\.?|baltimore|los angeles|chicago|boston|miami|seattle|houston|dallas|philadelphia|atlanta|denver|phoenix|portland|san francisco|las vegas|austin|nashville|new orleans|newark|jersey city|hoboken|stamford|new haven|hartford)\b/i;
+
+// A ", XX" state code for any US state other than New York → not NYC, even without a ZIP.
+const NON_NY_STATE_RE = /,\s*(AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/i;
 
 /**
  * Returns true if the address is plausibly in NYC.
- * An event with no address at all passes (we can't reject what we don't know).
+ * An event with no address at all passes (we can't reject what we don't know) —
+ * such events are backstopped by the borough guard at query time.
  */
 export function isNYCAddress(address: string | undefined): boolean {
-  if (!address) return true; // no address → don't reject
+  if (!address) return true; // no address → don't reject (borough guard backstops)
   const a = address.toLowerCase();
-  // Explicit non-NYC cities → reject immediately
-  if (NON_NYC_RE.test(a)) return false;
-  // Non-NY US states → reject (e.g. ", DC", ", CA", ", TX")
-  // Allow "NY", "New York" — those are fine
-  if (/,\s*[A-Z]{2}\s*\d{5}/.test(address)) {
-    // Has a state code — only accept NY
-    const stateMatch = address.match(/,\s*([A-Z]{2})\s*\d{5}/);
-    if (stateMatch && stateMatch[1] !== 'NY') return false;
-  }
-  // NYC ZIP code → accept
+  // Positive NYC signals WIN — accept even if a street name coincides with a
+  // non-NYC city (e.g. "East Houston St", "South Portland Ave, Brooklyn, NY").
   if (NYC_ZIP_RE.test(address)) return true;
-  // "New York" or "NY" in address → accept
-  if (/\bnew york\b|\b,\s*ny\b/i.test(a)) return true;
-  // Known NYC borough names → accept
+  if (/\bnew york\b|,\s*ny\b/i.test(a)) return true;
   if (/\b(?:manhattan|brooklyn|queens|bronx|staten island)\b/i.test(a)) return true;
-  // Unknown address format → allow through (better to keep than miss real NYC events)
+  // No NYC signal — reject explicit non-NYC cities / non-NY state codes.
+  if (NON_NYC_RE.test(a)) return false;
+  if (NON_NY_STATE_RE.test(address)) return false;
+  // Unknown address format → allow through (borough guard is the hard backstop)
   return true;
 }
 
@@ -146,7 +143,9 @@ export function normalizeEvent(raw: Partial<SiftEvent>): SiftEvent | null {
     borough: raw.borough,
     latitude: raw.latitude,
     longitude: raw.longitude,
-    price_min: raw.price_min ?? 0,
+    // Unknown price stays null (NOT 0) — 0 would leak paid events into the Free
+    // filter and mislabel them "Free". Only an explicit 0 / is_free means free.
+    price_min: raw.price_min ?? null,
     price_max: raw.price_max,
     is_free: raw.is_free ?? (raw.price_min === 0 && (!raw.price_max || raw.price_max === 0)),
     currency: raw.currency ?? 'USD',

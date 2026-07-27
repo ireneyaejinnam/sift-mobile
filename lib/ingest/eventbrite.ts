@@ -28,7 +28,7 @@ async function fetchOrgEvents(orgId: string, defaultCategory: string): Promise<S
       break;
     }
 
-    const json = await res.json();
+    const json: any = await res.json();
 
     if (json.error) {
       console.error(`[Eventbrite] API error for org ${orgId}: ${json.error_description}`);
@@ -65,7 +65,7 @@ async function fetchOrgEvents(orgId: string, defaultCategory: string): Promise<S
         if (diffDays > 1 && diffDays < 180) {
           sessions = [];
           for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            sessions.push({ date: d.toISOString().split('T')[0], price_min: priceMin ?? 0, price_max: priceMax });
+            sessions.push({ date: d.toISOString().split('T')[0], price_min: priceMin, price_max: priceMax });
           }
         }
       }
@@ -83,9 +83,10 @@ async function fetchOrgEvents(orgId: string, defaultCategory: string): Promise<S
         address: ev.venue?.address?.localized_address_display,
         latitude: ev.venue?.latitude ? parseFloat(ev.venue.latitude) : undefined,
         longitude: ev.venue?.longitude ? parseFloat(ev.venue.longitude) : undefined,
-        price_min: priceMin ?? 0,
+        price_min: priceMin,
         price_max: priceMax,
-        is_free: ev.is_free ?? (priceMin === 0 || priceMin == null),
+        // Unknown price (null) is NOT free — only an explicit 0 is.
+        is_free: ev.is_free ?? (priceMin === 0),
         event_url: ev.url,
         ticket_url: ev.url,
         image_url: ev.logo?.url,

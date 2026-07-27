@@ -9,6 +9,10 @@ import {
   fetchLocalAllUpcoming,
   LOCAL_SEED_COUNT,
 } from "./localEvents";
+// Pure scoring logic lives in ./eventScore (node/vitest-safe). Re-exported here
+// so existing importers of `@/lib/getEvents` keep working unchanged.
+export { computeEventScore } from "./eventScore";
+export type { TasteContext } from "./eventScore";
 
 // Dev flag: serve events from local JSON seed instead of Supabase.
 // Set EXPO_PUBLIC_USE_LOCAL_SEED=true to enable (see lib/ai-collect-data/output/ai_new_events.json).
@@ -208,141 +212,9 @@ function mapRowWithSessions(row: EventRow, matchedSessions: any[]): SiftEvent {
   };
 }
 
-/**
- * Composite ranking score: vibe * 0.50 + timeliness * 0.30 + completeness * 0.20
- * categoryWeight (from taste profile) is applied as a multiplier.
- */
-/** Taste context for multi-dimensional scoring */
-export interface TasteContext {
-  categoryWeight: number;
-  tagWeights: Record<string, number>;
-  boroughWeights: Record<string, number>;
-  pricePreference: { ceiling: number | null; freeBoost: number };
-  interactionCount: number;
-}
-
-const DEFAULT_TASTE: TasteContext = {
-  categoryWeight: 1.0,
-  tagWeights: {},
-  boroughWeights: {},
-  pricePreference: { ceiling: null, freeBoost: 0 },
-  interactionCount: 0,
-};
-
-/**
- * Compute event score for feed ranking.
- *
- * Formula: quality × 0.25 + taste × 0.40 + timing × 0.20 + completeness × 0.10 + novelty × 0.05
- * Taste: category 35% + tags 35% + borough 10% + price 10% + freeBoost 10%
- *
- * Cold start: blends personalized score with quality-based score based on interaction count.
- */
-export function computeEventScore(
-  event: SiftEvent,
-  categoryWeight = 1.0,
-  impressionPenalty = 1.0,
-  taste: TasteContext = DEFAULT_TASTE,
-  dateRangeActive = false
-): number {
-  // Quality: vibe 1–10 → 0–1, unchecked = 0.5 neutral
-  const quality = event.vibeScore != null ? (event.vibeScore - 1) / 9 : 0.5;
-
-  // ── Taste score (multi-dimensional) ──
-  const categoryAffinity = Math.min(Math.max((categoryWeight - 0.3) / 1.7, 0), 1.0);
-
-  // Tag affinity: average weight of matching tags (neutral = 0.5)
-  let tagAffinity = 0.5;
-  if (event.tags && event.tags.length > 0 && Object.keys(taste.tagWeights).length > 0) {
-    const tagScores = event.tags
-      .map((t) => taste.tagWeights[t])
-      .filter((w): w is number => w != null);
-    if (tagScores.length > 0) {
-      tagAffinity = Math.min(
-        (tagScores.reduce((a, b) => a + b, 0) / tagScores.length) / 2.5,
-        1.0
-      );
-    }
-  }
-
-  // Borough affinity
-  let boroughAffinity = 0.5;
-  if (event.borough && Object.keys(taste.boroughWeights).length > 0) {
-    const bw = taste.boroughWeights[event.borough];
-    if (bw != null) boroughAffinity = Math.min(bw / 2.0, 1.0);
-  }
-
-  // Price affinity
-  let priceAffinity = 0.5;
-  if (event.price === 0 && taste.pricePreference.freeBoost > 0) {
-    priceAffinity = Math.min(0.5 + taste.pricePreference.freeBoost * 0.25, 1.0);
-  } else if (taste.pricePreference.ceiling != null && event.price != null) {
-    priceAffinity = event.price <= taste.pricePreference.ceiling ? 0.7 : 0.3;
-  }
-
-  const tasteScore =
-    categoryAffinity * 0.35 +
-    tagAffinity * 0.35 +
-    boroughAffinity * 0.15 +
-    priceAffinity * 0.15;
-
-  // Timing: flat when user selected a date range (all events equally valid),
-  // otherwise smoother decay curve
-  let timing: number;
-  if (dateRangeActive) {
-    timing = 1.0; // user told us their dates — don't penalize later events in range
-  } else {
-    const daysUntil = event.daysLeft ?? 30;
-    timing =
-      daysUntil <= 0  ? 0
-      : daysUntil <= 3  ? 1.0
-      : daysUntil <= 7  ? 0.85
-      : daysUntil <= 14 ? 0.7
-      : daysUntil <= 30 ? 0.45
-      : 0.25;
-  }
-
-  // Completeness: rewards rich event data
-  const completeness =
-    (event.imageUrl ? 0.4 : 0) +
-    (event.description && event.description.length > 20 ? 0.3 : 0) +
-    (event.location ? 0.2 : 0) +
-    (event.priceLabel && event.priceLabel !== "See tickets" ? 0.1 : 0);
-
-  const novelty = impressionPenalty;
-
-  const personalizedScore =
-    quality * 0.20 + tasteScore * 0.50 + timing * 0.15 + completeness * 0.10 + novelty * 0.05;
-
-  // Cold start blending: until ~20 interactions, lean more on quality + timing
-  // If caller passed a non-default categoryWeight, they have real preference data —
-  // ensure confidence is at least 0.5 so category weight still influences scoring
-  const rawConfidence = Math.min(1, taste.interactionCount / 20);
-  const confidence = (categoryWeight !== 1.0 && rawConfidence < 0.5) ? 0.5 : rawConfidence;
-  const coldStartScore = quality * 0.40 + timing * 0.30 + completeness * 0.20 + novelty * 0.10;
-
-  const finalScore = confidence * personalizedScore + (1 - confidence) * coldStartScore;
-
-  // Attach explanation for debugging / future user-facing labels
-  (event as any).__scoreExplanation = {
-    finalScore: +finalScore.toFixed(3),
-    confidence: +confidence.toFixed(2),
-    components: {
-      quality: +(quality * 0.25).toFixed(3),
-      taste: +(tasteScore * 0.40).toFixed(3),
-      timing: +(timing * 0.20).toFixed(3),
-      completeness: +(completeness * 0.10).toFixed(3),
-      novelty: +(novelty * 0.05).toFixed(3),
-    },
-    tasteBreakdown: {
-      category: +(categoryAffinity * 0.35).toFixed(3),
-      tags: +(tagAffinity * 0.35).toFixed(3),
-      borough: +(boroughAffinity * 0.15).toFixed(3),
-      price: +(priceAffinity * 0.15).toFixed(3),
-    },
-  };
-
-  return finalScore;
-}
+// `TasteContext`, `DEFAULT_TASTE`, and `computeEventScore` moved to
+// ./eventScore (pure, node/vitest-safe) and are re-exported at the top of this
+// file. `computeEventScore` is imported above for the internal sort below.
 
 /**
  * Fetch events from Supabase with session-level filtering.
@@ -396,6 +268,7 @@ export async function fetchEvents(
     .in("id", matchedEventIds.slice(0, limit))
     .neq("is_suppressed", true)
     .eq("publication_status", "public")
+    .in("borough", NYC_BOROUGHS) // NYC-only hard guard
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null");
 
@@ -526,20 +399,18 @@ export async function fetchEventById(
  * Pre-sorted by composite score (vibe + timeliness + completeness) × taste weight.
  */
 export async function fetchAllUpcoming(
-  limit = 500,
+  limit = 150,
   categories?: EventCategory[],
-  categoryWeights?: Partial<Record<EventCategory, number>>
+  categoryWeights?: Partial<Record<EventCategory, number>>,
+  offset = 0
 ): Promise<SiftEvent[]> {
+  // NOTE: this returns events in stable (start_date, id) order for pagination.
+  // Composite/taste scoring is owned by the caller (discover tieredSort) — do
+  // NOT re-sort by score here (it would break offset paging and double-rank).
+  // `categoryWeights` is accepted for signature compatibility but unused.
+  void categoryWeights;
   if (USE_LOCAL_SEED) {
-    const mapped = fetchLocalAllUpcoming(limit, categories);
-    if (categoryWeights && Object.keys(categoryWeights).length > 0) {
-      mapped.sort((a: SiftEvent, b: SiftEvent) => {
-        const wa = categoryWeights[a.category] ?? 1.0;
-        const wb = categoryWeights[b.category] ?? 1.0;
-        return computeEventScore(b, wb) - computeEventScore(a, wa);
-      });
-    }
-    return mapped;
+    return fetchLocalAllUpcoming(limit, categories, offset);
   }
   if (!supabase) return [];
 
@@ -551,14 +422,19 @@ export async function fetchAllUpcoming(
     .or(`end_date.gte.${today},start_date.gte.${today}`)
     .neq("is_suppressed", true)
     .eq("publication_status", "public")
+    .in("borough", NYC_BOROUGHS) // NYC-only hard guard — drops non-NYC / null-borough rows
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null")
     .order("start_date", { ascending: true })
-    .limit(limit);
+    .order("id", { ascending: true })
+    .range(offset, offset + limit - 1);
 
   if (categories?.length) {
     const dbCats = categories.map((c) => CATEGORY_TO_DB[c] ?? c);
-    eventQuery = eventQuery.in("category", dbCats);
+    const cats = dbCats.join(",");
+    // Match by category OR tag overlap, mirroring getEventsForFilters — so an
+    // event tagged with the category (but classified differently) isn't dropped.
+    eventQuery = eventQuery.or(`category.in.(${cats}),tags.ov.{${cats}}`);
   }
 
   const { data: events, error } = await eventQuery;
@@ -586,14 +462,6 @@ export async function fetchAllUpcoming(
     .filter((row: any) => !VIBE_SUPPRESSED.has(row.id))
     .map((row: any) => mapRowWithSessions(row, sessionsByEvent.get(row.id) ?? []));
 
-  // Sort by composite score, applying taste profile category weights
-  if (categoryWeights && Object.keys(categoryWeights).length > 0) {
-    mapped.sort((a: SiftEvent, b: SiftEvent) => {
-      const wa = categoryWeights[a.category] ?? 1.0;
-      const wb = categoryWeights[b.category] ?? 1.0;
-      return computeEventScore(b, wb) - computeEventScore(a, wa);
-    });
-  }
-
+  // Intentionally NOT score-sorted here — caller owns ranking (see note above).
   return mapped;
 }
