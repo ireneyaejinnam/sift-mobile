@@ -24,6 +24,7 @@ import {
 } from "lucide-react-native";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import BottomSheet from "@/components/ui/BottomSheet";
+import { DATE_PRESETS, getDatePresetRange, matchDatePreset } from "@/lib/datePresets";
 import type { Filters, Vibe } from "@/types/quiz";
 import type { BoroughName, EventCategory, PriceRange } from "@/types/event";
 import { colors, radius, typography } from "@/lib/theme";
@@ -160,7 +161,10 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
       ? CATEGORIES.find((c) => c.value === cats[0])?.label ?? cats[0]
       : `${cats.length} moods`;
 
-  const dateLabel = filters.dateFrom
+  const activePreset = matchDatePreset(filters);
+  const dateLabel = activePreset
+    ? DATE_PRESETS.find((p) => p.value === activePreset)!.label
+    : filters.dateFrom
     ? filters.dateTo && filters.dateTo !== filters.dateFrom
       ? `${formatDate(filters.dateFrom)} – ${formatDate(filters.dateTo)}`
       : formatDate(filters.dateFrom)
@@ -248,6 +252,23 @@ export default function ResultsFilterBar({ filters, onChange }: Props) {
             multi
             onPress={() => onChange({ ...filters, dateFrom: undefined, dateTo: undefined })}
           />
+          {/* Quick presets — date-only ranges (Tonight = today) */}
+          <View style={styles.presetRow}>
+            {DATE_PRESETS.map((p) => {
+              const active = activePreset === p.value;
+              return (
+                <Pressable
+                  key={p.value}
+                  onPress={() => onChange({ ...filters, ...getDatePresetRange(p.value) })}
+                  style={[styles.presetChip, active && styles.presetChipActive]}
+                >
+                  <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
           <View style={styles.sheetDivider} />
           <View style={{ marginTop: 4 }}>
             <DateRangePicker
@@ -414,5 +435,32 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: 8,
+  },
+  presetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingTop: 10,
+  },
+  presetChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  presetChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  presetChipText: {
+    fontSize: 13,
+    color: colors.foreground,
+  },
+  presetChipTextActive: {
+    color: colors.primary,
+    fontWeight: "600",
   },
 });
