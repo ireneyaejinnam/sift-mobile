@@ -20,7 +20,10 @@ import {
   saveStorage,
   setOnboardingDoneFlag,
   clearOnboardingDoneFlag,
+  clearOnboardingDraft,
+  clearGuestFlag,
 } from "@/lib/storage";
+import { clearTasteProfile } from "@/lib/tasteProfile";
 import {
   fetchUserData,
   syncUserProfile,
@@ -40,6 +43,9 @@ import { events as localEvents } from "@/data/events";
 
 interface UserContextValue extends SiftStorage {
   ready: boolean;
+  /** True when the current Supabase session is anonymous (guest with a durable
+   *  uid, but no email account). `isLoggedIn` is reserved for real accounts. */
+  isAnonymous: boolean;
   setAuth: (
     isLoggedIn: boolean,
     userEmail: string,
@@ -57,6 +63,8 @@ interface UserContextValue extends SiftStorage {
   }) => boolean;
   isGoing: (eventId: string) => boolean;
   markCommitted: (eventId: string) => void;
+  markWent: (eventId: string, attended: boolean) => void;
+  updateGoingDate: (eventId: string, eventDate: string) => void;
   getGoingEvent: (eventId: string) => GoingEvent | undefined;
   addCustomList: (listName: string) => void;
   renameCustomList: (oldName: string, newName: string) => void;
@@ -82,13 +90,21 @@ function isInvalidRefreshTokenError(error: unknown): boolean {
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [storage, setStorage] = useState<SiftStorage>(initialStorage);
   const [ready, setReady] = useState(false);
+  // True while the active Supabase session is anonymous (guest w/ durable uid).
+  const [isAnonymous, setIsAnonymous] = useState(false);
 
   // Supabase user ID — used to key all remote data operations.
   const userIdRef = useRef<string | null>(null);
 
   const clearLocalAuthState = useCallback(async () => {
     userIdRef.current = null;
+    setIsAnonymous(false);
     clearOnboardingDoneFlag();
+    clearGuestFlag();
+    // Wipe locally-cached taste + onboarding draft so a subsequent NEW account
+    // starts fresh (otherwise the old account's taste migrates up on signup).
+    clearTasteProfile().catch(() => {});
+    clearOnboardingDraft().catch(() => {});
     // Update state synchronously first so the UI re-renders as logged-out
     // immediately; defer the async supabase + storage writes.
     const clean = { ...initialStorage };
@@ -161,47 +177,74 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             throw error;
           }
 
-          if (sessionData.session?.user) {
-            const user = sessionData.session.user;
+          let user = sessionData.session?.user ?? null;
+
+          // No session — mint an anonymous session so every install gets a
+          // durable Supabase uid (taste persists server-side). Falls back to
+          // clean-guest if anonymous sign-ins are disabled/unavailable.
+          if (!user) {
+            try {
+              const { data: anon, error } = await supabase.auth.signInAnonymously();
+              if (!error) user = anon.session?.user ?? null;
+            } catch {
+              // ignore — handled by the clean-guest fallback below
+            }
+          }
+
+          if (user) {
             userIdRef.current = user.id;
+            const anon = !!user.is_anonymous;
+            setIsAnonymous(anon);
 
-            // Try loading from Supabase first; fall back to local cache.
-            const remote = await fetchUserData(user.id);
             let data: SiftStorage;
-
-            if (remote) {
-              data = {
-                ...initialStorage,
-                isLoggedIn: true,
-                userEmail: user.email ?? "",
-                userDisplayName: remote.displayName,
-                userProfile: remote.userProfile,
-                savedEvents: remote.savedEvents,
-                goingEvents: remote.goingEvents,
-                customLists: remote.customLists,
-                createdAt: user.created_at,
-              };
-            } else {
-              // Supabase unavailable — use cached local data.
+            if (anon) {
+              // Anonymous: has a real uid (taste persists) but is NOT a
+              // logged-in account. Use local cache; no server user profile yet.
               const cached = await loadStorage();
               data = {
                 ...cached,
-                isLoggedIn: true,
-                userEmail: user.email ?? cached.userEmail,
-                userDisplayName: cached.userDisplayName,
+                isLoggedIn: false,
+                userEmail: "",
                 createdAt: user.created_at ?? cached.createdAt,
               };
+            } else {
+              // Real account — try Supabase first; fall back to local cache.
+              const remote = await fetchUserData(user.id);
+              if (remote) {
+                data = {
+                  ...initialStorage,
+                  isLoggedIn: true,
+                  userEmail: user.email ?? "",
+                  userDisplayName: remote.displayName,
+                  userProfile: remote.userProfile,
+                  savedEvents: remote.savedEvents,
+                  goingEvents: remote.goingEvents,
+                  customLists: remote.customLists,
+                  createdAt: user.created_at,
+                };
+              } else {
+                const cached = await loadStorage();
+                data = {
+                  ...cached,
+                  isLoggedIn: true,
+                  userEmail: user.email ?? cached.userEmail,
+                  userDisplayName: cached.userDisplayName,
+                  createdAt: user.created_at ?? cached.createdAt,
+                };
+              }
             }
 
             if (data.userProfile) setOnboardingDoneFlag();
             else clearOnboardingDoneFlag();
 
-            // Ensure "Favorites" list exists.
+            // Ensure "Favorites" list exists (real accounts sync it upstream).
             if (!data.customLists.includes("Favorites")) {
               const customLists = ["Favorites", ...data.customLists];
               data = { ...data, customLists };
-              syncCustomList(user.id, "Favorites", 0);
-              reorderCustomListsDB(user.id, customLists);
+              if (!anon) {
+                syncCustomList(user.id, "Favorites", 0);
+                reorderCustomListsDB(user.id, customLists);
+              }
             }
 
             // Backfill missing event dates in saved events.
@@ -210,7 +253,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             setStorage(data);
             saveStorage(data);
           } else {
-            // No session — guest always starts clean.
+            // Anonymous sign-in unavailable — clean guest, no session.
             await clearLocalAuthState();
           }
         }
@@ -230,13 +273,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       (_event, session) => {
         if (session?.user) {
           userIdRef.current = session.user.id;
+          const anon = !!session.user.is_anonymous;
+          setIsAnonymous(anon);
           setStorage((prev) => ({
             ...prev,
-            isLoggedIn: true,
+            // An anonymous session is NOT a logged-in account.
+            isLoggedIn: !anon,
             userEmail: session.user.email ?? prev.userEmail,
           }));
         } else {
           userIdRef.current = null;
+          setIsAnonymous(false);
           setStorage((prev) => ({
             ...prev,
             isLoggedIn: false,
@@ -273,6 +320,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           authFullName = data.user?.user_metadata?.full_name as string | undefined;
         }
         userIdRef.current = userId;
+        setIsAnonymous(false);
 
         // Load from Supabase; fall back to local cache.
         let data: SiftStorage = initialStorage;
@@ -325,6 +373,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         persist(next);
       } else {
         userIdRef.current = null;
+        setIsAnonymous(false);
         clearOnboardingDoneFlag();
         persist({ ...initialStorage });
       }
@@ -430,6 +479,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const committedAt = new Date().toISOString();
       const goingEvents = storage.goingEvents.map((e) =>
         e.eventId === eventId ? { ...e, committed: true, committedAt } : e
+      );
+      persist({ ...storage, goingEvents });
+      const updated = goingEvents.find((e) => e.eventId === eventId);
+      if (userIdRef.current && updated) syncGoingEvent(userIdRef.current, updated);
+    },
+    [storage, persist]
+  );
+
+  // Toggle whether the user actually attended a (past) going event.
+  const markWent = useCallback(
+    (eventId: string, attended: boolean) => {
+      const attendedAt = attended ? new Date().toISOString() : undefined;
+      const goingEvents = storage.goingEvents.map((e) =>
+        e.eventId === eventId ? { ...e, attended, attendedAt } : e
+      );
+      persist({ ...storage, goingEvents });
+      const updated = goingEvents.find((e) => e.eventId === eventId);
+      if (userIdRef.current && updated) syncGoingEvent(userIdRef.current, updated);
+    },
+    [storage, persist]
+  );
+
+  // Change the chosen date of an already-going event (no-op if not going).
+  const updateGoingDate = useCallback(
+    (eventId: string, eventDate: string) => {
+      if (!storage.goingEvents.some((e) => e.eventId === eventId)) return;
+      const goingEvents = storage.goingEvents.map((e) =>
+        e.eventId === eventId ? { ...e, eventDate } : e
       );
       persist({ ...storage, goingEvents });
       const updated = goingEvents.find((e) => e.eventId === eventId);
@@ -557,6 +634,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...storage,
       ready,
+      isAnonymous,
       setAuth,
       setUserProfile,
       addSavedEvent,
@@ -565,6 +643,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       toggleGoing,
       isGoing,
       markCommitted,
+      markWent,
+      updateGoingDate,
       getGoingEvent,
       addCustomList,
       renameCustomList,
@@ -578,9 +658,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       refreshFromRemote,
     }),
     [
-      storage, ready, setAuth, setUserProfile,
+      storage, ready, isAnonymous, setAuth, setUserProfile,
       addSavedEvent, removeSavedEvent, getSavedListForEvent,
-      toggleGoing, isGoing, markCommitted, getGoingEvent, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
+      toggleGoing, isGoing, markCommitted, markWent, updateGoingDate, getGoingEvent, addCustomList, renameCustomList, deleteCustomList, reorderCustomLists, saveEventToNewList,
       getAllListNames, addSharedWithYou, updateDisplayName, signOut, refreshFromRemote,
     ]
   );

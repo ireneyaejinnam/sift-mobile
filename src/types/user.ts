@@ -26,6 +26,8 @@ export interface GoingEvent {
   markedAt: string;
   committed?: boolean;
   committedAt?: string;
+  attended?: boolean;   // user confirmed they actually went (post-event)
+  attendedAt?: string;
 }
 
 export interface SharedWithYouEvent {
