@@ -33,7 +33,6 @@ import {
   Moon,
   Music,
   Palette,
-  Plus,
   RotateCcw,
   ShoppingBag,
   Sparkles,
@@ -47,14 +46,20 @@ import ProgressBar from "@/components/layout/ProgressBar";
 import DateRangePicker from "@/components/quiz/DateRangePicker";
 import EventCard from "@/components/events/EventCard";
 import SkeletonCard from "@/components/ui/SkeletonCard";
-import HintOverlay from "@/components/ui/HintOverlay";
+import SwipeTutorial from "@/components/ui/SwipeTutorial";
+import TastePrompt from "@/components/ui/TastePrompt";
 import EventDetail from "@/components/events/EventDetail";
 import ResultsFilterBar from "@/components/results/ResultsFilterBar";
 import BottomSheet from "@/components/ui/BottomSheet";
 import SaveEventSheet from "@/components/events/SaveEventSheet";
+import DeckActionBar from "@/components/events/DeckActionBar";
+import OfflineBanner from "@/components/ui/OfflineBanner";
 import GoingDateSheet from "@/components/events/GoingDateSheet";
 import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { saveCachedFeed, loadCachedFeed } from "@/lib/feedCache";
+import { emptyNav, canGoBack, advance as navAdvance, goBack as navGoBack, type DeckNav, type DeckAction } from "@/lib/deckHistory";
 import { useUser } from "@/context/UserContext";
 import { getAllCandidates, getNextCandidate } from "@/lib/eventRecommendations";
 import { fetchAllUpcoming, computeEventScore, type TasteContext } from "@/lib/getEvents";
@@ -129,11 +134,23 @@ interface Slot {
   meta?: { quizCategories?: string[] };
 }
 
+/** True when the user has narrowed the deck with any filter (U5). */
+function filtersActive(f: Filters): boolean {
+  return !!(
+    (f.categories && f.categories.length) ||
+    (f.dateFrom && f.dateTo) ||
+    (f.boroughs && f.boroughs.length) ||
+    f.distance ||
+    f.price
+  );
+}
+
 export default function DiscoverScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
-  const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing } = useUser();
+  const { isLoggedIn, userProfile, userEmail, savedEvents, goingEvents, toggleGoing, isGoing, getSavedListForEvent, addSavedEvent, removeSavedEvent, updateGoingDate, ready } = useUser();
+  const { isOnline } = useNetworkStatus();
 
   const [interactionsMap, setInteractionsMap] = useState<Map<string, EventInteraction>>(new Map());
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -185,17 +202,26 @@ export default function DiscoverScreen() {
   const [resultPool, setResultPool] = useState<SiftEvent[]>([]);
   const resultPoolRef = useRef<SiftEvent[]>([]);
   useEffect(() => { resultPoolRef.current = resultPool; }, [resultPool]);
+  // Bumped after every pagination top-up so the advance-on-grow effect re-runs
+  // (covers both "page appended" and "no more pages" cases).
+  const [feedTick, setFeedTick] = useState(0);
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [dismissedHistory, setDismissedHistory] = useState<DismissedRecord[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SiftEvent | null>(null);
   const [saveSheetEvent, setSaveSheetEvent] = useState<SiftEvent | null>(null);
+  const [saveDateEvent, setSaveDateEvent] = useState<SiftEvent | null>(null);
+  const [saveDateOverride, setSaveDateOverride] = useState<string | undefined>(undefined);
   const [goingSheetEvent, setGoingSheetEvent] = useState<SiftEvent | null>(null);
   const [shareSheetEvent, setShareSheetEvent] = useState<SiftEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const [cardStageHeight, setCardStageHeight] = useState(0);
-  const [lastDismissedEvent, setLastDismissedEvent] = useState<SiftEvent | null>(null);
-  const lastDismissWasHardPass = useRef(false);
+  // Back/forward deck history (see lib/deckHistory). navRef holds the stacks;
+  // canBack drives the header "Go back" button; activeEventRef mirrors the card
+  // currently on screen so "Go back" can queue it forward.
+  const navRef = useRef<DeckNav<SiftEvent>>(emptyNav());
+  const [canBack, setCanBack] = useState(false);
+  const activeEventRef = useRef<SiftEvent | null>(null);
   const loadingRef = useRef(false);
   const fetchVersionRef = useRef(0);
   const feedCursorRef = useRef(0); // cursor into resultPool for sequential advancement
@@ -205,6 +231,129 @@ export default function DiscoverScreen() {
 
   const commitServedCategory = (category: EventCategory) => {
     servedCategoryWindowRef.current = [...servedCategoryWindowRef.current, category].slice(-4);
+  };
+
+  // ── Continuous-deck pagination ────────────────────────────────────────────
+  const FEED_PAGE_SIZE = 150;   // events fetched per DB page
+  const FEED_PREFETCH = 15;     // top up when cursor is within N of the pool end
+  const EXPLORE_ENABLED = false; // inject ~12% discovery wildcards (flag-gated, off)
+  const pageRef = useRef(0);            // next page index to fetch
+  const hasMoreRef = useRef(true);      // false once a short (< PAGE_SIZE) page returns
+  const loadingMoreRef = useRef(false); // in-flight guard
+
+  // Generate a user-facing match reason from the score explanation (display only).
+  const getMatchReason = (event: SiftEvent): string => {
+    const expl = (event as any).__scoreExplanation;
+    if (!expl) return "Picked for you";
+    const tb = expl.tasteBreakdown;
+    const signals: [string, number][] = [
+      ["category", tb.category], ["tags", tb.tags], ["borough", tb.borough], ["price", tb.price],
+    ];
+    signals.sort((a, b) => b[1] - a[1]);
+    const top = signals[0];
+    if (top[1] < 0.05) return event.priceLabel === "Free" ? "It's free" : "Picked for you";
+    const catLabels: Record<string, string> = {
+      arts: "art events", music: "live music", comedy: "comedy", food: "food events",
+      outdoors: "outdoors", nightlife: "nightlife", fitness: "fitness", theater: "theater",
+      workshops: "workshops", popups: "pop-ups", sports: "sports",
+    };
+    if (top[0] === "category") return `Because you like ${catLabels[event.category] ?? event.category}`;
+    if (top[0] === "tags" && event.tags?.length) return `Because you like ${event.tags[0]}`;
+    if (top[0] === "borough" && event.borough) return `Popular in ${event.borough}`;
+    if (top[0] === "price" && event.priceLabel === "Free") return "It's free";
+    return "Picked for you";
+  };
+
+  // Shared feed ranker — used by both the initial load and pagination top-ups so
+  // every batch is ordered identically. Pipeline: hidden filter → user filters →
+  // quiz hard-filter → composite score (applyPrefs) → match reasons → dedup.
+  // Diversity is a single serve-time pass (isOverRepresented in nextSlotUpdate);
+  // the hard per-category cap was removed for the continuous deck.
+  // Content key collapses duplicate DB rows (different ids, same real event) that
+  // the ingest dedup missed — title + date + borough. Two genuinely-distinct
+  // same-title/date/borough events would merge, but that's rare and preferable
+  // to showing the same event twice.
+  const contentKey = (e: SiftEvent) =>
+    (e.title ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") + "|" +
+    (e.startDate ?? "").slice(0, 10) + "|" + (e.borough ?? "");
+
+  const rankFeedBatch = (
+    all: SiftEvent[],
+    f: Filters,
+    activeProfile: TasteProfile | null,
+    existing: SiftEvent[]
+  ): SiftEvent[] => {
+    const tasteReady = !!userProfile;
+    const hasDateRange = !!(f.dateFrom && f.dateTo);
+
+    const impressionPenalty = (eventId: string): number => {
+      const interaction = interactionsMap.get(eventId);
+      if (!interaction || interaction.impression_count === 0) return 1.0;
+      if (interaction.going_count > 0 || interaction.save_count > 0) return 1.0;
+      return Math.max(0.3, 1.0 - interaction.impression_count * 0.25);
+    };
+    const buildTasteCtx = (catWeight: number): TasteContext =>
+      tasteReady
+        ? {
+            categoryWeight: catWeight,
+            tagWeights: activeProfile?.tagWeights ?? {},
+            boroughWeights: activeProfile?.boroughWeights ?? {},
+            pricePreference: activeProfile?.pricePreference ?? { ceiling: null, freeBoost: 0 },
+            interactionCount: activeProfile?.interactionCount ?? 0,
+          }
+        : { categoryWeight: 1.0, tagWeights: {}, boroughWeights: {}, pricePreference: { ceiling: null, freeBoost: 0 }, interactionCount: 0 };
+    const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) =>
+      [...tier].sort((a, b) => {
+        const wa = weights[a.category] ?? 1.0;
+        const wb = weights[b.category] ?? 1.0;
+        return (
+          computeEventScore(b, wb, impressionPenalty(b.id), buildTasteCtx(wb), hasDateRange) -
+          computeEventScore(a, wa, impressionPenalty(a.id), buildTasteCtx(wa), hasDateRange)
+        );
+      });
+
+    let pool = all.filter((e) => !hiddenIds.has(e.id));
+    // Distance / borough filter
+    pool = pool.filter((e) => {
+      if (f.boroughs && f.boroughs.length > 0) return f.boroughs.includes(e.borough as BoroughName);
+      if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
+      if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
+      return true;
+    });
+    // Date-range filter (±1 day padding)
+    if (f.dateFrom && f.dateTo) {
+      const from = new Date(f.dateFrom); from.setDate(from.getDate() - 1);
+      const to = new Date(f.dateTo); to.setDate(to.getDate() + 1);
+      pool = pool.filter((e) => {
+        const start = new Date(e.startDate);
+        const end = new Date(e.endDate ?? e.startDate);
+        return start <= to && end >= from;
+      });
+    }
+    // Chosen categories are a hard filter (no "everything else" tier)
+    const quizCats = f.categories ?? [];
+    const ranked1 = quizCats.length > 0 ? pool.filter((e) => quizCats.includes(e.category)) : pool;
+    // Composite score (taste weights only after the questionnaire is done)
+    const weights = tasteReady ? (activeProfile?.categoryWeights ?? {}) : {};
+    let ranked = applyPrefs(ranked1, weights);
+    // Exploration wildcards — flag-gated (default off). Injects ~12% high-quality
+    // events from underexplored categories to counter filter bubbles.
+    if (EXPLORE_ENABLED) ranked = injectExploreSlots(ranked, pool, weights, quizCats);
+    for (const e of ranked) if (!e.matchReason) e.matchReason = getMatchReason(e);
+    // Dedup vs already-loaded rows (by id AND content) + session-dismissed +
+    // cancelled titles. Content dedup collapses different-id duplicate rows.
+    const seenIds = new Set(existing.map((e) => e.id));
+    const seenContent = new Set(existing.map(contentKey));
+    return ranked.filter((e) => {
+      if (seenIds.has(e.id) || sessionDismissedRef.current.has(e.id)) return false;
+      const ck = contentKey(e);
+      if (seenContent.has(ck)) return false;
+      const t = (e.title ?? "").toLowerCase();
+      if (t.includes("cancelled") || t.includes("canceled")) return false;
+      seenIds.add(e.id);
+      seenContent.add(ck);
+      return true;
+    });
   };
 
   // Quiz step slide-in animation
@@ -287,21 +436,24 @@ export default function DiscoverScreen() {
     });
   }, [tasteProfile, savedEvents, goingEvents]);
 
-  // Re-sort the live result pool whenever category weights change (from
-  // "More like this" / "Not my thing" taps). This makes the very next card
-  // reflect the updated taste — no need to wait for a refetch.
+  // Re-rank the live pool when category weights change (from "More like this" /
+  // "Not my thing" taps) so the next card reflects the updated taste. Re-ranks
+  // only the UNSERVED remainder with the SAME full scoring as the initial load
+  // (rankFeedBatch) — never a second, weaker sort — preserving served order.
   const categoryWeights = tasteProfile?.categoryWeights;
   useEffect(() => {
-    if (!categoryWeights) return;
-    if (Object.keys(categoryWeights).length === 0) return;
+    if (!categoryWeights || Object.keys(categoryWeights).length === 0) return;
     setResultPool((prev) => {
       if (prev.length === 0) return prev;
-      return [...prev].sort((a, b) => {
-        const wa = categoryWeights[a.category] ?? 1.0;
-        const wb = categoryWeights[b.category] ?? 1.0;
-        return computeEventScore(b, wb) - computeEventScore(a, wa);
-      });
+      const cursor = feedCursorRef.current;
+      const served = prev.slice(0, cursor);
+      const remaining = prev.slice(cursor);
+      const reranked = rankFeedBatch(remaining, filters, tasteProfile, served);
+      const next = [...served, ...reranked];
+      resultPoolRef.current = next;
+      return next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryWeights]);
   // Session-dismissed: never cleared by reset() — events stay gone for the whole session
   const sessionDismissedRef = useRef(new Set<string>());
@@ -312,6 +464,8 @@ export default function DiscoverScreen() {
     expandedInterestCatsRef.current = [];
     servedCategoryWindowRef.current = [];
     sessionDismissedRef.current = new Set();
+    navRef.current = emptyNav();
+    setCanBack(false);
     setIsTransitioning(false);
     setEntryMode("sift");
     setStep("category");
@@ -351,74 +505,12 @@ export default function DiscoverScreen() {
     }, [entryMode, step, handleBack, reset])
   );
 
-  // ── Diversity re-ranking ──────────────────────────────────────────────────
-  // Max 2 of same category in any 5-card window.
-  // If category is filtered, diversify on borough instead.
-  // Cap per-category contribution so no single category dominates the feed tail
-  const MAX_EVENTS_PER_CATEGORY = 70;
-  const capEventsPerCategory = (events: SiftEvent[]): SiftEvent[] => {
-    const counts = new Map<string, number>();
-    return events.filter((e) => {
-      const count = counts.get(e.category) ?? 0;
-      if (count >= MAX_EVENTS_PER_CATEGORY) return false;
-      counts.set(e.category, count + 1);
-      return true;
-    });
-  };
-
-  const diversifyFeed = (events: SiftEvent[], filteredCats: EventCategory[]): SiftEvent[] => {
-    if (events.length <= 1) return events;
-    const maxPerWindow = 2;
-    const windowSize = 4; // look back 4 positions (so max 2 of same in last 5 including candidate)
-    const getKey = (e: SiftEvent) =>
-      filteredCats.length === 0 ? e.category : (e.borough ?? "unknown");
-
-    // Group events by category, maintaining score order within each group
-    const buckets = new Map<string, SiftEvent[]>();
-    for (const e of events) {
-      const key = getKey(e);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key)!.push(e);
-    }
-
-    const result: SiftEvent[] = [];
-    const totalEvents = events.length;
-    let stuckCount = 0;
-
-    while (result.length < totalEvents && stuckCount < 20) {
-      const recentKeys = result.slice(-windowSize).map(getKey);
-      let placed = false;
-
-      // Try each bucket in order of first element's original rank
-      // (buckets maintain score order, so first = highest scoring in that category)
-      const sortedBuckets = [...buckets.entries()]
-        .filter(([, arr]) => arr.length > 0)
-        .sort(([, a], [, b]) => events.indexOf(a[0]) - events.indexOf(b[0]));
-
-      for (const [key, bucket] of sortedBuckets) {
-        const count = recentKeys.filter((k) => k === key).length;
-        if (count < maxPerWindow) {
-          result.push(bucket.shift()!);
-          placed = true;
-          stuckCount = 0;
-          break;
-        }
-      }
-
-      if (!placed) {
-        // All available categories are at max in the window — take the best remaining
-        const best = sortedBuckets[0];
-        if (best && best[1].length > 0) {
-          result.push(best[1].shift()!);
-          stuckCount++;
-        } else {
-          break;
-        }
-      }
-    }
-
-    return result;
-  };
+  // ── Diversity ─────────────────────────────────────────────────────────────
+  // Single diversity pass now lives at SERVE time (isOverRepresented in
+  // nextSlotUpdate: >1 of the same category in the last 4 served is deferred).
+  // The old build-time capEventsPerCategory (70/cat) + diversifyFeed passes were
+  // removed for the continuous deck — the 70 cap truncated single-category
+  // filters, and two windowed passes were redundant.
 
   // ── Explore slots ──────────────────────────────────────────────────────
   // Inject ~10% high-quality wildcards from categories the user hasn't explored much
@@ -489,173 +581,52 @@ export default function DiscoverScreen() {
       //   Tier 2: Onboarding interests (logged-in only, skip for guest)
       //   Tier 3: Everything else in the date range
 
-      // Generate user-facing match reason from score explanation
-      const getMatchReason = (event: SiftEvent): string => {
-        const expl = (event as any).__scoreExplanation;
-        if (!expl) return "Picked for you";
-        const tb = expl.tasteBreakdown;
-        // Find the strongest taste signal
-        const signals: [string, number][] = [
-          ["category", tb.category],
-          ["tags", tb.tags],
-          ["borough", tb.borough],
-          ["price", tb.price],
-        ];
-        signals.sort((a, b) => b[1] - a[1]);
-        const top = signals[0];
-        if (top[1] < 0.05) return event.price === 0 ? "It's free" : "Picked for you";
-        const catLabels: Record<string, string> = {
-          arts: "art events", music: "live music", comedy: "comedy", food: "food events",
-          outdoors: "outdoors", nightlife: "nightlife", fitness: "fitness", theater: "theater",
-          workshops: "workshops", popups: "pop-ups", sports: "sports",
-        };
-        if (top[0] === "category") return `Because you like ${catLabels[event.category] ?? event.category}`;
-        if (top[0] === "tags" && event.tags?.length) return `Because you like ${event.tags[0]}`;
-        if (top[0] === "borough" && event.borough) return `Popular in ${event.borough}`;
-        if (top[0] === "price" && event.price === 0) return "It's free";
-        return "Picked for you";
-      };
-
-      const applyDistanceFilter = (list: SiftEvent[]) =>
-        list.filter((e) => {
-          if (f.boroughs && f.boroughs.length > 0) {
-            return f.boroughs.includes(e.borough as BoroughName);
-          }
-          if (f.distance === "neighborhood" && e.borough !== "Manhattan") return false;
-          if (f.distance === "borough" && e.borough !== "Manhattan" && e.borough !== "Brooklyn") return false;
-          return true;
-        });
-
-      // Compute impression penalty for an event based on interaction history
-      const getImpressionPenalty = (eventId: string): number => {
-        const interaction = interactionsMap.get(eventId);
-        if (!interaction || interaction.impression_count === 0) return 1.0;
-        // If user has positively acted, no penalty
-        if (interaction.going_count > 0 || interaction.save_count > 0) return 1.0;
-        // Seen but never acted on — downrank
-        return Math.max(0.3, 1.0 - (interaction.impression_count * 0.25));
-      };
-
-      // Build taste context from profile (uses activeProfile, set in fetchAndSort)
-      let activeProfile: TasteProfile | null = tasteProfile;
-      const buildTasteCtx = (catWeight: number): TasteContext => ({
-        categoryWeight: catWeight,
-        tagWeights: activeProfile?.tagWeights ?? {},
-        boroughWeights: activeProfile?.boroughWeights ?? {},
-        pricePreference: activeProfile?.pricePreference ?? { ceiling: null, freeBoost: 0 },
-        interactionCount: activeProfile?.interactionCount ?? 0,
-      });
-
-      // Re-rank within a tier by composite score with full taste context + novelty.
-      const hasDateRange = !!(f.dateFrom && f.dateTo);
-      const applyPrefs = (tier: SiftEvent[], weights: Partial<Record<EventCategory, number>>) => {
-        return [...tier].sort((a, b) => {
-          const wa = weights[a.category] ?? 1.0;
-          const wb = weights[b.category] ?? 1.0;
-          const pa = getImpressionPenalty(a.id);
-          const pb = getImpressionPenalty(b.id);
-          return computeEventScore(b, wb, pb, buildTasteCtx(wb), hasDateRange) - computeEventScore(a, wa, pa, buildTasteCtx(wa), hasDateRange);
-        });
-      };
-
-      // Events arrive pre-sorted by composite score.
-      // tieredSort filters hidden events, groups into tiers, and re-ranks with taste + novelty.
-      const tieredSort = (all: SiftEvent[]) => {
-        // Filter out permanently hidden events (server-side + local)
-        let pool = all.filter((e) => !hiddenIds.has(e.id));
-        pool = applyDistanceFilter(pool);
-
-        // Apply date range filter if user picked dates
-        if (f.dateFrom && f.dateTo) {
-          const from = new Date(f.dateFrom);
-          const to = new Date(f.dateTo);
-          from.setDate(from.getDate() - 1); // ±1 day padding
-          to.setDate(to.getDate() + 1);
-          pool = pool.filter((e) => {
-            const start = new Date(e.startDate);
-            const end = new Date(e.endDate ?? e.startDate);
-            return start <= to && end >= from;
-          });
-        }
-
-        const quizCats = f.categories ?? [];
-
-        // Tier 1: matches quiz categories (or all events if no filter)
-        const tier1 = quizCats.length > 0
-          ? pool.filter((e) => quizCats.includes(e.category))
-          : pool;
-
-        const tier1Ids = new Set(tier1.map((e) => e.id));
-
-        // Tier 2: everything else (empty when no category filter)
-        const tier2 = quizCats.length > 0
-          ? pool.filter((e) => !tier1Ids.has(e.id))
-          : [];
-
-        // Re-rank within each tier by composite score with full taste
-        const weights = activeProfile?.categoryWeights ?? {};
-        console.log('[feed:debug] categoryWeights:', JSON.stringify(weights));
-        console.log('[feed:debug] interactionCount:', activeProfile?.interactionCount);
-        const ranked = [
-          ...applyPrefs(tier1, weights),
-          ...applyPrefs(tier2, weights),
-        ];
-
-        // Log top 15 categories before diversity
-        console.log('[feed:debug] ranked top 15:', ranked.slice(0, 15).map(e => e.category).join(', '));
-
-        // Apply user-facing match reasons after scoring
-        for (const e of ranked) {
-          if (!e.matchReason) e.matchReason = getMatchReason(e);
-        }
-
-        // ── Cap + Diversity re-ranking ──
-        const capped = capEventsPerCategory(ranked);
-        const diversified = diversifyFeed(capped, quizCats);
-        console.log(`[feed:debug] capped: ${capped.length}, diversified: ${diversified.length}`);
-        // Log top 15 after diversity
-        console.log('[feed:debug] diversified top 15:', diversified.slice(0, 15).map(e => e.category).join(', '));
-
-        return diversified;
-      };
-
-      const fetchAndSort = async (): Promise<SiftEvent[]> => {
+      // Ranking is owned by the shared rankFeedBatch (component scope) so the
+      // initial page and pagination top-ups order identically.
+      const fetchAndSort = async (): Promise<{ events: SiftEvent[]; rawCount: number }> => {
         try {
+          let activeProfile: TasteProfile | null = tasteProfile;
           // Ensure taste profile is loaded (may not be ready on first render)
           if (!activeProfile || Object.keys(activeProfile.categoryWeights).length === 0) {
             activeProfile = await loadTasteProfile();
             setTasteProfile(activeProfile);
           }
-          const categoryWeights = activeProfile?.categoryWeights;
-          const allEvents = await fetchAllUpcoming(500, f.categories, categoryWeights);
-          if (allEvents.length > 0) {
-            const sorted = tieredSort(allEvents);
-            // Dedupe by ID + filter cancelled events
-            const seenIds = new Set<string>();
-            const deduped = sorted.filter((e) => {
-              if (seenIds.has(e.id) || sessionDismissedRef.current.has(e.id)) return false;
-              const titleLower = (e.title ?? '').toLowerCase();
-              if (titleLower.includes('cancelled') || titleLower.includes('canceled')) return false;
-              seenIds.add(e.id);
-              return true;
-            });
-            console.log('[feed:debug] final pool top 20:', deduped.slice(0, 20).map(e => `${e.category}`).join(', '));
-            return deduped;
+          // Taste weights reorder the deck only after the questionnaire is done.
+          const cw = userProfile ? activeProfile?.categoryWeights : undefined;
+          const raw = await fetchAllUpcoming(FEED_PAGE_SIZE, f.categories, cw, 0);
+          if (raw.length > 0) {
+            const ranked = rankFeedBatch(raw, f, activeProfile, []);
+            console.log('[feed:debug] page0 top 20:', ranked.slice(0, 20).map(e => e.category).join(', '));
+            // Cache the ranked page so an offline relaunch has real events to show.
+            void saveCachedFeed(ranked);
+            return { events: ranked, rawCount: raw.length };
           }
-          return getAllCandidates(f, [], userProfile);
+          return { events: getAllCandidates(f, [], userProfile), rawCount: 0 };
         } catch {
+          // Offline / fetch failed — prefer the last real feed over the static seed.
+          const cached = await loadCachedFeed();
+          if (cached.length > 0) {
+            showToast("Offline — showing your recent events");
+            return { events: rankFeedBatch(cached, f, tasteProfile, []), rawCount: 0 };
+          }
           showToast("Couldn't connect — showing cached results");
-          return getAllCandidates(f, [], userProfile);
+          return { events: getAllCandidates(f, [], userProfile), rawCount: 0 };
         }
       };
 
       // Run fetch and minimum transition delay in parallel
-      const [resultEvents] = await Promise.all([fetchAndSort(), minDelay]);
+      const [fetchResult] = await Promise.all([fetchAndSort(), minDelay]);
+      const resultEvents = fetchResult.events;
 
       // If a newer filter change started while we were fetching, discard these stale results
       if (fetchVersionRef.current !== version) {
         return;
       }
+
+      // Initialise pagination: page 0 is loaded; more pages exist iff it was full.
+      pageRef.current = 1;
+      hasMoreRef.current = fetchResult.rawCount === FEED_PAGE_SIZE;
+      loadingMoreRef.current = false;
 
       clearTimeout(msgTimer1);
       clearTimeout(msgTimer2);
@@ -668,11 +639,17 @@ export default function DiscoverScreen() {
             key: `${e.id}-${Date.now()}-${Math.random()}`,
             type: 'event' as const,
           }))
-        : [{ event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
+        : [filtersActive(f)
+            // Filter matched nothing from the start → filter-empty state (U5),
+            // not "expand to interests".
+            ? { event: null, key: `done-${Date.now()}`, type: 'done' as const }
+            : { event: null, key: `end-card-${Date.now()}`, type: 'end-card' as const, meta: { quizCategories: f.categories ?? [] } }];
       setResultPool(resultEvents);
       resultPoolRef.current = resultEvents; // sync ref immediately — don't wait for useEffect
       feedCursorRef.current = 1; // first event is already shown in initial slot
       servedCategoryWindowRef.current = resultEvents[0] ? [resultEvents[0].category] : [];
+      navRef.current = emptyNav(); // fresh feed — no back/forward history yet
+      setCanBack(false);
       setSlots(initial);
       setDismissedIds([]);
 
@@ -736,6 +713,35 @@ export default function DiscoverScreen() {
   }, []);
 
   // Returns the next slot update — end card if pool exhausted, otherwise next event
+  // Continuous deck: fetch the next page when the cursor nears the pool end,
+  // dedupe against what's loaded, and append. Reuses the shared ranker so
+  // appended pages order identically to page 0.
+  const maybeLoadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMoreRef.current) return;
+    if (feedCursorRef.current < resultPoolRef.current.length - FEED_PREFETCH) return;
+    loadingMoreRef.current = true;
+    const version = fetchVersionRef.current;
+    try {
+      const cw = userProfile ? tasteProfile?.categoryWeights : undefined;
+      const raw = await fetchAllUpcoming(FEED_PAGE_SIZE, filters.categories, cw, pageRef.current * FEED_PAGE_SIZE);
+      if (version !== fetchVersionRef.current) return; // filter changed mid-fetch
+      pageRef.current += 1;
+      hasMoreRef.current = raw.length === FEED_PAGE_SIZE;
+      const fresh = rankFeedBatch(raw, filters, tasteProfile, resultPoolRef.current);
+      if (fresh.length > 0) {
+        const next = [...resultPoolRef.current, ...fresh];
+        resultPoolRef.current = next;
+        setResultPool(next);
+      }
+    } catch {
+      // leave hasMore as-is; retried on the next advance
+    } finally {
+      loadingMoreRef.current = false;
+      setFeedTick((t) => t + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, tasteProfile, userProfile, hiddenIds, interactionsMap]);
+
   const nextSlotUpdate = (
     prev: Slot[],
     idx: number,
@@ -781,6 +787,14 @@ export default function DiscoverScreen() {
       return prev.filter((_, i) => i !== idx);
     }
 
+    // More DB pages exist for this filter — don't end yet. Trigger a top-up and
+    // hold on an empty slot (skeleton); the advance-on-grow effect serves the
+    // next card once the page lands.
+    if (hasMoreRef.current) {
+      void maybeLoadMore();
+      return [];
+    }
+
     // Last event slot exhausted — now show the end card if we have interests to expand to
     const interestCats = (userProfile?.interests ?? [])
       .map((i) => INTEREST_TO_CATEGORY[i])
@@ -788,7 +802,15 @@ export default function DiscoverScreen() {
 
     const alreadyHasEndCard = prev.some((s) => s.type === 'end-card');
 
-    if (!expandedToInterestsRef.current && interestCats.length > 0 && !alreadyHasEndCard) {
+    // When the user explicitly chose categories in the question sequence, never
+    // offer to expand into other interest categories — chosen categories are a
+    // hard filter. Only offer expansion when no explicit choice was made.
+    if (
+      quizCategories.length === 0 &&
+      !expandedToInterestsRef.current &&
+      interestCats.length > 0 &&
+      !alreadyHasEndCard
+    ) {
       return [{
         event: null,
         key: `end-card-${Date.now()}`,
@@ -801,6 +823,17 @@ export default function DiscoverScreen() {
     return [{ event: null, key: `done-${Date.now()}`, type: 'done' as const }];
   };
 
+  // When a pagination top-up lands (or confirms exhaustion) while we're holding
+  // an empty slot, serve the next available card (or fall through to the done card).
+  useEffect(() => {
+    if (step !== "results") return;
+    setSlots((prev) => {
+      if (prev.length !== 0) return prev;
+      return nextSlotUpdate([], 0, new Set(dismissedIds), filters.categories?.map(String) ?? []);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedTick]);
+
   // Advance the slot after any dismiss (shared by neutral + hard pass)
   const advanceDismissSlot = useCallback(
     (eventId: string, nextDismissed: string[]) => {
@@ -811,8 +844,40 @@ export default function DiscoverScreen() {
         const excludedIds = new Set([...nextDismissed, ...shownIds]);
         return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
       });
+      void maybeLoadMore();
     },
-    [filters]
+    [filters, maybeLoadMore]
+  );
+
+  // Drop a specific event into the active card slot (used for back/forward nav).
+  const showEventInActiveSlot = useCallback((evt: SiftEvent) => {
+    setSlots((prev) => {
+      commitServedCategory(evt.category);
+      if (prev.length === 0) {
+        return [{ event: evt, key: `nav-${evt.id}-${Date.now()}`, type: 'event' }];
+      }
+      const activeIdx = prev.findIndex((s) => s.type !== 'divider');
+      const idx = activeIdx === -1 ? 0 : activeIdx;
+      const next = [...prev];
+      next[idx] = { event: evt, key: `nav-${evt.id}-${Date.now()}`, type: 'event' };
+      return next;
+    });
+  }, []);
+
+  // Advance after a swipe, honoring nav history: restore a queued forward card if
+  // the user had gone back, otherwise serve a fresh one from the pool.
+  const advanceAfterAction = useCallback(
+    (event: SiftEvent, action: DeckAction | 'going', nextDismissed: string[]) => {
+      const { nav, restore } = navAdvance(navRef.current, event, action);
+      navRef.current = nav;
+      setCanBack(canGoBack(nav));
+      if (restore) {
+        showEventInActiveSlot(restore);
+      } else {
+        advanceDismissSlot(event.id, nextDismissed);
+      }
+    },
+    [advanceDismissSlot, showEventInActiveSlot]
   );
 
   // Left swipe = "Not now" — no taste impact, event resurfaces later
@@ -823,8 +888,6 @@ export default function DiscoverScreen() {
       setDismissedIds(nextDismissed);
 
       const event = resultPool.find((e) => e.id === eventId);
-      if (event) setLastDismissedEvent(event);
-      lastDismissWasHardPass.current = false;
 
       // No taste weight update — just increment interaction count + record suppression
       const daysLeft = event?.daysLeft;
@@ -832,9 +895,10 @@ export default function DiscoverScreen() {
       // Persist interactionCount so "events seen" reflects all swipes
       incrementSeenCount().then(setTasteProfile).catch(() => {});
 
-      advanceDismissSlot(eventId, nextDismissed);
+      if (event) advanceAfterAction(event, 'neutral', nextDismissed);
+      else advanceDismissSlot(eventId, nextDismissed);
     },
-    [dismissedIds, resultPool, advanceDismissSlot]
+    [dismissedIds, resultPool, advanceAfterAction, advanceDismissSlot]
   );
 
   // Down swipe = "Not interested" — negative taste impact, counts toward permanent hide
@@ -845,8 +909,6 @@ export default function DiscoverScreen() {
       setDismissedIds(nextDismissed);
 
       const dismissed = resultPool.find((e) => e.id === eventId);
-      if (dismissed) setLastDismissedEvent(dismissed);
-      lastDismissWasHardPass.current = true;
 
       if (dismissed?.category) {
         const record: DismissedRecord = {
@@ -863,67 +925,65 @@ export default function DiscoverScreen() {
           price: dismissed.price,
         }).then(setTasteProfile).catch(() => {});
         recordSkip(eventId).then((hidden) => {
-          if (hidden) setHiddenIds((prev) => new Set([...prev, eventId]));
+          if (hidden) {
+            setHiddenIds((prev) => new Set([...prev, eventId]));
+            // U4: the 3rd pass permanently hides the event — say so ("Go back" in
+            // the header brings it back).
+            showToast("Got it — we'll stop showing this one. Tap Go back to undo.");
+          }
         }).catch(() => {});
       }
 
-      advanceDismissSlot(eventId, nextDismissed);
+      if (dismissed) advanceAfterAction(dismissed, 'hard', nextDismissed);
+      else advanceDismissSlot(eventId, nextDismissed);
     },
-    [dismissedIds, resultPool, advanceDismissSlot]
+    [dismissedIds, resultPool, advanceAfterAction, advanceDismissSlot]
   );
 
-  // Undoes the most recent dismiss. Pulls the event back out of dismissedIds,
-  // removes it from the taste profile's dislikedIds, and drops it back into
-  // the active slot so the user sees the card they just swiped away.
-  const handleUndoDismiss = useCallback(() => {
-    const evt = lastDismissedEvent;
-    if (!evt) return;
+  // "Go back" — step back to the most recent reversible card (neutral / hard
+  // dismiss). Reverses that card's side-effects and queues the on-screen card
+  // forward, so re-deciding the restored card walks you back to where you were.
+  const handleGoBack = useCallback(() => {
+    const result = navGoBack(navRef.current, activeEventRef.current);
+    if (!result) return;
+    navRef.current = result.nav;
+    setCanBack(canGoBack(result.nav));
+    const { item: evt, action } = result.reverse;
     sessionDismissedRef.current.delete(evt.id);
     setDismissedIds((prev) => prev.filter((id) => id !== evt.id));
-    if (lastDismissWasHardPass.current) {
-      // Reverse taste + server skip for hard passes
+    if (action === 'hard') {
       undoEventDislike(evt.id, evt.category, {
         category: evt.category, tags: evt.tags, borough: evt.borough, price: evt.price,
       }).then(setTasteProfile).catch(() => {});
       undoSkip(evt.id).catch(() => {});
     } else {
-      // Clear server-side suppression for neutral skips
       undoNeutralSkip(evt.id).catch(() => {});
     }
-    setSlots((prev) => {
-      commitServedCategory(evt.category);
-      if (prev.length === 0) {
-        return [{ event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' }];
-      }
-      const activeIdx = prev.findIndex((s) => s.type !== 'divider');
-      const idx = activeIdx === -1 ? 0 : activeIdx;
-      const next = [...prev];
-      next[idx] = { event: evt, key: `undo-${evt.id}-${Date.now()}`, type: 'event' };
-      return next;
-    });
-    setLastDismissedEvent(null);
-  }, [lastDismissedEvent]);
+    showEventInActiveSlot(evt);
+  }, [showEventInActiveSlot]);
 
   // Advances the slot for a going-swiped event (shared by instant-going and date-picker confirm)
   const advanceGoingSlot = useCallback(
-    (eventId: string) => {
-      sessionDismissedRef.current.add(eventId);
-      const nextDismissed = [...dismissedIds, eventId];
+    (event: SiftEvent) => {
+      sessionDismissedRef.current.add(event.id);
+      const nextDismissed = [...dismissedIds, event.id];
       setDismissedIds(nextDismissed);
-      setSlots((prev) => {
-        const idx = prev.findIndex((s) => s.event?.id === eventId);
-        if (idx === -1) return prev;
-        const shownIds = new Set(prev.map((s) => s.event?.id).filter(Boolean) as string[]);
-        const excludedIds = new Set([...nextDismissed, ...shownIds]);
-        return nextSlotUpdate(prev, idx, excludedIds, filters.categories?.map(String) ?? []);
-      });
+      advanceAfterAction(event, 'going', nextDismissed);
     },
-    [dismissedIds, filters, userProfile, resultPool]
+    [dismissedIds, advanceAfterAction]
   );
 
   // Fetches interest-based events and injects them after the end card
   const expandToInterests = useCallback(async () => {
     if (expandedToInterestsRef.current) return;
+
+    // Chosen categories are a hard filter — never expand into other interest
+    // categories when the user explicitly picked categories in the sequence.
+    if (filters.categories?.length) {
+      setSlots([{ event: null, key: `done-${Date.now()}`, type: 'done' }]);
+      return;
+    }
+
     expandedToInterestsRef.current = true;
 
     const interestCats = (userProfile?.interests ?? [])
@@ -965,6 +1025,8 @@ export default function DiscoverScreen() {
     if (activeSlot?.type === 'event' && activeSlot.event) {
       recordImpression(activeSlot.event.id);
     }
+    // Mirror the on-screen card so "Go back" can queue it forward.
+    activeEventRef.current = activeSlot?.type === 'event' ? activeSlot.event ?? null : null;
   }, [activeSlot?.key]);
 
   const handleCardStageLayout = useCallback((event: LayoutChangeEvent) => {
@@ -995,8 +1057,10 @@ export default function DiscoverScreen() {
 
   const handleGoingSwipe = useCallback(
     (event: SiftEvent) => {
+      // Guests must sign in to save going. Sign-in is a modal (returnTo keeps the
+      // deck mounted underneath), so we land back on this exact card afterward.
       if (!isLoggedIn) {
-        router.push("/(auth)/signin");
+        router.push({ pathname: "/(auth)/signin", params: { returnTo: "/(tabs)/discover" } });
         return;
       }
       const isMultiDate = (event.sessions && event.sessions.length > 1) ||
@@ -1005,7 +1069,7 @@ export default function DiscoverScreen() {
       if (isMultiDate) {
         // Store the event and open the date picker — advance the slot on confirm
         setGoingSheetEvent(event);
-        advanceGoingSlot(event.id);
+        advanceGoingSlot(event);
         return;
       }
 
@@ -1022,9 +1086,37 @@ export default function DiscoverScreen() {
         category: event.category, tags: event.tags, borough: event.borough, price: event.price,
       }).then(setTasteProfile).catch(() => {});
       recordGoingInteraction(event.id).catch(() => {});
-      advanceGoingSlot(event.id);
+      advanceGoingSlot(event);
     },
     [isLoggedIn, toggleGoing, advanceGoingSlot, showToast, promptCalendar]
+  );
+
+  // Interested = if already saved, unsave; otherwise open the Save-to-list sheet
+  // so the user picks which list. For a multi-date event, prompt for the date
+  // first so it's saved under the date they mean (not the first/past one).
+  const handleInterested = useCallback(
+    (event: SiftEvent) => {
+      // Guests must sign in to save. Modal sign-in preserves the card.
+      if (!isLoggedIn) {
+        router.push({ pathname: "/(auth)/signin", params: { returnTo: "/(tabs)/discover" } });
+        return;
+      }
+      if (getSavedListForEvent(event.id)) {
+        removeSavedEvent(event.id);
+        showToast("Removed from your lists");
+        return;
+      }
+      track("event_saved", { event_id: event.id });
+      const isMultiDate = (event.sessions && event.sessions.length > 1) ||
+        (!!event.endDate && event.endDate !== event.startDate);
+      if (isMultiDate) {
+        setSaveDateEvent(event);
+      } else {
+        setSaveDateOverride(undefined);
+        setSaveSheetEvent(event);
+      }
+    },
+    [isLoggedIn, getSavedListForEvent, removeSavedEvent, showToast]
   );
 
   // ── Transition screen (must come before quiz check) ────
@@ -1045,11 +1137,6 @@ export default function DiscoverScreen() {
       <View style={s.choicePage}>
         <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
           <Text style={s.stickyHeading}>Discover</Text>
-          <View style={[s.headerActions, { top: insets.top + 14 }]}>
-            <Pressable onPress={() => router.push("/add-event")} style={s.addEventButton} hitSlop={8}>
-              <Plus size={16} color={colors.white} strokeWidth={2} />
-            </Pressable>
-          </View>
         </View>
         <ScrollView
           contentContainerStyle={[s.choiceScroll, { paddingTop: 18, paddingBottom: insets.bottom + 32 }]}
@@ -1295,30 +1382,43 @@ export default function DiscoverScreen() {
       <View style={[s.stickyHeader, { paddingTop: insets.top + 16 }]}>
         <Text style={s.stickyHeading}>Discover</Text>
         <View style={[s.headerActions, { top: insets.top + 14 }]}>
-          <Pressable onPress={() => router.push("/add-event")} style={s.addEventButton} hitSlop={8}>
-            <Plus size={16} color={colors.white} strokeWidth={2} />
+          <Pressable
+            onPress={handleGoBack}
+            disabled={!canBack}
+            style={[s.headerPill, !canBack && s.headerPillDisabled]}
+            hitSlop={8}
+          >
+            <ArrowLeft
+              size={14}
+              color={canBack ? colors.textSecondary : colors.textMuted}
+              strokeWidth={1.8}
+            />
+            <Text style={[s.headerPillText, !canBack && s.headerPillTextDisabled]}>
+              Go back
+            </Text>
           </Pressable>
-          <Pressable onPress={reset} style={s.startOverButton} hitSlop={8}>
-            <RotateCcw size={16} color={colors.textSecondary} strokeWidth={1.8} />
+          <Pressable onPress={reset} style={s.headerPill} hitSlop={8}>
+            <RotateCcw size={14} color={colors.textSecondary} strokeWidth={1.8} />
+            <Text style={s.headerPillText}>Reset</Text>
           </Pressable>
         </View>
       </View>
 
 
       <View style={s.resultsStage}>
+        {!isOnline && <OfflineBanner />}
         <View style={s.resultsFilters}>
           <ResultsFilterBar filters={filters} onChange={handleFiltersChange} />
         </View>
 
-        {/* Swipe hints — stays until user dismisses */}
-        <HintOverlay hintKey="swipe_gestures" hints={[
-          { action: "Swipe right", detail: "Going" },
-          { action: "Swipe left", detail: "Not now — won't affect your taste" },
-          { action: "Swipe down", detail: "Not interested — fewer like this" },
-          { action: "Tap card", detail: "See event details" },
-          { action: "Long press", detail: "Tune your taste" },
-          { action: "Tap +", detail: "Add events from social" },
-        ]} />
+        {/* First-run nudge to set taste — logged-in accounts without a profile */}
+        <TastePrompt
+          show={isLoggedIn && !userProfile?.interests?.length}
+          onPress={() => router.push("/(onboarding)/flow")}
+        />
+
+        {/* First-run forced tutorial — press Next through each gesture, once */}
+        <SwipeTutorial show={activeSlot?.type === 'event'} />
 
         {!activeSlot && !loading && (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 40 }}>
@@ -1354,14 +1454,26 @@ export default function DiscoverScreen() {
 
         {activeSlot?.type === 'done' && (
           <View style={s.endCard}>
-            <Text style={s.endCardTitle}>You've seen it all.</Text>
-            <Text style={s.endCardSub}>No more events match your picks right now.</Text>
-            <Pressable
-              onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
-              style={s.endCardButton}
-            >
-              <Text style={s.endCardButtonText}>Broaden search</Text>
-            </Pressable>
+            {filtersActive(filters) ? (
+              <>
+                <Text style={s.endCardTitle}>No events match these filters.</Text>
+                <Text style={s.endCardSub}>Clear them to see everything happening.</Text>
+                <Pressable onPress={() => handleFiltersChange({})} style={s.endCardButton}>
+                  <Text style={s.endCardButtonText}>Clear filters</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={s.endCardTitle}>You've seen it all.</Text>
+                <Text style={s.endCardSub}>No more events match your picks right now.</Text>
+                <Pressable
+                  onPress={() => handleFiltersChange({ ...filters, dateFrom: undefined, dateTo: undefined, distance: undefined, boroughs: undefined })}
+                  style={s.endCardButton}
+                >
+                  <Text style={s.endCardButtonText}>Broaden search</Text>
+                </Pressable>
+              </>
+            )}
             <Pressable onPress={reset} style={[s.browseLinkButton, { marginTop: 8 }]}>
               <Text style={s.browseLinkText}>Start over</Text>
             </Pressable>
@@ -1374,8 +1486,6 @@ export default function DiscoverScreen() {
               event={activeSlot.event}
               immersive
               immersiveHeight={cardStageHeight}
-              canUndo={!!lastDismissedEvent}
-              onUndo={handleUndoDismiss}
               onPress={() => {
                 track("card_tap", { event_id: activeSlot.event!.id, category: activeSlot.event!.category });
                 openEventDetail(activeSlot.event!);
@@ -1383,17 +1493,25 @@ export default function DiscoverScreen() {
               onDismiss={() => handleNeutralSkip(activeSlot.event!.id)}
               onHardPass={() => handleHardPass(activeSlot.event!.id)}
               onGoing={() => handleGoingSwipe(activeSlot.event!)}
-              onRequestSignIn={() => router.push("/(auth)/signin")}
-              onBookmarkPress={() => {
-                track("event_saved", { event_id: activeSlot.event!.id });
-                setSaveSheetEvent(activeSlot.event!);
-              }}
+              onRequestSignIn={() => router.push({ pathname: "/(auth)/signin", params: { returnTo: "/(tabs)/discover" } })}
               onSharePress={() => {
                 track("share_tap", { event_id: activeSlot.event!.id });
                 setShareSheetEvent(activeSlot.event!);
               }}
             />
           </View>
+        )}
+
+        {activeSlot?.type === 'event' && activeSlot.event && (
+          <DeckActionBar
+            saved={!!getSavedListForEvent(activeSlot.event.id)}
+            going={isGoing(activeSlot.event.id)}
+            onInterested={() => handleInterested(activeSlot.event!)}
+            onInterestedLongPress={() => handleInterested(activeSlot.event!)}
+            onGoing={() => handleGoingSwipe(activeSlot.event!)}
+            onNotNow={() => handleNeutralSkip(activeSlot.event!.id)}
+            onNotInterested={() => handleHardPass(activeSlot.event!.id)}
+          />
         )}
 
         {loading && (
@@ -1405,16 +1523,49 @@ export default function DiscoverScreen() {
         )}
       </View>
 
+      {/* Multi-date save — pick which date before choosing a list */}
+      <BottomSheet
+        open={!!saveDateEvent}
+        onClose={() => setSaveDateEvent(null)}
+        title="Pick a date"
+      >
+        {saveDateEvent && (
+          <GoingDateSheet
+            event={saveDateEvent}
+            confirmLabel="Choose date"
+            initialDate={
+              goingEvents.find((g) => g.eventId === saveDateEvent.id)?.eventDate ??
+              savedEvents.find((s) => s.eventId === saveDateEvent.id)?.eventStartDate ??
+              null
+            }
+            onConfirm={(date) => {
+              const ev = saveDateEvent;
+              // Keep a going copy's date in sync with the save date.
+              updateGoingDate(ev.id, date);
+              // Close this sheet, then open the list sheet AFTER its native Modal
+              // fully dismisses (~300ms) — iOS can't present two Modals at once.
+              setSaveDateEvent(null);
+              setTimeout(() => {
+                setSaveDateOverride(date);
+                setSaveSheetEvent(ev);
+              }, 350);
+            }}
+            onCancel={() => setSaveDateEvent(null)}
+          />
+        )}
+      </BottomSheet>
+
       <BottomSheet
         open={!!saveSheetEvent}
-        onClose={() => setSaveSheetEvent(null)}
+        onClose={() => { setSaveSheetEvent(null); setSaveDateOverride(undefined); }}
         title="Save to list"
       >
         {saveSheetEvent && (
           <SaveEventSheet
             event={saveSheetEvent}
             currentListName={null}
-            onClose={() => setSaveSheetEvent(null)}
+            dateOverride={saveDateOverride}
+            onClose={() => { setSaveSheetEvent(null); setSaveDateOverride(undefined); }}
             onSaved={(name) => {
               showToast(`Saved to ${name}`);
               if (saveSheetEvent) {
@@ -1437,6 +1588,11 @@ export default function DiscoverScreen() {
         {goingSheetEvent && (
           <GoingDateSheet
             event={goingSheetEvent}
+            initialDate={
+              goingEvents.find((g) => g.eventId === goingSheetEvent.id)?.eventDate ??
+              savedEvents.find((s) => s.eventId === goingSheetEvent.id)?.eventStartDate ??
+              null
+            }
             onConfirm={(date) => {
               toggleGoing({
                 eventId: goingSheetEvent.id,
@@ -1444,6 +1600,13 @@ export default function DiscoverScreen() {
                 eventDate: date,
                 eventEndDate: goingSheetEvent.endDate,
               });
+              // Keep a saved copy's date in sync with the going date.
+              const savedList = getSavedListForEvent(goingSheetEvent.id);
+              if (savedList) {
+                addSavedEvent(goingSheetEvent.id, savedList, {
+                  title: goingSheetEvent.title, startDate: date, endDate: goingSheetEvent.endDate,
+                });
+              }
               track("event_going", { event_id: goingSheetEvent.id, source: "swipe" });
               showToast("Marked as going");
               promptCalendar({ ...goingSheetEvent, startDate: date, endDate: date });
@@ -1488,7 +1651,7 @@ export default function DiscoverScreen() {
             <EventDetail
               event={selectedEvent}
               onBack={closeEventDetail}
-              onRequestSignIn={() => router.push("/(auth)/signin")}
+              onRequestSignIn={() => router.push({ pathname: "/(auth)/signin", params: { returnTo: "/(tabs)/discover" } })}
             />
           )}
         </Animated.View>
@@ -1709,23 +1872,27 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  addEventButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
+  headerPill: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  startOverButton: {
-    width: 32,
+    gap: 5,
     height: 32,
-    borderRadius: 16,
+    paddingHorizontal: 12,
+    borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
+  },
+  headerPillDisabled: {
+    opacity: 0.5,
+  },
+  headerPillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  headerPillTextDisabled: {
+    color: colors.textMuted,
   },
   resultsStage: {
     flex: 1,

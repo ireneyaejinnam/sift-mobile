@@ -92,11 +92,18 @@ export default function RootLayout() {
               animation: "fade",
             }}
           >
-            <Stack.Screen name="(auth)/gate" />
-            <Stack.Screen name="(auth)/signin" />
+            {/* Disable iOS edge-swipe-back on auth/onboarding screens — they're
+                entered via router.replace (empty back stack), so an edge-swipe
+                would dead-end the session. In-app back buttons (with their gate
+                fallback) remain the only way back. */}
+            <Stack.Screen name="(auth)/gate" options={{ gestureEnabled: false }} />
+            <Stack.Screen
+              name="(auth)/signin"
+              options={{ presentation: "modal", gestureEnabled: false }}
+            />
             <Stack.Screen
               name="(onboarding)/flow"
-              options={{ animation: "slide_from_right" }}
+              options={{ animation: "slide_from_right", gestureEnabled: false }}
             />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen

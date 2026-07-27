@@ -10,6 +10,21 @@ import { SiftEvent } from './schema';
 
 const LISTING_URL = 'https://ra.co/graphql';
 
+/** Shape of a Resident Advisor GraphQL event node (see query below). */
+interface RAEvent {
+  id: string | number;
+  title?: string;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  contentUrl?: string;
+  flyerFront?: string;
+  isTicketed?: boolean;
+  cost?: string;
+  venue?: { name?: string; address?: string; area?: { name?: string } };
+  pick?: { blurb?: string };
+}
+
 export async function ingestResidentAdvisor(): Promise<void> {
   console.log('[RA] Starting ingest...');
   const allEvents: SiftEvent[] = [];
@@ -76,7 +91,7 @@ export async function ingestResidentAdvisor(): Promise<void> {
       await scrapeRAHtml(allEvents);
     } else {
       const json = await res.json() as { data?: { eventListings?: { data?: unknown[] } } };
-      const listings = (json?.data?.eventListings?.data ?? []) as Array<{ event?: Record<string, unknown> }>;
+      const listings = (json?.data?.eventListings?.data ?? []) as Array<{ event?: RAEvent }>;
 
       for (const listing of listings) {
         const ev = listing.event;

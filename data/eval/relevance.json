@@ -1,0 +1,43 @@
+{
+  "_comment": "Hand-labeled eval set for the recommender (R2). Self-authored relevance labels — a regression signal for scoring changes, not ground truth. Expandable toward the 50-80 target. Each triple references the shared `events` pool by id.",
+  "events": [
+    { "id": "e1", "title": "Jazz at the Blue Note", "category": "music", "borough": "Manhattan", "price": 0, "priceLabel": "Free", "vibeScore": 9, "daysLeft": 2, "tags": ["jazz", "live"], "imageUrl": "http://x/1.jpg", "description": "An intimate late-night jazz session with a rotating cast of NYC players.", "location": "Blue Note", "address": "131 W 3rd St", "startDate": "2026-08-02", "time": "8:00 PM", "link": "" },
+    { "id": "e2", "title": "Warehouse DJ Night", "category": "music", "borough": "Brooklyn", "price": 30, "priceLabel": "$30", "vibeScore": 7, "socialSignal": 6, "daysLeft": 10, "tags": ["dj", "electronic"], "imageUrl": "http://x/2.jpg", "description": "Four-to-the-floor sets from local selectors in a raw Bushwick space.", "location": "Elsewhere", "address": "599 Johnson Ave", "startDate": "2026-08-10", "time": "10:00 PM", "link": "" },
+    { "id": "e3", "title": "New Contemporary Wing", "category": "arts", "borough": "Manhattan", "price": 25, "priceLabel": "$25", "vibeScore": 8, "daysLeft": 5, "tags": ["gallery", "exhibit"], "imageUrl": "http://x/3.jpg", "description": "A sweeping survey of postwar painting across three renovated floors.", "location": "MoMA", "address": "11 W 53rd St", "startDate": "2026-08-05", "time": "11:00 AM", "link": "" },
+    { "id": "e4", "title": "Cellar Stand-Up", "category": "comedy", "borough": "Manhattan", "price": 20, "priceLabel": "$20", "vibeScore": 6, "daysLeft": 3, "tags": ["standup"], "description": "Surprise drop-ins from touring headliners in a legendary basement room.", "location": "Comedy Cellar", "address": "117 MacDougal St", "startDate": "2026-08-03", "time": "9:00 PM", "link": "" },
+    { "id": "e5", "title": "Natural Wine Tasting", "category": "food", "borough": "Brooklyn", "price": 60, "priceLabel": "$60", "vibeScore": 8, "daysLeft": 7, "tags": ["tasting", "wine"], "imageUrl": "http://x/5.jpg", "description": "A guided flight of low-intervention bottles paired with small plates.", "location": "The Four Horsemen", "address": "295 Grand St", "startDate": "2026-08-07", "time": "6:30 PM", "link": "" },
+    { "id": "e6", "title": "House of Yes Dance Party", "category": "nightlife", "borough": "Brooklyn", "price": 15, "priceLabel": "$15", "vibeScore": 7, "socialSignal": 8, "daysLeft": 4, "tags": ["club", "dance"], "imageUrl": "http://x/6.jpg", "description": "Costumed chaos and confetti on the dance floor.", "location": "House of Yes", "address": "2 Wyckoff Ave", "startDate": "2026-08-04", "time": "11:00 PM", "link": "" },
+    { "id": "e7", "title": "Astoria Park Run Club", "category": "fitness", "borough": "Queens", "price": 0, "priceLabel": "Free", "vibeScore": 6, "daysLeft": 6, "tags": ["run", "outdoor"], "description": "A friendly 5K along the waterfront, all paces welcome.", "location": "Astoria Park", "address": "19th St", "startDate": "2026-08-06", "time": "7:00 AM", "link": "" },
+    { "id": "e8", "title": "Broadway Revival", "category": "theater", "borough": "Manhattan", "price": 45, "priceLabel": "$45", "vibeScore": 9, "daysLeft": 14, "tags": ["broadway", "musical"], "imageUrl": "http://x/8.jpg", "description": "A sold-out revival of a beloved musical with a new orchestration.", "location": "Broadway Theatre", "address": "1681 Broadway", "startDate": "2026-08-14", "time": "7:30 PM", "link": "" },
+    { "id": "e9", "title": "Open Mic Acoustic", "category": "music", "borough": "Queens", "price": 0, "priceLabel": "Free", "vibeScore": 5, "daysLeft": 20, "tags": ["acoustic"], "description": "", "location": "", "address": "", "startDate": "2026-08-20", "time": "8:00 PM", "link": "" },
+    { "id": "e10", "title": "Bushwick Mural Walk", "category": "arts", "borough": "Brooklyn", "price": 0, "priceLabel": "Free", "vibeScore": 7, "daysLeft": 8, "tags": ["mural", "street"], "imageUrl": "http://x/10.jpg", "description": "Self-guided tour of new street-art commissions.", "location": "Bushwick Collective", "address": "Troutman St", "startDate": "2026-08-08", "time": "12:00 PM", "link": "" },
+    { "id": "e11", "title": "Chelsea Market Pop-Up", "category": "food", "borough": "Manhattan", "price": 0, "priceLabel": "Free", "vibeScore": 6, "daysLeft": 3, "tags": ["market", "popup"], "description": "A weekend maker's market of tastings from new vendors.", "location": "Chelsea Market", "address": "75 9th Ave", "startDate": "2026-08-03", "time": "12:00 PM", "link": "" },
+    { "id": "e12", "title": "Improv Jam", "category": "comedy", "borough": "Brooklyn", "price": 10, "priceLabel": "$10", "vibeScore": 8, "daysLeft": 12, "tags": ["improv"], "imageUrl": "http://x/12.jpg", "description": "Long-form improv from house teams plus an open jam to close.", "location": "Union Hall", "address": "702 Union St", "startDate": "2026-08-12", "time": "8:00 PM", "link": "" },
+    { "id": "e13", "title": "Rooftop Lounge Night", "category": "nightlife", "borough": "Manhattan", "price": 40, "priceLabel": "$40", "vibeScore": 6, "daysLeft": 25, "tags": ["lounge"], "description": "", "location": "", "address": "", "startDate": "2026-08-25", "time": "9:00 PM", "link": "" },
+    { "id": "e14", "title": "Indie Rock at Bowery", "category": "music", "borough": "Manhattan", "price": 20, "priceLabel": "$20", "vibeScore": 8, "daysLeft": 6, "tags": ["rock", "band"], "imageUrl": "http://x/14.jpg", "description": "A rising four-piece touring their acclaimed debut LP.", "location": "Bowery Ballroom", "address": "6 Delancey St", "startDate": "2026-08-06", "time": "8:00 PM", "link": "" }
+  ],
+  "triples": [
+    { "id": "cs1", "scenario": "cold-start", "taste": { "interactionCount": 0 }, "relevantIds": ["e1", "e3", "e8", "e14"] },
+    { "id": "cs2", "scenario": "cold-start", "taste": { "interactionCount": 0 }, "relevantIds": ["e1", "e3", "e12", "e14"] },
+    { "id": "cs3", "scenario": "cold-start", "taste": { "interactionCount": 0 }, "relevantIds": ["e1", "e5", "e8", "e3"] },
+
+    { "id": "fc1", "scenario": "floor-case", "taste": { "interactionCount": 0, "categoryWeights": { "music": 1.8 } }, "relevantIds": ["e1", "e2", "e14"] },
+    { "id": "fc2", "scenario": "floor-case", "taste": { "interactionCount": 0, "categoryWeights": { "arts": 1.7 } }, "relevantIds": ["e3", "e10"] },
+    { "id": "fc3", "scenario": "floor-case", "taste": { "interactionCount": 0, "categoryWeights": { "comedy": 1.6 } }, "relevantIds": ["e4", "e12"] },
+
+    { "id": "qc1", "scenario": "quiz-category", "taste": { "interactionCount": 8, "categoryWeights": { "nightlife": 1.7 } }, "relevantIds": ["e6", "e13"] },
+    { "id": "qc2", "scenario": "quiz-category", "taste": { "interactionCount": 6, "categoryWeights": { "food": 1.8 } }, "relevantIds": ["e5", "e11"] },
+    { "id": "qc3", "scenario": "quiz-category", "taste": { "interactionCount": 10, "categoryWeights": { "theater": 1.9 } }, "relevantIds": ["e8"] },
+
+    { "id": "st1", "scenario": "single-vs-conflicting", "taste": { "interactionCount": 12, "categoryWeights": { "music": 1.9 } }, "relevantIds": ["e1", "e2", "e14"] },
+    { "id": "st2", "scenario": "single-vs-conflicting", "taste": { "interactionCount": 10, "categoryWeights": { "music": 1.6, "food": 1.6 } }, "relevantIds": ["e1", "e2", "e14", "e5", "e11"] },
+    { "id": "st3", "scenario": "single-vs-conflicting", "taste": { "interactionCount": 8, "categoryWeights": { "arts": 1.5, "comedy": 1.5 } }, "relevantIds": ["e3", "e10", "e4", "e12"] },
+
+    { "id": "fp1", "scenario": "free-vs-paid", "taste": { "interactionCount": 5, "pricePreference": { "ceiling": null, "freeBoost": 2 } }, "relevantIds": ["e1", "e7", "e10", "e11"] },
+    { "id": "fp2", "scenario": "free-vs-paid", "taste": { "interactionCount": 4, "pricePreference": { "ceiling": 20, "freeBoost": 0 } }, "relevantIds": ["e1", "e4", "e6", "e11", "e14"] },
+    { "id": "fp3", "scenario": "free-vs-paid", "taste": { "interactionCount": 6, "categoryWeights": { "music": 1.5 }, "pricePreference": { "ceiling": null, "freeBoost": 3 } }, "relevantIds": ["e1", "e9"] },
+
+    { "id": "soc1", "scenario": "social-proof", "taste": { "interactionCount": 0 }, "candidateIds": ["e2", "e5", "e6", "e7", "e10", "e11", "e13"], "relevantIds": ["e2", "e6"] },
+    { "id": "soc2", "scenario": "social-proof", "taste": { "interactionCount": 8, "categoryWeights": { "nightlife": 1.4, "music": 1.4 } }, "candidateIds": ["e2", "e5", "e6", "e7", "e11", "e13"], "relevantIds": ["e6", "e2"] }
+  ]
+}

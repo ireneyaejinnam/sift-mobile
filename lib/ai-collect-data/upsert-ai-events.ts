@@ -136,7 +136,9 @@ export async function upsertAiEvents(keepLocal = false): Promise<void> {
   // Validate and fix image URLs
   console.log('[upsert] Validating image URLs...');
   for (const e of sanitized) {
-    e.image_url = await resolveImage(e);
+    e.image_url = await resolveImage(
+      e as { title: string; image_url?: string | null; event_url?: string | null }
+    );
   }
 
   let eventsInserted = 0;

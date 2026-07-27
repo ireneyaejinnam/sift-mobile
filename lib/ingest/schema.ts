@@ -4,7 +4,7 @@ export interface EventSession {
   venue_name?: string;
   address?: string;
   borough?: string;
-  price_min?: number;
+  price_min?: number | null;   // null = unknown price (NOT free)
   price_max?: number;
 }
 
@@ -23,7 +23,7 @@ export interface SiftEvent {
   borough?: string;
   latitude?: number;
   longitude?: number;
-  price_min?: number;   // min across all sessions
+  price_min?: number | null;   // min across all sessions; null = unknown (NOT free)
   price_max?: number;   // max across all sessions
   is_free: boolean;
   currency?: string;

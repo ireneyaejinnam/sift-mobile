@@ -156,6 +156,20 @@ export default function CalendarSection({
             );
           })}
         </View>
+
+        {/* Legend — explains the day dot colors */}
+        <View style={st.legend}>
+          <View style={st.legendItem}>
+            <View style={[st.legendDot, { backgroundColor: colors.primary }]} />
+            <Text style={st.legendText}>Going</Text>
+          </View>
+          {showSavedDetails && (
+            <View style={st.legendItem}>
+              <View style={[st.legendDot, { backgroundColor: colors.accent }]} />
+              <Text style={st.legendText}>Saved</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {selectedDate && (
@@ -315,6 +329,29 @@ const st = StyleSheet.create({
   dot: { width: 4, height: 4, borderRadius: 2 },
   dotGoing: { backgroundColor: colors.primary },
   dotSaved: { backgroundColor: colors.accent },
+  legend: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 20,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    ...typography.xs,
+    color: colors.textSecondary,
+  },
   detail: {
     padding: 16,
     backgroundColor: colors.card,

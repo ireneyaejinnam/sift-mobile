@@ -144,7 +144,7 @@ export async function matchToExistingEvent(
  * Date: fuzzy match × 0.3
  * Venue: max(word Jaccard, exact match) × 0.2
  */
-function computeSimilarity(
+export function computeSimilarity(
   extracted: ExtractedEvent,
   candidate: { title: string; start_date: string; venue_name?: string | null },
   overrideCandDate?: string

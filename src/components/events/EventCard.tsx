@@ -21,12 +21,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
-  Bookmark,
   Check,
   ExternalLink,
   Flame,
   MapPin,
-  RotateCcw,
   Share2,
   Star,
   Ticket,
@@ -88,10 +86,7 @@ interface EventCardProps {
   onHardPass: () => void;      // negative "not interested" (down swipe)
   onGoing: () => void;
   onRequestSignIn?: () => void;
-  onBookmarkPress: () => void;
   onSharePress: () => void;
-  onUndo?: () => void;
-  canUndo?: boolean;
   immersive?: boolean;
   immersiveHeight?: number;
 }
@@ -103,10 +98,7 @@ export default function EventCard({
   onHardPass,
   onGoing,
   onRequestSignIn,
-  onBookmarkPress,
   onSharePress,
-  onUndo,
-  canUndo = false,
   immersive = false,
   immersiveHeight,
 }: EventCardProps) {
@@ -114,8 +106,6 @@ export default function EventCard({
   const {
     isLoggedIn,
     userProfile,
-    getSavedListForEvent,
-    removeSavedEvent,
     toggleGoing,
     isGoing,
     markCommitted,
@@ -156,7 +146,6 @@ export default function EventCard({
     }
   }, [event.id, event.category, event.imageUrl]);
 
-  const savedList = getSavedListForEvent(event.id);
   const going = isGoing(event.id);
 
   // ── Going handler ────────────────────────────────────────
@@ -276,19 +265,11 @@ export default function EventCard({
     opacity: interpolate(translateY.value, [0, SWIPE_DOWN_THRESHOLD], [0, 1], Extrapolation.CLAMP),
   }));
 
-  const handleBookmarkPress = () => {
-    if (savedList) {
-      removeSavedEvent(event.id);
-      showToast("Removed from list");
-    } else {
-      onBookmarkPress();
-    }
-  };
-
-  const isSiftPick = (event.vibeScore ?? 0) >= 8;
   const isTrending = (event.socialSignal ?? 0) >= 2;
+  // Show to logged-in users, and to anonymous users who have set their taste
+  // (EPIC 1 anon users have a profile but isLoggedIn:false).
   const showMatchReason =
-    isLoggedIn &&
+    (isLoggedIn || !!userProfile?.interests?.length) &&
     !!event.matchReason &&
     event.matchReason !== "Picked for you" &&
     event.matchReason !== "More to explore" &&
@@ -375,25 +356,12 @@ export default function EventCard({
                 )}
               </View>
 
-              {/* Actions — overlaid top-right. Undo is the rightmost icon
-                  when available (first thing the eye hits on the right). */}
+              {/* Actions — overlaid top-right. Save lives in the action bar
+                  below the deck (Interested); only Share remains on the card. */}
               <View style={styles.imageActions}>
-                <Pressable onPress={handleBookmarkPress} style={styles.iconButton} hitSlop={8}>
-                  <Bookmark
-                    size={16}
-                    strokeWidth={1.5}
-                    color={savedList ? colors.primary : "#fff"}
-                    fill={savedList ? colors.primary : "none"}
-                  />
-                </Pressable>
                 <Pressable onPress={onSharePress} style={styles.iconButton} hitSlop={8}>
                   <Share2 size={16} strokeWidth={1.5} color="#fff" />
                 </Pressable>
-                {canUndo && onUndo && (
-                  <Pressable onPress={onUndo} style={styles.iconButton} hitSlop={8}>
-                    <RotateCcw size={16} strokeWidth={1.5} color="#fff" />
-                  </Pressable>
-                )}
               </View>
 
               {/* Title + meta overlaid on gradient at bottom of image */}
@@ -451,6 +419,7 @@ export default function EventCard({
                   <Pressable
                     onPress={() => {
                       const url = event.eventUrl || event.ticketUrl;
+                      track("event_link_click", { event_id: event.id, url, has_ticket_url: !!event.ticketUrl });
                       if (url) WebBrowser.openBrowserAsync(url);
                     }}
                     style={styles.ctaButtonOutline}

@@ -23,7 +23,10 @@
         "NSCalendarsFullAccessUsageDescription": "Sift adds events to your calendar so you never miss them.",
         "NSCalendarsUsageDescription": "Sift adds events to your calendar so you never miss them."
       },
-      "associatedDomains": ["applinks:siftapp.site"]
+      "associatedDomains": [
+        "applinks:siftapp.site"
+      ],
+      "appleTeamId": "7SJU728J3A"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,8 +45,15 @@
               "pathPrefix": "/event/"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
+      ],
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
       ]
     },
     "web": {

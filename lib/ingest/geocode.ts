@@ -6,38 +6,10 @@ const supabase = createClient(
 );
 
 // ── Borough bounding boxes (fast, no API call) ─────────────────────────────
-// Rough but accurate enough for NYC. Used as a first pass before Nominatim.
-const BOROUGH_BOXES = [
-  {
-    name: 'Manhattan',
-    minLat: 40.6986, maxLat: 40.8820, minLng: -74.0210, maxLng: -73.9070,
-  },
-  {
-    name: 'Brooklyn',
-    minLat: 40.5695, maxLat: 40.7395, minLng: -74.0420, maxLng: -73.8330,
-  },
-  {
-    name: 'Queens',
-    minLat: 40.5413, maxLat: 40.8007, minLng: -73.9630, maxLng: -73.6996,
-  },
-  {
-    name: 'Bronx',
-    minLat: 40.7855, maxLat: 40.9176, minLng: -73.9338, maxLng: -73.7654,
-  },
-  {
-    name: 'Staten Island',
-    minLat: 40.4774, maxLat: 40.6514, minLng: -74.2591, maxLng: -74.0341,
-  },
-] as const;
-
-export function extractBoroughFromCoords(lat: number, lng: number): string | null {
-  for (const b of BOROUGH_BOXES) {
-    if (lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng) {
-      return b.name;
-    }
-  }
-  return null;
-}
+// Live in a pure module so scripts can import the coordinate check without
+// pulling in this file's Supabase client.
+export { BOROUGH_BOXES, extractBoroughFromCoords } from './nycBounds';
+import { extractBoroughFromCoords } from './nycBounds';
 
 // ── Borough extraction from address string ──────────────────────────────────
 export function extractBoroughFromAddress(address: string): string | null {
@@ -224,9 +196,10 @@ export async function geocodeAllEvents(): Promise<void> {
     console.log(`[Geocode] Pass 3 complete: ${pass3Updated} events geocoded via forward lookup`);
   }
 
-  // ── Pass 4: fallback — events with utterly no location data ────────────────
-  // Rather than looping forever, set these to 'Manhattan' (most NYC events are there)
-  // so they stop appearing as "missing borough" on every run.
+  // ── Pass 4: report events still missing a borough ──────────────────────────
+  // Previously these were force-defaulted to 'Manhattan', which DISGUISED non-NYC
+  // leaks (e.g. a Baltimore event) as valid NYC events. We now leave the borough
+  // null so the NYC borough guard at query time excludes them from the feed.
   const { data: noLocation, error: noLocErr } = await supabase
     .from('events')
     .select('id')
@@ -234,15 +207,7 @@ export async function geocodeAllEvents(): Promise<void> {
     .limit(5000);
 
   if (!noLocErr && noLocation?.length) {
-    console.log(`[Geocode] Pass 4: defaulting ${noLocation.length} events with no location data to Manhattan`);
-    const ids = noLocation.map(e => e.id);
-    for (let i = 0; i < ids.length; i += 50) {
-      await supabase
-        .from('events')
-        .update({ borough: 'Manhattan' })
-        .in('id', ids.slice(i, i + 50));
-    }
-    console.log(`[Geocode] Pass 4 complete: ${noLocation.length} events defaulted`);
+    console.log(`[Geocode] Pass 4: ${noLocation.length} events still have no borough — left null (excluded from the NYC feed by the borough guard).`);
   }
 
   console.log('[Geocode] Done.');

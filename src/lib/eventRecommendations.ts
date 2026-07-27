@@ -3,6 +3,28 @@ import type { SiftEvent } from "@/types/event";
 import type { Filters } from "@/types/quiz";
 import type { UserProfile } from "@/types/user";
 import { todayNYC } from "@/lib/time";
+import { computeEventScore } from "@/lib/eventScore";
+
+/**
+ * Deterministic quality ordering (replaces the old `Math.random` shuffle) so the
+ * fallback deck is reproducible: computeEventScore desc, then startDate, then id.
+ * Scores a clone because computeEventScore mutates (attaches __scoreExplanation).
+ */
+function byScore(arr: SiftEvent[]): SiftEvent[] {
+  const scored = arr.map((e) => ({ e, s: computeEventScore({ ...e }) }));
+  scored.sort(
+    (a, b) =>
+      b.s - a.s ||
+      (a.e.startDate < b.e.startDate ? -1 : a.e.startDate > b.e.startDate ? 1 : 0) ||
+      (a.e.id < b.e.id ? -1 : a.e.id > b.e.id ? 1 : 0)
+  );
+  return scored.map((x) => x.e);
+}
+
+/** Legibility cue for events pulled in by broadening beyond the quiz filters. */
+function broaden(e: SiftEvent): SiftEvent {
+  return { ...e, matchReason: "Expanding your search" };
+}
 
 function isUpcoming(event: SiftEvent): boolean {
   return (event.endDate ?? event.startDate) >= todayNYC();
@@ -102,7 +124,7 @@ export function getEventCandidates(
       (e) => e.price > 20 || e.tags.some((t) => popularTags.includes(t))
     );
   }
-  // "surprise_me" → no extra filter, handled by shuffle
+  // "surprise_me" → no extra filter; ordering handled by byScore in callers
 
   return filtered.map((e) => applyMatchReason(e, filters));
 }
@@ -113,10 +135,14 @@ export function getAllCandidates(
   excludedIds: string[] = [],
   userProfile?: UserProfile | null
 ): SiftEvent[] {
-  const shuffle = (arr: SiftEvent[]) => [...arr].sort(() => Math.random() - 0.5);
-
   // Tier 1: matches all quiz filters including selected categories
   const tier1 = getEventCandidates(filters, excludedIds);
+
+  // Explicit category choice is a hard filter — never broaden into interests
+  // or other categories when the user picked specific ones in the sequence.
+  if (filters.categories?.length) {
+    return byScore(tier1);
+  }
 
   // Tier 2: matches user's saved interests (ignoring quiz categories)
   let tier2: SiftEvent[] = [];
@@ -136,7 +162,12 @@ export function getAllCandidates(
   const tier3 = getEventCandidates({ ...filters, categories: undefined }, excludedIds)
     .filter((e) => !usedIds.has(e.id));
 
-  return [...shuffle(tier1), ...shuffle(tier2), ...shuffle(tier3)];
+  // Tier 1 keeps its filter-based reason; broadened tiers get a legibility cue.
+  return [
+    ...byScore(tier1),
+    ...byScore(tier2).map(broaden),
+    ...byScore(tier3).map(broaden),
+  ];
 }
 
 /**
@@ -152,8 +183,12 @@ export function getNextCandidate(
 ): SiftEvent | null {
   const byFilters = getEventCandidates(filters, excludedIds);
   if (byFilters.length > 0) {
-    return byFilters[Math.floor(Math.random() * byFilters.length)];
+    return byScore(byFilters)[0];
   }
+
+  // Explicit category choice is a hard filter — do not fall back to other
+  // categories when the user picked specific ones in the sequence.
+  if (filters.categories?.length) return null;
 
   // Tier 2: user's saved interests (respecting date/distance/price but not quiz categories)
   if (userProfile?.interests?.length) {
@@ -163,14 +198,14 @@ export function getNextCandidate(
     const broader = getEventCandidates({ ...filters, categories: undefined }, excludedIds);
     const byInterest = broader.filter((e) => interestCategories.includes(e.category));
     if (byInterest.length > 0) {
-      return byInterest[Math.floor(Math.random() * byInterest.length)];
+      return broaden(byScore(byInterest)[0]);
     }
   }
 
   // Tier 3: any remaining upcoming event (still respecting date/distance/price)
   const remaining = getEventCandidates({ ...filters, categories: undefined }, excludedIds);
   if (remaining.length > 0) {
-    return remaining[Math.floor(Math.random() * remaining.length)];
+    return broaden(byScore(remaining)[0]);
   }
 
   return null;

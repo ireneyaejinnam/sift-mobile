@@ -127,13 +127,15 @@ export function fetchLocalEventById(id: string): SiftEvent | null {
 
 export function fetchLocalAllUpcoming(
   limit = 500,
-  categories?: EventCategory[]
+  categories?: EventCategory[],
+  offset = 0
 ): SiftEvent[] {
   const today = todayNYC();
   let filtered = ALL_LOCAL.filter((e) => (e.endDate ?? e.startDate) >= today);
   if (categories?.length) {
     filtered = filtered.filter((e) => categories.includes(e.category));
   }
-  filtered.sort((a, b) => a.startDate.localeCompare(b.startDate));
-  return filtered.slice(0, limit);
+  // Stable order (date, then id) so offset pagination doesn't overlap/skip.
+  filtered.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
+  return filtered.slice(offset, offset + limit);
 }

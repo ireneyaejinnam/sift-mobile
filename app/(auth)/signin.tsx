@@ -11,18 +11,52 @@ import {
   ScrollView,
   Image,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/lib/supabase";
-import { setGuestFlag, hasOnboardingDoneFlag, setOnboardingDoneFlag } from "@/lib/storage";
+import { setGuestFlag, hasOnboardingDoneFlag, setOnboardingDoneFlag, clearGestureTipSeen } from "@/lib/storage";
+import { migrateToSupabase } from "@/lib/tasteProfile";
+import { sanitizeReturnTo } from "@/lib/returnTo";
 import { useToast } from "@/components/ui/Toast";
 import { track } from "@/lib/track";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 
+/** Map raw Supabase auth errors to human copy that distinguishes a user
+ *  mistake (bad credentials) from a system/network failure. */
+function friendlyAuthError(
+  error: { message?: string; status?: number; code?: string } | null
+): string {
+  if (!error) return "Something went wrong. Try again.";
+  const msg = (error.message ?? "").toLowerCase();
+  const status = error.status ?? 0;
+  if (error.code === "invalid_credentials" || msg.includes("invalid login credentials")) {
+    return "That email or password doesn't match. Try again.";
+  }
+  if (
+    error.code === "user_already_exists" ||
+    msg.includes("already registered") ||
+    msg.includes("already been registered")
+  ) {
+    return "An account with this email already exists — try signing in.";
+  }
+  if (msg.includes("email not confirmed")) {
+    return "Please confirm your email first — check your inbox.";
+  }
+  if (msg.includes("weak") || msg.includes("password should be")) {
+    return "Choose a stronger password (at least 6 characters).";
+  }
+  if (status >= 500 || msg.includes("network") || msg.includes("failed to fetch")) {
+    return "Can't reach the server — check your connection and try again.";
+  }
+  return error.message || "Something went wrong. Try again.";
+}
+
 export default function SignInScreen() {
   const router = useRouter();
-  const { setAuth, isLoggedIn } = useUser();
+  const { returnTo: returnToParam } = useLocalSearchParams<{ returnTo?: string }>();
+  const returnTo = sanitizeReturnTo(returnToParam);
+  const { setAuth, isAnonymous } = useUser();
   const { showToast } = useToast();
   const [isCreateAccount, setIsCreateAccount] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -48,13 +82,13 @@ export default function SignInScreen() {
         redirectTo: "https://siftapp.site/reset-password",
       });
       if (error) {
-        showToast(error.message);
+        showToast(friendlyAuthError(error));
       } else {
         showToast("Reset link sent — check your email");
         setIsForgotPassword(false);
       }
     } catch {
-      showToast("Something went wrong. Try again.");
+      showToast("Can't reach the server — check your connection and try again.");
     }
     setLoading(false);
   };
@@ -76,12 +110,13 @@ export default function SignInScreen() {
 
     try {
       if (isCreateAccount) {
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password: password.trim(),
-        });
+        // If we're currently an anonymous guest, upgrade that SAME uid in place
+        // (keeps the taste row) instead of minting a brand-new user.
+        const { error } = isAnonymous
+          ? await supabase.auth.updateUser({ email: email.trim(), password: password.trim() })
+          : await supabase.auth.signUp({ email: email.trim(), password: password.trim() });
         if (error) {
-          showToast(error.message);
+          showToast(friendlyAuthError(error));
           setLoading(false);
           return;
         }
@@ -93,23 +128,39 @@ export default function SignInScreen() {
           password: password.trim(),
         });
         if (error) {
-          showToast(error.message);
+          showToast(friendlyAuthError(error));
           setLoading(false);
           return;
         }
         track("sign_in_completed", { method: "email" });
       }
     } catch {
-      showToast("Something went wrong. Try again.");
+      showToast("Can't reach the server — check your connection and try again.");
       setLoading(false);
       return;
     }
 
     await setAuth(true, email.trim(), isCreateAccount ? (displayName.trim() || undefined) : undefined);
+
+    // Merge any guest/anon taste accumulated locally into the account so the
+    // server row doesn't clobber pre-link local taste (A3). No-op self-union
+    // for the upgrade-in-place path; preserves guest taste when signing into a
+    // pre-existing account.
+    await migrateToSupabase();
+    // A brand-new account should re-see the swipe tutorial on the deck.
+    if (isCreateAccount) {
+      clearGestureTipSeen().catch(() => {});
+    }
     setLoading(false);
 
-    // Skip onboarding — go straight to discover for both new and returning users
-    router.replace("/(tabs)/discover");
+    // If we were opened as a modal over a screen (returnTo passed from the deck /
+    // event detail), dismiss back onto that still-mounted screen so the card the
+    // user was on is preserved. Otherwise (gate entry) go to the deck.
+    if (returnTo && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace(returnTo ?? "/(tabs)/discover");
+    }
   };
 
   const handleContinueAsGuest = () => {

@@ -17,7 +17,7 @@ import { ingestMuseums } from './museums';
 import { ingestEventbrite } from './eventbrite';
 import { geocodeAllEvents } from './geocode';
 import { reclassifyEvents } from './reclassify';
-import { deduplicateEvents } from './dedup';
+import { deduplicateEvents, mergeRecurringEvents } from './dedup';
 import { cleanupExpired } from './cleanup';
 
 async function run(name: string, fn: () => Promise<void>) {
@@ -51,6 +51,7 @@ async function main() {
   console.log('\n[daily-ingest] Step 3: Post-processing...');
   await run('Reclassify', reclassifyEvents);
   await run('Dedup',      deduplicateEvents);
+  await run('Merge recurring', mergeRecurringEvents);
   await run('Cleanup',    cleanupExpired);
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

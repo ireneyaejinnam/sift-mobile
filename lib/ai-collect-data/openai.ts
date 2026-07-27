@@ -45,6 +45,24 @@ export async function chatJSON<T = unknown>(
 }
 
 /**
+ * Web-search-grounded text completion via the Responses API. Replaces the old
+ * Claude discovery call (Anthropic's web_search tool) so all AI runs on OpenAI.
+ */
+export async function webSearchText(
+  instructions: string,
+  input: string,
+  model = 'gpt-4o'
+): Promise<string> {
+  const r = await openai.responses.create({
+    model,
+    instructions,
+    input,
+    tools: [{ type: 'web_search' }],
+  });
+  return r.output_text ?? '';
+}
+
+/**
  * Simple text completion (no structured output).
  */
 export async function chatText(

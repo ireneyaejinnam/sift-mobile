@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { isSimilar } from './similarity';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -32,7 +33,10 @@ export async function deduplicateEvents(): Promise<void> {
   console.log(`[Dedup] Loaded ${events.length} events`);
   const toDelete = new Set<string>();
 
-  // Group by date (YYYY-MM-DD) + normalized venue
+  // Group by date (YYYY-MM-DD) + normalized venue. (Venue-string-mismatch and
+  // null-venue duplicates are handled non-destructively by the deck's
+  // content-dedup; the same-title/venue and recurring cases are now also caught
+  // by mergeRecurringEvents, which is wired into the pipelines after this pass.)
   const groups = new Map<string, typeof events>();
   for (const ev of events) {
     if (toDelete.has(ev.id)) continue;
@@ -187,16 +191,7 @@ function dataScore(ev: { description?: string | null; image_url?: string | null 
   return (ev.description ? ev.description.length : 0) + (ev.image_url ? 50 : 0);
 }
 
-function isSimilar(a: string, b: string): boolean {
-  if (a === b) return true;
-  const stopWords = new Set(['the', 'a', 'an', 'at', 'in', 'on', 'of', 'and', 'with']);
-  const wordsA = new Set(a.split(' ').filter(w => w.length > 2 && !stopWords.has(w)));
-  const wordsB = new Set(b.split(' ').filter(w => w.length > 2 && !stopWords.has(w)));
-  if (wordsA.size === 0 || wordsB.size === 0) return false;
-  const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
-  const union = new Set([...wordsA, ...wordsB]).size;
-  return intersection / union > 0.6;
-}
+// isSimilar (word-set Jaccard > 0.6) now lives in ./similarity (pure, testable).
 
 // ── Entry points ─────────────────────────────────────────────
 

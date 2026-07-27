@@ -6,7 +6,7 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { SiftStorage } from "@/types/user";
+import type { SiftStorage, UserProfile } from "@/types/user";
 import { initialStorage, STORAGE_KEY } from "@/types/user";
 
 // ── Local cache (offline fallback) ───────────────────────────
@@ -81,6 +81,42 @@ export async function addDismissedEvent(record: DismissedRecord): Promise<void> 
   }
 }
 
+// ── Onboarding draft (resume partial taste-setter progress) ─
+
+const ONBOARDING_DRAFT_KEY = "sift_onboarding_draft_v1";
+
+export interface OnboardingDraft {
+  step: number;
+  profile: Partial<UserProfile>;
+  updatedAt: string; // ISO string
+}
+
+export async function loadOnboardingDraft(): Promise<OnboardingDraft | null> {
+  try {
+    const raw = await AsyncStorage.getItem(ONBOARDING_DRAFT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as OnboardingDraft;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveOnboardingDraft(draft: OnboardingDraft): Promise<void> {
+  try {
+    await AsyncStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // ignore
+  }
+}
+
+export async function clearOnboardingDraft(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(ONBOARDING_DRAFT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 // ── Device ID (stable guest identity for analytics) ─────────
 
 const DEVICE_ID_KEY = "sift_device_id";
@@ -132,6 +168,15 @@ export async function hasGestureTipSeen(): Promise<boolean> {
 export async function setGestureTipSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(GESTURE_TIP_KEY, "1");
+  } catch {
+    // ignore
+  }
+}
+
+// Reset the tutorial flag so it re-shows (e.g. for a newly created account).
+export async function clearGestureTipSeen(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(GESTURE_TIP_KEY);
   } catch {
     // ignore
   }

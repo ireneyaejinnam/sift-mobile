@@ -85,7 +85,7 @@ export async function flushImpressions(): Promise<void> {
 
 async function upsertAction(
   eventId: string,
-  field: "skip_count" | "save_count" | "going_count" | "share_count",
+  field: "skip_count" | "save_count" | "going_count" | "share_count" | "went_count",
   extraFields?: Record<string, any>
 ): Promise<{ permanentlyHidden: boolean }> {
   if (!hasServerAccess()) return { permanentlyHidden: false };
@@ -95,7 +95,7 @@ async function upsertAction(
   // Fetch current state
   const { data: existing } = await db()
     .from("user_event_interactions")
-    .select("skip_count, save_count, going_count, share_count, permanently_hidden")
+    .select("skip_count, save_count, going_count, share_count, went_count, permanently_hidden")
     .eq("user_id", userId)
     .eq("event_id", eventId)
     .maybeSingle();
@@ -194,6 +194,10 @@ export async function recordSave(eventId: string): Promise<void> {
 
 export async function recordGoing(eventId: string): Promise<void> {
   await upsertAction(eventId, "going_count");
+}
+
+export async function recordWent(eventId: string): Promise<void> {
+  await upsertAction(eventId, "went_count");
 }
 
 export async function recordShare(eventId: string): Promise<void> {

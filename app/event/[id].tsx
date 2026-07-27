@@ -15,7 +15,6 @@ import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
-  Bookmark,
   CalendarDays,
   CalendarPlus,
   Check,
@@ -24,6 +23,7 @@ import {
   ImageIcon,
   MapPin,
   Share2,
+  Star,
   Ticket,
 } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -34,6 +34,8 @@ import ShareSheet from "@/components/events/ShareSheet";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
 import { track } from "@/lib/track";
+import { recordEventSave, recordEventGoing } from "@/lib/tasteProfile";
+import { recordSave as recordSaveInteraction, recordGoing as recordGoingInteraction } from "@/lib/interactions";
 import { generateGoogleCalendarUrl, addToDeviceCalendar, shareICSFile } from "@/lib/calendar";
 import { isTicketVendorUrl } from "@/lib/ticketUrl";
 import { fetchEventById } from "@/lib/getEvents";
@@ -68,15 +70,24 @@ export default function SharedEventPage() {
 
   const {
     isLoggedIn,
+    savedEvents,
     getSavedListForEvent,
     isGoing,
+    getGoingEvent,
     toggleGoing,
+    updateGoingDate,
     removeSavedEvent,
     addSavedEvent,
     addSharedWithYou,
     markCommitted,
   } = useUser();
+  const chosenDateFor = (id: string): string | null =>
+    getGoingEvent(id)?.eventDate ??
+    savedEvents.find((s) => s.eventId === id)?.eventStartDate ??
+    null;
   const [saveSheetOpen, setSaveSheetOpen] = useState(false);
+  const [saveDateOpen, setSaveDateOpen] = useState(false);
+  const [saveDate, setSaveDate] = useState<string | undefined>(undefined);
   const [goingSheetOpen, setGoingSheetOpen] = useState(false);
   const [shareSheetOpen, setShareSheetOpen] = useState(false);
   const [dbEvent, setDbEvent] = useState<SiftEvent | null>(null);
@@ -133,18 +144,83 @@ export default function SharedEventPage() {
 
   const savedList = event ? getSavedListForEvent(event.id) : null;
 
-  const handleBookmark = () => {
+  // Prompt to add a going event to the user's calendar (Google / Apple).
+  const promptCalendar = (ev: SiftEvent) => {
+    Alert.alert("Add to calendar", "Choose your calendar", [
+      {
+        text: "Google Calendar",
+        onPress: () => {
+          track("calendar_export", { event_id: ev.id, method: "google" });
+          Linking.openURL(generateGoogleCalendarUrl(ev));
+        },
+      },
+      {
+        text: "Apple Calendar",
+        onPress: async () => {
+          track("calendar_export", { event_id: ev.id, method: "apple" });
+          const nativeAvailable = Platform.OS !== "web" && typeof addToDeviceCalendar === "function";
+          const ok = nativeAvailable ? await addToDeviceCalendar(ev) : false;
+          if (ok) {
+            showToast("Added to calendar");
+            return;
+          }
+          const shared = await shareICSFile([ev]);
+          if (shared) showToast("Calendar file ready");
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  // Interested = if already saved, unsave; else open the Save-to-list sheet to
+  // pick a list. Multi-date events prompt for a date first.
+  const handleInterested = () => {
     if (!event) return;
     if (!isLoggedIn) {
-      router.push("/(auth)/signin");
+      router.push({ pathname: "/(auth)/signin", params: { returnTo: `/event/${event.id}` } });
       return;
     }
     if (savedList) {
       removeSavedEvent(event.id);
-      showToast("Removed from list");
+      showToast("Removed from your lists");
+      return;
+    }
+    track("event_saved", { event_id: event.id });
+    const isMultiDate = (event.sessions && event.sessions.length > 1) ||
+      (!!event.endDate && event.endDate !== event.startDate);
+    if (isMultiDate) {
+      setSaveDateOpen(true);
     } else {
+      setSaveDate(undefined);
       setSaveSheetOpen(true);
     }
+  };
+
+  // Going (tap) = mark / unmark going, with calendar prompt + taste parity.
+  const handleGoing = () => {
+    if (!event) return;
+    if (!isLoggedIn) {
+      router.push({ pathname: "/(auth)/signin", params: { returnTo: `/event/${event.id}` } });
+      return;
+    }
+    if (isGoing(event.id)) {
+      toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate, eventEndDate: event.endDate });
+      return;
+    }
+    const isMultiDay = (event.sessions && event.sessions.length > 1) ||
+      (!!event.endDate && event.endDate !== event.startDate);
+    if (isMultiDay) {
+      setGoingSheetOpen(true);
+      return;
+    }
+    toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate });
+    track("event_going", { event_id: event.id, source: "detail" });
+    showToast("Marked as going");
+    promptCalendar(event);
+    recordEventGoing(event.id, event.category, {
+      category: event.category, tags: event.tags, borough: event.borough, price: event.price,
+    }).catch(() => {});
+    recordGoingInteraction(event.id).catch(() => {});
   };
 
   if (dbLoading) {
@@ -192,6 +268,16 @@ export default function SharedEventPage() {
               <ImageIcon size={40} strokeWidth={1} color={colors.textMuted} />
             </View>
           )}
+
+          {/* Share — overlaid on the image (top-right) */}
+          <Pressable
+            onPress={() => setShareSheetOpen(true)}
+            style={s.imageShareButton}
+            hitSlop={8}
+          >
+            <Share2 size={16} strokeWidth={1.6} color={colors.white} />
+            <Text style={s.imageShareText}>Share</Text>
+          </Pressable>
 
           <View style={s.body}>
             {/* Add-event context banners */}
@@ -300,104 +386,44 @@ export default function SharedEventPage() {
               </View>
             ) : null}
 
-            {/* Action row */}
-            <View style={s.actionRow}>
+            {/* Action row — Interested + Going */}
+            <View style={s.detailActions}>
               <Pressable
-                onPress={() => {
-                  Alert.alert("Add to calendar", "Choose your calendar", [
-                    {
-                      text: "Google Calendar",
-                      onPress: () => {
-                        track("calendar_export", { event_id: event.id, method: "google" });
-                        Linking.openURL(generateGoogleCalendarUrl(event));
-                      },
-                    },
-                    {
-                      text: "Apple Calendar",
-                      onPress: async () => {
-                        track("calendar_export", { event_id: event.id, method: "apple" });
-                        const nativeAvailable = Platform.OS !== "web" && typeof addToDeviceCalendar === "function";
-                        const ok = nativeAvailable ? await addToDeviceCalendar(event) : false;
-                        if (ok) {
-                          showToast("Added to calendar");
-                          return;
-                        }
-                        const shared = await shareICSFile([event]);
-                        if (shared) showToast("Calendar file ready");
-                      },
-                    },
-                    { text: "Cancel", style: "cancel" },
-                  ]);
-                }}
-                style={s.actionButton}
+                onPress={handleInterested}
+                onLongPress={handleInterested}
+                delayLongPress={300}
+                style={[s.detailInterested, savedList && s.detailInterestedActive]}
               >
-                <CalendarPlus
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.primary}
-                />
-                <Text style={s.actionButtonText}>Calendar</Text>
-              </Pressable>
-              <Pressable onPress={handleBookmark} style={s.actionButton}>
-                <Bookmark
-                  size={16}
-                  strokeWidth={1.5}
+                <Star
+                  size={18}
+                  strokeWidth={1.8}
                   color={savedList ? colors.primary : colors.foreground}
                   fill={savedList ? colors.primary : "none"}
                 />
-                <Text style={s.actionButtonText}>
-                  {savedList ? "Saved" : "Save"}
+                <Text style={[s.detailInterestedText, savedList && s.detailInterestedTextActive]}>
+                  Interested
                 </Text>
               </Pressable>
-              <Pressable
-                onPress={() => setShareSheetOpen(true)}
-                style={s.actionButton}
-              >
-                <Share2
-                  size={16}
-                  strokeWidth={1.5}
-                  color={colors.foreground}
-                />
-                <Text style={s.actionButtonText}>Share</Text>
+              <Pressable onPress={handleGoing} style={s.detailGoing}>
+                {isGoing(event.id) ? (
+                  <Check size={18} strokeWidth={2.2} color={colors.white} />
+                ) : (
+                  <CalendarPlus size={18} strokeWidth={1.8} color={colors.white} />
+                )}
+                <Text style={s.detailGoingText}>Going</Text>
               </Pressable>
             </View>
 
-            {/* Going button */}
-            <Pressable
-              onPress={() => {
-                if (!isLoggedIn) {
-                  router.push("/(auth)/signin");
-                  return;
-                }
-                const going = isGoing(event.id);
-                if (going) {
-                  toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate, eventEndDate: event.endDate });
-                  return;
-                }
-                // Multi-day: show date picker
-                const isMultiDay = (event.sessions && event.sessions.length > 1) ||
-                  (!!event.endDate && event.endDate !== event.startDate);
-                if (isMultiDay) {
-                  setGoingSheetOpen(true);
-                  return;
-                }
-                toggleGoing({ eventId: event.id, eventTitle: event.title, eventDate: event.startDate });
-                showToast("Marked as going");
-              }}
-              style={[s.goingButton, isGoing(event.id) && s.goingButtonActive]}
-            >
-              {isGoing(event.id) && <Check size={16} strokeWidth={2} color={colors.white} />}
-              <Text style={[s.goingButtonText, isGoing(event.id) && s.goingButtonTextActive]}>
-                {isGoing(event.id) ? "Going" : "Going"}
-              </Text>
-            </Pressable>
-
             {/* View event link */}
             <Pressable
-              onPress={() => { const url = event.eventUrl || event.link || event.ticketUrl; if (url) WebBrowser.openBrowserAsync(url); }}
+              onPress={() => {
+                const url = event.eventUrl || event.link || event.ticketUrl;
+                track("event_link_click", { event_id: event.id, url, has_ticket_url: !!event.ticketUrl });
+                if (url) WebBrowser.openBrowserAsync(url);
+              }}
               style={s.viewEventButton}
             >
-              <Text style={s.viewEventText}>View on source</Text>
+              <Text style={s.viewEventText}>View event</Text>
               <ExternalLink
                 size={14}
                 strokeWidth={1.5}
@@ -425,17 +451,45 @@ export default function SharedEventPage() {
         )}
       </ScrollView>
 
+      {/* Multi-date save — pick which date before choosing a list */}
+      <BottomSheet
+        open={saveDateOpen}
+        onClose={() => setSaveDateOpen(false)}
+        title="Pick a date"
+      >
+        <GoingDateSheet
+          event={event}
+          confirmLabel="Choose date"
+          initialDate={chosenDateFor(event.id)}
+          onConfirm={(date) => {
+            // Keep a going copy's date in sync with the save date.
+            updateGoingDate(event.id, date);
+            // Defer opening the list sheet until this Modal fully dismisses
+            // (iOS won't present two native Modals at once).
+            setSaveDate(date);
+            setSaveDateOpen(false);
+            setTimeout(() => setSaveSheetOpen(true), 350);
+          }}
+          onCancel={() => setSaveDateOpen(false)}
+        />
+      </BottomSheet>
       <BottomSheet
         open={saveSheetOpen}
-        onClose={() => setSaveSheetOpen(false)}
+        onClose={() => { setSaveSheetOpen(false); setSaveDate(undefined); }}
         title="Save to list"
       >
         <SaveToListSheet
           eventId={event.id}
-          eventMeta={{ title: event.title, startDate: event.startDate, endDate: event.endDate, location: event.location }}
+          eventMeta={{ title: event.title, startDate: saveDate ?? event.startDate, endDate: event.endDate, location: event.location }}
           currentListName={savedList}
-          onClose={() => setSaveSheetOpen(false)}
-          onSaved={(name) => showToast(`Saved to ${name}`)}
+          onClose={() => { setSaveSheetOpen(false); setSaveDate(undefined); }}
+          onSaved={(name) => {
+            showToast(`Saved to ${name}`);
+            recordEventSave(event.id, event.category, {
+              category: event.category, tags: event.tags, borough: event.borough, price: event.price,
+            }).catch(() => {});
+            recordSaveInteraction(event.id).catch(() => {});
+          }}
         />
       </BottomSheet>
       <BottomSheet
@@ -457,6 +511,7 @@ export default function SharedEventPage() {
       >
         <GoingDateSheet
           event={event}
+          initialDate={chosenDateFor(event.id)}
           onConfirm={(date) => {
             toggleGoing({
               eventId: event.id,
@@ -464,8 +519,20 @@ export default function SharedEventPage() {
               eventDate: date,
               eventEndDate: event.endDate,
             });
+            const savedList = getSavedListForEvent(event.id);
+            if (savedList) {
+              addSavedEvent(event.id, savedList, {
+                title: event.title, startDate: date, endDate: event.endDate,
+              });
+            }
+            track("event_going", { event_id: event.id, source: "detail" });
             setGoingSheetOpen(false);
             showToast("Marked as going");
+            promptCalendar({ ...event, startDate: date, endDate: date });
+            recordEventGoing(event.id, event.category, {
+              category: event.category, tags: event.tags, borough: event.borough, price: event.price,
+            }).catch(() => {});
+            recordGoingInteraction(event.id).catch(() => {});
           }}
           onCancel={() => setGoingSheetOpen(false)}
         />
@@ -611,42 +678,53 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   onSaleText: { ...typography.sm, fontWeight: "500", color: "#C8844A" },
-  actionRow: {
+  imageShareButton: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  imageShareText: { fontSize: 13, fontWeight: "600", color: colors.white },
+  detailActions: {
     flexDirection: "row",
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  actionButton: {
+  detailInterested: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 12,
+    gap: 8,
+    height: 52,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
-  actionButtonText: { ...typography.xs, fontWeight: "500", color: colors.foreground },
-  goingButton: {
+  detailInterestedActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
+  },
+  detailInterestedText: { ...typography.body, fontWeight: "600", color: colors.foreground },
+  detailInterestedTextActive: { color: colors.primary },
+  detailGoing: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 14,
+    gap: 8,
+    height: 52,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    marginBottom: 12,
-  },
-  goingButtonActive: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary,
   },
-  goingButtonText: { ...typography.body, fontWeight: "500", color: colors.foreground },
-  goingButtonTextActive: { color: colors.white },
+  detailGoingText: { ...typography.body, fontWeight: "600", color: colors.white },
   viewEventButton: {
     flexDirection: "row",
     alignItems: "center",

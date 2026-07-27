@@ -32,13 +32,18 @@ export default async function handler(req: any, res: any) {
       { table: "user_taste_profiles", column: "user_id" },
       { table: "saved_events", column: "user_id" },
       { table: "going_events", column: "user_id" },
+      { table: "custom_lists", column: "user_id" },
+      { table: "user_plan_event_orders", column: "user_id" },
+      { table: "user_profiles", column: "user_id" },
       { table: "event_contributors", column: "user_id" },
       { table: "social_post_submissions", column: "submitted_by" },
     ];
 
     for (const { table, column } of tables) {
       const { error } = await admin.from(table).delete().eq(column, userId);
-      if (error) {
+      // A missing table (schema drift) shouldn't block the whole delete — skip
+      // "relation does not exist"; abort on any real error.
+      if (error && !/does not exist/i.test(error.message)) {
         console.error(`[delete-account] Failed to delete from ${table}:`, error.message);
         return res.status(500).json({ error: `Failed to delete ${table}` });
       }
@@ -79,7 +84,8 @@ export default async function handler(req: any, res: any) {
     const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
     if (deleteError) {
       console.error("[delete-account] Failed to delete auth user:", deleteError.message);
-      return res.status(500).json({ error: "Failed to delete account" });
+      // Surface the real reason (e.g. a blocking FK) so it's diagnosable in-app.
+      return res.status(500).json({ error: `Failed to delete account: ${deleteError.message}` });
     }
 
     return res.status(200).json({ success: true });

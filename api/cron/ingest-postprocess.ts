@@ -1,5 +1,5 @@
 import { reclassifyEvents } from '../../lib/ingest/reclassify';
-import { deduplicateEvents } from '../../lib/ingest/dedup';
+import { deduplicateEvents, mergeRecurringEvents } from '../../lib/ingest/dedup';
 import { cleanupExpired } from '../../lib/ingest/cleanup';
 
 async function run(name: string, fn: () => Promise<void>) {
@@ -18,6 +18,7 @@ export default async function handler(req: any, res: any) {
 
   await run('Reclassify', reclassifyEvents);
   await run('Dedup',      deduplicateEvents);
+  await run('Merge recurring', mergeRecurringEvents);
   await run('Cleanup',    cleanupExpired);
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

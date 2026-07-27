@@ -6,19 +6,21 @@ import {
   ArrowLeft,
   ChevronRight,
   KeyRound,
-  Sliders,
+  MessageSquare,
   LogOut,
   Shield,
   Trash2,
   FileText,
 } from "lucide-react-native";
 import { useUser } from "@/context/UserContext";
+import { useFeedback } from "@/context/FeedbackContext";
 import { colors, radius, spacing, typography, shadows } from "@/lib/theme";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signOut, userEmail } = useUser();
+  const { promptFeedback } = useFeedback();
   const [deleting, setDeleting] = useState(false);
 
   const handleChangePassword = () => {
@@ -93,14 +95,14 @@ export default function SettingsScreen() {
       </View>
 
       <View style={s.content}>
-        {/* Taste & Preferences */}
+        {/* Preferences */}
         <Text style={s.sectionLabel}>PREFERENCES</Text>
         <View style={s.card}>
           <MenuItem
-            icon={<Sliders size={18} strokeWidth={1.6} color={colors.primary} />}
-            label="Set your taste"
-            sub="Update your interests, budget, and neighborhoods"
-            onPress={() => router.push("/(onboarding)/flow")}
+            icon={<MessageSquare size={18} strokeWidth={1.6} color={colors.primary} />}
+            label="Send feedback"
+            sub="Tell us how Sift is working for you"
+            onPress={promptFeedback}
           />
         </View>
 
