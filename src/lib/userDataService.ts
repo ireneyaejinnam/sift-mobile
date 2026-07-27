@@ -128,6 +128,8 @@ export async function syncGoingEvent(userId: string, event: GoingEvent): Promise
         marked_at: event.markedAt,
         committed: event.committed ?? false,
         committed_at: event.committedAt ?? null,
+        attended: event.attended ?? false,
+        attended_at: event.attendedAt ?? null,
       },
       { onConflict: "user_id,event_id" }
     );
@@ -277,5 +279,7 @@ function rowToGoingEvent(row: Record<string, unknown>): GoingEvent {
     markedAt:     row.marked_at     as string,
     committed:    (row.committed as boolean | null) ?? undefined,
     committedAt:  (row.committed_at as string | null) ?? undefined,
+    attended:     (row.attended as boolean | null) ?? undefined,
+    attendedAt:   (row.attended_at as string | null) ?? undefined,
   };
 }

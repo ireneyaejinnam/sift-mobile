@@ -75,6 +75,18 @@ function ensureDefaults(partial: any): TasteProfile {
 
 // ── Load ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Wipe the locally-cached taste profile. Called on sign-out so a subsequent new
+ * account doesn't inherit (or migrate up) the previous account's taste.
+ */
+export async function clearTasteProfile(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export async function loadTasteProfile(): Promise<TasteProfile> {
   const userId = await getCurrentUserId();
 
@@ -140,6 +152,7 @@ const SWIPE_RIGHT_BUMP = 0.10;
 const SWIPE_LEFT_DROP  = 0.05;
 const SAVE_BUMP        = 0.12;
 const GOING_BUMP       = 0.15;
+const WENT_BUMP        = 0.20; // actually attended — strongest confirmation
 
 /** Context about the event for multi-dimensional taste learning */
 export interface EventContext {
@@ -267,6 +280,18 @@ export async function recordEventGoing(eventId: string, category?: EventCategory
 }
 
 /**
+ * Went / attended — strongest positive signal (post-event confirmation).
+ */
+export async function recordEventWent(eventId: string, category?: EventCategory, ctx?: EventContext): Promise<TasteProfile> {
+  const profile = await loadTasteProfile();
+  profile.likedIds = [eventId, ...profile.likedIds.filter(id => id !== eventId)].slice(0, MAX_IDS);
+  profile.dislikedIds = profile.dislikedIds.filter(id => id !== eventId);
+  bumpTaste(profile, ctx ?? { category }, WENT_BUMP);
+  await saveProfile(profile);
+  return profile;
+}
+
+/**
  * Increment interactionCount and persist — used for neutral skips
  * that don't change taste weights but should count as "seen".
  */
@@ -368,7 +393,15 @@ export async function migrateToSupabase(): Promise<void> {
     if (!raw) return;
 
     const local = JSON.parse(raw) as TasteProfile;
-    if (!local.likedIds.length && !local.dislikedIds.length) return;
+    // Nothing worth merging if the guest accumulated no signal at all. Includes
+    // category/tag weights so a questionnaire-only guest (weights, no swipes)
+    // still merges.
+    const hasLocalSignal =
+      local.likedIds.length > 0 ||
+      local.dislikedIds.length > 0 ||
+      Object.keys(local.categoryWeights ?? {}).length > 0 ||
+      Object.keys(local.tagWeights ?? {}).length > 0;
+    if (!hasLocalSignal) return;
 
     const { data: remote } = await supabase
       .from("user_taste_profiles")
