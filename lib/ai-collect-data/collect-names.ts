@@ -11,14 +11,12 @@
  * Fields: id, name, source_url, processed
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { EVENTBRITE_SEED_ORGS } from '../ingest/config';
-import { chatText, MODELS } from './openai';
+import { chatText, MODELS, webSearchText } from './openai';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export const DEFAULT_MAX_PER_SOURCE = 20;
 
@@ -773,18 +771,7 @@ async function* genAIDiscover(): AsyncGenerator<Candidate> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       console.log(`[collect] AI discover: running single-call 3-pass discovery (attempt ${attempt + 1}/2)...`);
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        system: [{ type: 'text', text: DISCOVERY_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-        tools: [
-          { type: 'web_search_20250305', name: 'web_search' as const },
-        ],
-        messages: [{ role: 'user', content: buildDiscoveryUserMessage() }],
-      });
-
-      const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
-      const text = textBlocks.map(b => b.text).join('\n');
+      const text = await webSearchText(DISCOVERY_SYSTEM_PROMPT, buildDiscoveryUserMessage());
 
       const events = extractJsonArray(text);
       console.log(`[collect] AI discover: found ${events.length} candidates`);

@@ -7,7 +7,13 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval": "tsx scripts/eval-recommender.ts",
+    "eval:dedup": "tsx scripts/eval-dedup.ts",
+    "eval:matching": "tsx scripts/eval-matching.ts"
   },
   "dependencies": {
     "@amplitude/analytics-react-native": "^1.5.52",
@@ -15,6 +21,7 @@
     "@google/genai": "^1.49.0",
     "@gorhom/bottom-sheet": "^5.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "11.4.1",
     "@react-navigation/bottom-tabs": "^7.0.0",
     "@supabase/supabase-js": "^2.101.1",
     "expo": "~54.0.0",
@@ -58,7 +65,8 @@
     "babel-plugin-module-resolver": "^5.0.0",
     "node-html-parser": "^7.1.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^4.1.10"
   },
   "private": true
 }

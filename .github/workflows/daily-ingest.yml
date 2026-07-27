@@ -2,8 +2,12 @@ name: Curated Scraper Ingest
 
 on:
   schedule:
-    - cron: '0 7 */3 * *'  # Every 3 days at 07:00 UTC
+    - cron: '0 7 * * 1,4,5'  # Mon/Thu/Fri 07:00 UTC — guarantees pre-weekend (Thu+Fri) freshness
   workflow_dispatch:         # Manual trigger from GitHub UI
+
+permissions:
+  contents: read
+  issues: write   # for the failure-alert issue
 
 jobs:
   ingest:
@@ -34,3 +38,30 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      - name: Health check (fail the run if the pipeline is stale/empty)
+        run: npx tsx lib/ingest/health-check.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      - name: Alert on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Ingest pipeline failing';
+            const body = `Run failed: **${context.workflow}** (run ${context.runId}).\n` +
+              `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'ingest-alert',
+            });
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: open.data[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['ingest-alert'],
+              });
+            }

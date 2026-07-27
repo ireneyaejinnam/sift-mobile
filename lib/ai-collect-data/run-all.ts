@@ -21,7 +21,7 @@
  *   --source NAME    only collect from this source (e.g. luma, ticketmaster)
  *   --model MODEL          enrich model (default: gpt-4o-mini)
  *   --collect-model MODEL  collect dedup/cancel model (default: gpt-4o-mini)
- *   (discovery always uses claude-sonnet-4-6 — requires web search)
+ *   (discovery uses OpenAI web search via the Responses API — all AI is OpenAI)
  */
 
 import { cleanupExpiredEvents } from './cleanup-expired';
