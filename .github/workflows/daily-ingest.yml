@@ -2,7 +2,7 @@ name: Curated Scraper Ingest
 
 on:
   schedule:
-    - cron: '0 7 * * 1,4,5'  # Mon/Thu/Fri 07:00 UTC — guarantees pre-weekend (Thu+Fri) freshness
+    - cron: '0 7 * * 1,4'  # Mon/Thu 07:00 UTC (3am ET)
   workflow_dispatch:         # Manual trigger from GitHub UI
 
 permissions:
