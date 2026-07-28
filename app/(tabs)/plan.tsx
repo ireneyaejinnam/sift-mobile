@@ -20,10 +20,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  GripVertical,
   Link2,
   List,
   Share2,
 } from "lucide-react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { useToast } from "@/components/ui/Toast";
 import { useUser } from "@/context/UserContext";
@@ -120,6 +122,8 @@ export default function PlanScreen() {
   const [collapsedLists, setCollapsedLists] = useState<Record<string, boolean>>({});
   const [listVisibleCount, setListVisibleCount] = useState<Record<string, number>>({});
   const [pastExpanded, setPastExpanded] = useState<Record<string, boolean>>({});
+  // Manual event order within each list section (list name → ordered event IDs)
+  const [listEventOrder, setListEventOrder] = useState<Record<string, string[]>>({});
   const viewTranslateX = useRef(new NativeAnimated.Value(0)).current;
   const viewOpacity = useRef(new NativeAnimated.Value(1)).current;
   const selectorTranslateX = useRef(new NativeAnimated.Value(0)).current;
@@ -230,6 +234,18 @@ export default function PlanScreen() {
     });
   }, [dayGroups, userId, hasLoadedRemoteOrder]);
 
+  // Load/save per-list event order from AsyncStorage
+  useEffect(() => {
+    AsyncStorage.getItem("sift_list_event_order").then((raw) => {
+      if (raw) setListEventOrder(JSON.parse(raw));
+    }).catch(() => {});
+  }, []);
+
+  const saveListEventOrder = useCallback((next: Record<string, string[]>) => {
+    setListEventOrder(next);
+    AsyncStorage.setItem("sift_list_event_order", JSON.stringify(next)).catch(() => {});
+  }, []);
+
   const orderedDayGroups = useMemo(() =>
     dayGroups.map((group) => {
       const order = dayOrder[group.date];
@@ -334,7 +350,7 @@ export default function PlanScreen() {
     [getGoingEvent, markWent]
   );
 
-  // Rows for a section, with a date sub-label when the date changes.
+  // Plain rows (non-draggable) — used for past items.
   const renderRows = (items: ListItem[]) => {
     let prevDate = "";
     return items.map(({ event, date }) => {
@@ -354,6 +370,56 @@ export default function PlanScreen() {
         </View>
       );
     });
+  };
+
+  // Apply manual order to items, preserving new items at end.
+  const applyListOrder = (sectionName: string, items: ListItem[]): ListItem[] => {
+    const order = listEventOrder[sectionName];
+    if (!order) return items;
+    return [
+      ...order.map((id) => items.find((it) => it.event.id === id)).filter(Boolean) as ListItem[],
+      ...items.filter((it) => !order.includes(it.event.id)),
+    ];
+  };
+
+  // Draggable rows for upcoming items within a list section.
+  const renderDraggableRows = (sectionName: string, items: ListItem[]) => {
+    const ordered = applyListOrder(sectionName, items);
+    return (
+      <DraggableFlatList
+        data={ordered}
+        keyExtractor={(item) => item.event.id}
+        scrollEnabled={false}
+        activationDistance={12}
+        onDragBegin={() => setIsDraggingList(true)}
+        onDragEnd={({ data }) => {
+          setIsDraggingList(false);
+          const nextOrder = data.map((it) => it.event.id);
+          saveListEventOrder({ ...listEventOrder, [sectionName]: nextOrder });
+        }}
+        onRelease={() => setIsDraggingList(false)}
+        renderItem={({ item, drag: itemDrag, isActive: itemActive, getIndex }: RenderItemParams<ListItem>) => {
+          const idx = getIndex() ?? 0;
+          const showDate = idx === 0 || item.date !== ordered[idx - 1]?.date;
+          return (
+            <ScaleDecorator>
+              <View style={itemActive ? { opacity: 0.9 } : undefined}>
+                {showDate && <Text style={s.listDateSub}>{formatShortDay(item.date)}</Text>}
+                <SavedEventRow
+                  event={item.event}
+                  going={isGoing(item.event.id)}
+                  canMarkWent={isGoing(item.event.id) && item.date < today}
+                  attended={!!getGoingEvent(item.event.id)?.attended}
+                  onToggleWent={() => handleToggleWent(item.event)}
+                  onPress={() => openDetail(item.event, item.date)}
+                  drag={itemDrag}
+                />
+              </View>
+            </ScaleDecorator>
+          );
+        }}
+      />
+    );
   };
 
   // One list/going section (collapse + paginate + Past subsection). `drag` is
@@ -384,10 +450,11 @@ export default function PlanScreen() {
           )}
           <Text style={s.listSectionHeader}>{section.name}</Text>
           <Text style={s.listSectionCount}>{total}</Text>
+          {drag && <GripVertical size={16} strokeWidth={1.5} color={colors.textMuted} />}
         </Pressable>
         {!collapsed && (
           <>
-            {renderRows(shownUpcoming)}
+            {renderDraggableRows(section.name, shownUpcoming)}
             {section.upcoming.length > visible && (
               <Pressable
                 onPress={() =>

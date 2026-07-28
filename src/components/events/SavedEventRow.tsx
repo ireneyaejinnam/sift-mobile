@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { View, Text, Image, Pressable, StyleSheet } from "react-native";
-import { Check, ImageIcon } from "lucide-react-native";
+import { GripVertical, ImageIcon } from "lucide-react-native";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, typography } from "@/lib/theme";
 import type { SiftEvent } from "@/types/event";
@@ -16,6 +16,7 @@ export default function SavedEventRow({
   canMarkWent = false,
   onToggleWent,
   onPress,
+  drag,
 }: {
   event: SiftEvent;
   going: boolean;
@@ -25,6 +26,8 @@ export default function SavedEventRow({
   canMarkWent?: boolean;
   onToggleWent?: () => void;
   onPress: () => void;
+  /** Long-press drag handler for reordering. */
+  drag?: () => void;
 }) {
   const [fallbackImage, setFallbackImage] = useState<string | null>(null);
 
@@ -37,7 +40,7 @@ export default function SavedEventRow({
   const imgSrc = event.imageUrl ?? fallbackImage;
 
   return (
-    <Pressable onPress={onPress} style={styles.row}>
+    <Pressable onPress={onPress} onLongPress={drag} delayLongPress={200} style={[styles.row, going && styles.rowGoing]}>
       {imgSrc ? (
         <Image source={{ uri: imgSrc }} style={styles.thumb} resizeMode="cover" />
       ) : (
@@ -59,9 +62,9 @@ export default function SavedEventRow({
           </Text>
         </Pressable>
       )}
-      <View style={[styles.check, going && styles.checkActive]}>
-        {going && <Check size={12} strokeWidth={3} color={colors.white} />}
-      </View>
+      {drag && (
+        <GripVertical size={16} strokeWidth={1.5} color={colors.textMuted} />
+      )}
     </Pressable>
   );
 }
@@ -94,17 +97,8 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     flex: 1,
   },
-  check: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkActive: {
-    backgroundColor: colors.primary,
+  rowGoing: {
+    backgroundColor: colors.primaryLight,
     borderColor: colors.primary,
   },
   wentChip: {
