@@ -10,7 +10,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { ScaleDecorator } from "react-native-draggable-flatlist";
-import { Check, Trash2 } from "lucide-react-native";
+import { GripVertical, Trash2 } from "lucide-react-native";
 import { getUnsplashFallback } from "@/lib/unsplashFallback";
 import { colors, radius, typography, shadows } from "@/lib/theme";
 import type { SiftEvent } from "@/types/event";
@@ -85,21 +85,17 @@ export default function EventPlanCard({
         </Animated.View>
       ) : null}
       <Animated.View style={cardAnimatedStyle}>
-        <View style={[sc.card, isActive && sc.cardActive]}>
+        <View style={[sc.card, isActive && sc.cardActive, goingEvent && sc.cardGoing]}>
           <Pressable style={sc.cardMain} onPress={onPress} onLongPress={drag} delayLongPress={200}>
             {imgSrc ? (
               <Image source={{ uri: imgSrc }} style={sc.thumb} />
             ) : (
               <View style={sc.thumbPlaceholder} />
             )}
-            <View style={sc.titleRow}>
-              <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
-              {goingEvent?.committed && (
-                <View style={sc.committedBadge}>
-                  <Check size={9} strokeWidth={2.5} color={colors.white} />
-                </View>
-              )}
-            </View>
+            <Text style={sc.cardTitle} numberOfLines={2}>{event.title}</Text>
+            {drag && (
+              <GripVertical size={16} strokeWidth={1.5} color={colors.textMuted} style={sc.dragHandle} />
+            )}
           </Pressable>
         </View>
       </Animated.View>
@@ -170,25 +166,18 @@ const sc = StyleSheet.create({
     height: 64,
     backgroundColor: colors.border,
   },
-  titleRow: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingRight: 8,
-  },
   cardTitle: {
     ...typography.body,
     fontWeight: "500",
     color: colors.foreground,
     flex: 1,
+    paddingRight: 8,
   },
-  committedBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
+  cardGoing: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  dragHandle: {
+    marginRight: 8,
   },
 });

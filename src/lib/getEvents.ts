@@ -268,7 +268,7 @@ export async function fetchEvents(
     .in("id", matchedEventIds.slice(0, limit))
     .neq("is_suppressed", true)
     .eq("publication_status", "public")
-    .in("borough", NYC_BOROUGHS) // NYC-only hard guard
+    .or(`borough.in.(${NYC_BOROUGHS.join(",")}),borough.is.null`) // NYC + unknown-borough events
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null");
 
@@ -422,7 +422,7 @@ export async function fetchAllUpcoming(
     .or(`end_date.gte.${today},start_date.gte.${today}`)
     .neq("is_suppressed", true)
     .eq("publication_status", "public")
-    .in("borough", NYC_BOROUGHS) // NYC-only hard guard — drops non-NYC / null-borough rows
+    .or(`borough.in.(${NYC_BOROUGHS.join(",")}),borough.is.null`) // NYC + unknown-borough events
     .not("source", "in", `(${EXCLUDED_SOURCES.join(",")})`)
     .or("vibe_score.gte.5,vibe_score.is.null")
     .order("start_date", { ascending: true })
