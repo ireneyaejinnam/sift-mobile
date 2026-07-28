@@ -246,7 +246,7 @@ async function* genResidentAdvisor(): AsyncGenerator<Candidate> {
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
         body: JSON.stringify({
           query: `query { eventListings(
-            filters: { areas: { eq: 13 }, listingDate: { gte: "${TOMORROW}", lte: "${nextMonth}" } }
+            filters: { areas: { eq: 8 }, listingDate: { gte: "${TOMORROW}", lte: "${nextMonth}" } }
             pageSize: ${PAGE_SIZE} page: ${page}
           ) { data { event { title contentUrl } } } }`,
         }),
