@@ -2,7 +2,7 @@ name: AI Event Discovery
 
 on:
   schedule:
-    - cron: '0 11 * * 1,4,5'  # Mon/Thu/Fri 11:00 UTC — guarantees pre-weekend (Thu+Fri) freshness
+    - cron: '0 11 * * 1,4'  # Mon/Thu 11:00 UTC (7am ET)
   workflow_dispatch:         # Manual trigger from GitHub UI
 
 permissions:
