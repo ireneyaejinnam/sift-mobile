@@ -68,3 +68,24 @@ Change: removed the `(categoryWeight !== 1.0 && rawConfidence < 0.5) ? 0.5` spec
 | **OVERALL** | **0.483 → 0.539** | **0.500 → 0.540** |
 
 Result: overall improved, floor-case improved markedly, **no scenario regressed** → change kept. Removing the floor at 0 interactions lets pure cold-start (quality/timing) surface the strong category matches rather than the half-taste blend diluting them. R6 tests updated to pin the new invariant (confidence depends only on `interactionCount`, not `categoryWeight`).
+
+## Confidence distribution (D2, measured 2026-07-28)
+
+Live query against `user_event_interactions`:
+
+| metric | value |
+|--------|-------|
+| `user_taste_profiles` rows | **0** (taste-setter still buried; no server-side taste data) |
+| users with ≥1 interaction | **15** |
+| interaction counts (sorted) | 1, 1, 5, 7, 10, 16, 28, 30, 34, 37, 56, 58, 64, 111, 318 |
+| median interactions | **30** |
+| users at full confidence (≥20 interactions) | **9 / 15 (60%)** |
+| users still in cold-start ramp (<20) | **6 / 15 (40%)** |
+
+Confidence values (`min(1, interactionCount/20)`): 0.05, 0.05, 0.25, 0.35, 0.50, 0.80, 1.00 ×9.
+
+**Convergence finding:** 60% of interacting users have reached full personalization confidence, meaning the scorer is running at full taste weight (50%) for the majority. However, **0 users have server-side taste profiles** — the taste-setter was buried in Settings (pre-EPIC 5 surfacing) and taste didn't persist for guests (pre-EPIC 1 anon auth). The confidence ramp works mechanically, but the taste signal it's amplifying comes entirely from implicit interaction weights (category/tag/borough/price bumps from swipes), not from explicit preference-setting. This means:
+
+1. The onboarding taste flow removal (which was designed to reduce friction) didn't actually disable personalization — interaction-based taste learning carries the signal.
+2. But the `categoryWeight` floor removal (R4) was the right call: with 0 explicit profiles, the floor was boosting an empty signal.
+3. The real win will be when EPIC 1 (anon auth) + the taste banner (Profile) drive explicit taste data into `user_taste_profiles` — then the 50% taste weight will blend both explicit and implicit signals.
