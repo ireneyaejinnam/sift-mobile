@@ -109,6 +109,10 @@ export default function EventCard({
     toggleGoing,
     isGoing,
     markCommitted,
+    goingEvents,
+    savedEvents,
+    getSavedListForEvent,
+    addSavedEvent,
   } = useUser();
 
   const promptCalendar = (ev: SiftEvent) => {
@@ -479,6 +483,11 @@ export default function EventCard({
         <GoingDateSheet
           event={event}
           userProfile={userProfile}
+          initialDate={
+            goingEvents.find((g) => g.eventId === event.id)?.eventDate ??
+            savedEvents.find((s) => s.eventId === event.id)?.eventStartDate ??
+            null
+          }
           onConfirm={(date) => {
             toggleGoing({
               eventId: event.id,
@@ -486,6 +495,13 @@ export default function EventCard({
               eventDate: date,
               eventEndDate: event.endDate,
             });
+            // Keep a saved copy's date in sync with the going date.
+            const savedList = getSavedListForEvent(event.id);
+            if (savedList) {
+              addSavedEvent(event.id, savedList, {
+                title: event.title, startDate: date, endDate: event.endDate,
+              });
+            }
             setGoingSheetOpen(false);
             track("event_going", { event_id: event.id });
             showToast("Marked as going");
